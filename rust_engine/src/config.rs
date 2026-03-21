@@ -261,6 +261,36 @@ pub struct FlatBookSymbolConfig {
     pub max_levels: usize,
 }
 
+/// Task 7: Pair-specific trading profile configuration (Phase 2 Feature 8).
+///
+/// Allows per-symbol customization of:
+/// - Imbalance threshold for signal generation
+/// - VPIN bucket size for toxicity detection
+/// - Trailing stop ATR multiplier
+/// - Maximum leverage cap
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairProfile {
+    /// Symbol name (e.g. "BTC_USDT").
+    pub symbol: String,
+    /// Imbalance threshold for entry signals (e.g., 0.05 = 5%).
+    #[serde(default = "default_imbalance_threshold")]
+    pub imbalance_threshold: f64,
+    /// VPIN bucket size in USD (e.g., 500000.0 for BTC).
+    #[serde(default = "default_vpin_bucket_size")]
+    pub vpin_bucket_size: f64,
+    /// Trailing stop ATR multiplier (e.g., 3.0 = 3x ATR).
+    #[serde(default = "default_trailing_stop_atr_multiplier")]
+    pub trailing_stop_atr_multiplier: f64,
+    /// Maximum leverage for this pair (e.g., 20).
+    #[serde(default = "default_max_leverage_pair")]
+    pub max_leverage: i32,
+}
+
+fn default_imbalance_threshold() -> f64 { 0.03 }
+fn default_vpin_bucket_size() -> f64 { 100_000.0 }
+fn default_trailing_stop_atr_multiplier() -> f64 { 2.0 }
+fn default_max_leverage_pair() -> i32 { 20 }
+
 fn default_tick_size() -> f64 { 0.1 }
 fn default_max_levels() -> usize { 10_000 }
 
@@ -443,6 +473,9 @@ pub struct EngineConfig {
     /// Shared memory configuration for Rust↔Python communication.
     #[serde(default)]
     pub shared_mem: SharedMemConfig,
+    /// Task 8: Per-symbol pair profiles (Phase 2 Feature 8).
+    #[serde(default)]
+    pub pair_profiles: HashMap<String, PairProfile>,
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +545,7 @@ impl Default for EngineConfig {
             thread_topology: ThreadTopology::default(),
             flat_book_configs: vec![],
             shared_mem: SharedMemConfig::default(),
+            pair_profiles: HashMap::new(),
         }
     }
 }

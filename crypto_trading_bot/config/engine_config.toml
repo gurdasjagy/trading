@@ -42,3 +42,28 @@ max_open_positions = 3
 circuit_breaker_loss_pct = 3.0
 position_size_pct = 2.0
 
+# Task 9: Pair-specific trading profiles (Phase 2 Feature 8)
+# BTC: High liquidity, conservative thresholds
+[[pair_profiles]]
+symbol = "BTC_USDT"
+imbalance_threshold = 0.05
+vpin_bucket_size = 500000.0
+trailing_stop_atr_multiplier = 3.0
+max_leverage = 20
+
+# ETH: Medium-high liquidity, moderate thresholds
+[[pair_profiles]]
+symbol = "ETH_USDT"
+imbalance_threshold = 0.03
+vpin_bucket_size = 200000.0
+trailing_stop_atr_multiplier = 2.0
+max_leverage = 25
+
+# SOL: Medium liquidity, aggressive thresholds
+[[pair_profiles]]
+symbol = "SOL_USDT"
+imbalance_threshold = 0.02
+vpin_bucket_size = 50000.0
+trailing_stop_atr_multiplier = 1.5
+max_leverage = 15
+

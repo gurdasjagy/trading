@@ -1048,6 +1048,21 @@ async fn api_risk_dashboard(State(state): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
+/// GET /api/execution-analytics — Execution quality analytics (Task 4)
+async fn api_execution_analytics(State(state): State<Arc<AppState>>) -> Json<Value> {
+    // Read from exec_analytics (will be passed via AppState in Task 5-6)
+    // For now, return placeholder values
+    Json(json!({
+        "success": true,
+        "avg_slippage_bps": 0.0,
+        "avg_shortfall_bps": 0.0,
+        "avg_impact_bps": 0.0,
+        "should_use_limit_orders": false,
+        "should_reduce_size": false,
+        "is_ready": false,
+    }))
+}
+
 /// GET /api/execution-quality — Execution quality metrics
 async fn api_execution_quality(State(state): State<Arc<AppState>>) -> Json<Value> {
     let d = &state.dashboard;
@@ -1677,6 +1692,7 @@ pub fn run_dashboard_server(bind_addr: &str, state: Arc<DashboardState>) {
                     .route("/api/risk/metrics", get(api_risk_metrics))
                     .route("/api/risk-dashboard", get(api_risk_dashboard))
                     .route("/api/execution-quality", get(api_execution_quality))
+                    .route("/api/execution-analytics", get(api_execution_analytics))
                     .route("/api/equity-history", get(api_equity_history))
                     .route("/api/positions/live", get(api_positions_live))
                     .route("/api/trades/history", get(api_trades_history))

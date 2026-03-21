@@ -98,6 +98,7 @@ use crate::volume_profile::VolumeProfile;
 use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
 use crate::trend_strength::TrendStrengthIndex;
 use crate::execution_analytics::ExecutionAnalytics;
+use crate::realized_vol::RealizedVolatilityCalculator; // Task 16
 // use crate::event_sequencer::{EventSequencer, SequencedEventKind};
 
 // ---------------------------------------------------------------------------
@@ -512,6 +513,7 @@ mod volume_profile;
 mod liquidation_detector;
 mod trend_strength;
 mod execution_analytics;
+mod realized_vol; // Task 16: Phase 2 Feature 9
 
 // Directive 1: Rust-native position lifecycle (replaces Python TradeTracker)
 mod position_lifecycle;
@@ -927,6 +929,12 @@ fn strategy_evaluator_loop(
     // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
     let mut tsi_calculator = TrendStrengthIndex::new();
     info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
+    // Task 17: Phase 2 Feature 9 - Realized Volatility Calculator initialization
+    let mut realized_vol_calc = RealizedVolatilityCalculator::new(300); // 5-minute window (300 seconds)
+    info!("[strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)");
+    // Task 25: Phase 2 Feature 10 - Trade Flow Analyzer initialization
+    let mut trade_flow_analyzer = trade_flow_analyzer::TradeFlowAnalyzer::new(100, 10.0);
+    info!("[strategy] 📊 Trade Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)");
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
@@ -971,7 +979,7 @@ fn strategy_evaluator_loop(
                 info!("[strategy] 🔄 Volume profile reset (daily)");
             }
 
-            // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector
+            // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector + Trade Flow Analyzer
             while let Some(trade) = trades_ring.try_pop() {
                 let price = FixedPrice(trade.price).to_f64();
                 let volume = fixed_point::FixedQty(trade.qty).to_f64();
@@ -984,6 +992,8 @@ fn strategy_evaluator_loop(
                 volume_profile.update_trade(price, volume, 0.1);
                 liq_detector.on_trade(trade.recv_ns, volume_usdt);
                 strategy.update_candles(trade.recv_ns, price, volume);
+                // Task 26: Feed trade events to TradeFlowAnalyzer
+                trade_flow_analyzer.on_trade(price, volume, trade.side, trade.recv_ns);
             }
 
             // FIX 12: Check funding rate arbitrage opportunities every 1000 snapshots
@@ -1085,6 +1095,16 @@ fn strategy_evaluator_loop(
 
             // Evaluate strategy
             let symbol_name = registry.get_name(snapshot.symbol_id);
+            
+            // Task 24: Calculate order flow toxicity score before signal generation
+            let cvd_divergence_score = 0.0; // Placeholder - would need actual divergence calculation
+            let toxicity = trade_flow_analyzer.calculate_toxicity_score(metrics.vpin, cvd_divergence_score);
+            
+            // Halt trading if toxicity > 0.7
+            if toxicity > 0.7 {
+                debug!("[strategy] 🚫 Order flow toxicity {:.2} > 0.7 — halting signal generation", toxicity);
+                continue;
+            }
 
             // ── Phase 2 Feature 1: CVD Divergence Detection ──
             // Track recent price highs/lows for divergence detection
@@ -1113,6 +1133,9 @@ fn strategy_evaluator_loop(
             let tick_low = FixedPrice(snapshot.best_bid).to_f64();
             let tick_close = FixedPrice(snapshot.mid_price).to_f64();
             vol_trailing.update_tick(tick_high, tick_low, tick_close, 0.0);
+            
+            // Task 18: Update realized volatility calculator with tick data
+            realized_vol_calc.on_tick(snapshot.timestamp_ns, tick_high, tick_low, tick_close);
 
             // ── Directive 1: Evaluate lifecycle exits on EVERY tick ──
             // PositionLifecycleManager tracks PnL tick-by-tick and fires
@@ -1160,6 +1183,15 @@ fn strategy_evaluator_loop(
                                 close_action.reason,
                                 close_action.trigger_pnl_pct,
                                 close_action.peak_pnl_pct,
+                            );
+                            
+                            // Task 1: Record fill in ExecutionAnalytics
+                            exec_analytics.lock().record_fill(
+                                mid,
+                                mid,
+                                mid,
+                                mid,
+                                mid * pos_size as f64,
                             );
                         }
                     }
@@ -1286,6 +1318,25 @@ fn strategy_evaluator_loop(
                 }
             }
 
+            // Task 28: Periodic logging of Phase 2 Feature 7-10 metrics (every 100 snapshots)
+            static mut SNAPSHOT_COUNTER: u64 = 0;
+            unsafe {
+                SNAPSHOT_COUNTER += 1;
+                if SNAPSHOT_COUNTER % 100 == 0 {
+                    let exec_analytics_guard = exec_analytics.lock();
+                    let vol_regime = realized_vol_calc.get_regime();
+                    let vol_pct = realized_vol_calc.get_volatility();
+                    info!(
+                        "[strategy] 📊 Metrics: slippage={:.2}bps impact={:.2}bps vol={:.1}%({}) toxicity={:.2}",
+                        exec_analytics_guard.get_avg_slippage_bps(),
+                        exec_analytics_guard.get_avg_impact_bps(),
+                        vol_pct,
+                        vol_regime.to_string(),
+                        toxicity
+                    );
+                }
+            }
+            
             if let Some(mut intent) = strategy.evaluate(&metrics, &current_regime, symbol_name) {
                 let entry_price = intent.price.unwrap_or(metrics.mid_price);
                 let is_buy = matches!(intent.side, execution_gateway::OrderSide::Buy);
@@ -1444,6 +1495,10 @@ fn strategy_evaluator_loop(
                         // e.g., precision=2 → tick_size=0.01
                         10.0_f64.powi(-(spec.order_price_precision as i32))
                     });
+                
+                // Task 2: Check ExecutionAnalytics for order type override
+                let should_use_limit = exec_analytics.lock().should_use_limit_orders();
+                
                 let (entry_decision, smart_price) = smart_entry.decide(
                     is_buy,
                     FixedPrice(snapshot.best_bid).to_f64(),
@@ -1463,7 +1518,12 @@ fn strategy_evaluator_loop(
 
                 // ── Directive 4: Volatility-adjusted SL/TP ──
                 // Use real-time ATR to size stops instead of fixed percentages.
-                let trail_distance = vol_trailing.calculate_trail_distance(entry_price, 0.0);
+                let mut trail_distance = vol_trailing.calculate_trail_distance(entry_price, 0.0);
+                
+                // Task 20: Apply realized volatility regime scaling to trailing stop distance
+                let vol_regime_scale = realized_vol_calc.get_regime().get_scale_factor();
+                trail_distance *= vol_regime_scale;
+                
                 let sl_pct = (trail_distance / entry_price).max(0.005).min(0.05);
                 let tp_pct = (sl_pct * 2.0).min(0.10); // 2:1 reward-risk minimum
                 let stop_loss_price = if is_buy {
@@ -1478,29 +1538,41 @@ fn strategy_evaluator_loop(
                 };
 
                 // Directive 4: Set order type based on smart entry decision
-                let (cmd_order_type, cmd_post_only, effective_price) = match entry_decision {
-                    smart_entry::EntryDecision::PostMaker => {
-                        (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
-                    }
-                    smart_entry::EntryDecision::CrossSpread => {
-                        (spsc::order_cmd_type::MARKET, 0u8, smart_price)
-                    }
-                    smart_entry::EntryDecision::ChaseBook => {
-                        (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
-                    }
-                    _ => {
-                        (spsc::order_cmd_type::LIMIT, 0u8, entry_price)
+                // Task 2: Override to LIMIT if ExecutionAnalytics detects high slippage
+                let (cmd_order_type, cmd_post_only, effective_price) = if should_use_limit {
+                    info!("[strategy] 📊 Execution analytics: forcing LIMIT order (avg slippage > 5bps)");
+                    (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
+                } else {
+                    match entry_decision {
+                        smart_entry::EntryDecision::PostMaker => {
+                            (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
+                        }
+                        smart_entry::EntryDecision::CrossSpread => {
+                            (spsc::order_cmd_type::MARKET, 0u8, smart_price)
+                        }
+                        smart_entry::EntryDecision::ChaseBook => {
+                            (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
+                        }
+                        _ => {
+                            (spsc::order_cmd_type::LIMIT, 0u8, entry_price)
+                        }
                     }
                 };
 
-                // Phase 2 Feature 7: Reduce size if market impact is high
+                // Task 3: Reduce size if market impact is high (ExecutionAnalytics)
                 let should_reduce_size = exec_analytics.lock().should_reduce_size();
-                let impact_scalar = if should_reduce_size {
+                let mut impact_scalar = if should_reduce_size {
                     info!("[strategy] 📊 Execution analytics: reducing size by 50% (avg impact > 10bps)");
                     0.5
                 } else {
                     1.0
                 };
+                
+                // Task 24: Reduce size by 50% if toxicity > 0.5
+                if toxicity > 0.5 {
+                    impact_scalar *= 0.5;
+                    info!("[strategy] 🚫 Order flow toxicity {:.2} > 0.5 — reducing size by 50%", toxicity);
+                }
                 
                 // ── FEATURE 3: Kelly Criterion Position Sizing ──
                 // Calculate position size using Kelly criterion with ATR-based stop distance
@@ -1553,6 +1625,19 @@ fn strategy_evaluator_loop(
                     info!(
                         "[strategy] 📈 TSI={:.2} → size scaled by {:.1}x (final_qty={:.1})",
                         tsi_score, tsi_scale, kelly_qty
+                    );
+                }
+                
+                // Task 19: Apply realized volatility regime scaling to position size
+                let vol_scale = realized_vol_calc.get_position_scale();
+                kelly_qty *= vol_scale;
+                
+                if vol_scale != 1.0 {
+                    let vol_regime = realized_vol_calc.get_regime();
+                    let vol_pct = realized_vol_calc.get_volatility();
+                    info!(
+                        "[strategy] 📊 Realized Vol={:.1}% regime={} → size scaled by {:.2}x (final_qty={:.1})",
+                        vol_pct, vol_regime.to_string(), vol_scale, kelly_qty
                     );
                 }
 
