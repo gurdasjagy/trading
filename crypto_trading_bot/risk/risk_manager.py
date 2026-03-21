@@ -120,6 +120,9 @@ class RiskManager:
         self._MIN_AVG_RETURN: float = 0.01
         # Funding rate multiplier: close position if rate is worse than EXTREME_FUNDING × tolerance
         self._EXTREME_FUNDING_MULTIPLIER: float = 3.0
+        
+        # Load persisted Kelly state on initialization
+        self._load_kelly_state()
 
     # ------------------------------------------------------------------
     # Primary validation entry-point
@@ -874,6 +877,9 @@ class RiskManager:
                 self._trade_wins += 1
                 self._total_win_return += abs(pnl_pct)
                 self._bayesian_kelly.update(won=True)
+            
+            # Persist Kelly state after every trade result
+            self._save_kelly_state()
 
     def update_market_state(
         self,
@@ -938,6 +944,57 @@ class RiskManager:
             corr = self._correlation._get_pairwise_correlation(symbol, pos_symbol)
             max_corr = max(max_corr, corr)
         return max_corr
+
+    def _save_kelly_state(self) -> None:
+        """Persist Kelly parameters to JSON file for restart recovery."""
+        try:
+            import json
+            from pathlib import Path
+            
+            state = {
+                "trade_wins": self._trade_wins,
+                "trade_losses": self._trade_losses,
+                "total_win_return": self._total_win_return,
+                "total_loss_return": self._total_loss_return,
+                "consecutive_losses": self._consecutive_losses,
+            }
+            
+            state_file = Path("data") / "kelly_state.json"
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(state_file, "w") as f:
+                json.dump(state, f, indent=2)
+            
+            logger.debug("Kelly state saved: {} wins, {} losses", self._trade_wins, self._trade_losses)
+        except Exception as exc:
+            logger.debug("Failed to save Kelly state: {}", exc)
+
+    def _load_kelly_state(self) -> None:
+        """Load persisted Kelly parameters from JSON file."""
+        try:
+            import json
+            from pathlib import Path
+            
+            state_file = Path("data") / "kelly_state.json"
+            if not state_file.exists():
+                logger.debug("No Kelly state file found — starting fresh")
+                return
+            
+            with open(state_file, "r") as f:
+                state = json.load(f)
+            
+            self._trade_wins = int(state.get("trade_wins", 0))
+            self._trade_losses = int(state.get("trade_losses", 0))
+            self._total_win_return = float(state.get("total_win_return", 0.0))
+            self._total_loss_return = float(state.get("total_loss_return", 0.0))
+            self._consecutive_losses = int(state.get("consecutive_losses", 0))
+            
+            logger.info(
+                "Kelly state loaded: {} wins, {} losses, consecutive_losses={}",
+                self._trade_wins, self._trade_losses, self._consecutive_losses
+            )
+        except Exception as exc:
+            logger.warning("Failed to load Kelly state: {} — starting fresh", exc)
 
     def validate_risk_reward(
         self,

@@ -152,13 +152,7 @@ class TradeExecutor:
             ``order_id``, ``filled_price``, ``sl_order_id``,
             ``tp_order_ids``, and ``error`` (on failure).
         """
-        warnings.warn(
-            "TradeExecutor.execute_trade is deprecated for live production trading. "
-            "Signals are now processed by the Rust trading_engine binary. "
-            "Use this method only for back-testing or emergency manual overrides.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        # Note: Rust path (rust_engine/) is for future use; Python path remains active for paper/live trading
         symbol: str = signal.get("symbol", "")
         direction: str = signal.get("direction", "long")
         size: float = signal.get("position_size", 0.0)
