@@ -124,6 +124,55 @@ class LiveReadinessChecker:
                     f"(max {self._MAX_LEVERAGE}x)"
                 )
 
+        # 6. Walk-forward validation for ML strategies (only in live mode)
+        if settings.trading_mode == "live":
+            try:
+                # Get strategy manager from engine
+                from core.engine import TradingEngine
+                engine = getattr(TradingEngine, "_instance", None)
+                if engine is not None and hasattr(engine, "strategy_manager"):
+                    strategy_manager = engine.strategy_manager
+                    
+                    # Get enabled strategies
+                    enabled_strategies = [
+                        name for name, strat in strategy_manager._strategies.items()
+                        if strat.enabled and hasattr(strat, "model") and strat.model is not None
+                    ]
+                    
+                    if enabled_strategies:
+                        logger.info(
+                            "[LiveCheck] Validating {} ML strategies for live trading",
+                            len(enabled_strategies),
+                        )
+                        
+                        for strategy_name in enabled_strategies:
+                            try:
+                                passed, reasons = await strategy_manager.validate_strategy_for_live(
+                                    strategy_name
+                                )
+                                if not passed:
+                                    error_msg = (
+                                        f"Strategy {strategy_name!r} failed walk-forward validation: "
+                                        f"{', '.join(reasons)}"
+                                    )
+                                    errors.append(error_msg)
+                                    logger.error("[LiveCheck] {}", error_msg)
+                                else:
+                                    logger.info(
+                                        "[LiveCheck] Strategy {} passed walk-forward validation",
+                                        strategy_name,
+                                    )
+                            except Exception as exc:
+                                error_msg = f"Strategy {strategy_name!r} validation error: {exc}"
+                                errors.append(error_msg)
+                                logger.error("[LiveCheck] {}", error_msg)
+                    else:
+                        logger.info("[LiveCheck] No ML strategies to validate")
+                else:
+                    logger.warning("[LiveCheck] Strategy manager not available — skipping validation")
+            except Exception as exc:
+                logger.error("[LiveCheck] Walk-forward validation check error: {}", exc)
+
         passed = len(errors) == 0
         if passed:
             logger.info("[LiveCheck] All live readiness checks passed")

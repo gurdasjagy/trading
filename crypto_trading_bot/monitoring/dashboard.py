@@ -106,10 +106,22 @@ def create_app(
     app = FastAPI(title="Crypto Trading Bot Dashboard", version="1.0.0")
 
     # ── Authentication ────────────────────────────────────────────────────
-    _auth_enabled = bool(
-        getattr(_settings, "dashboard_username", None)
-        and getattr(_settings, "dashboard_password", None)
-    )
+    # Enforce authentication when trading_mode=live
+    _trading_mode = getattr(_settings, "trading_mode", "paper").lower()
+    _dashboard_username = getattr(_settings, "dashboard_username", None)
+    _dashboard_password = getattr(_settings, "dashboard_password", None)
+    
+    if _trading_mode == "live" and (not _dashboard_username or not _dashboard_password):
+        logger.critical(
+            "Dashboard authentication is REQUIRED for live trading mode. "
+            "Set DASHBOARD_USERNAME and DASHBOARD_PASSWORD in your .env file."
+        )
+        raise ValueError(
+            "Dashboard authentication credentials (DASHBOARD_USERNAME, DASHBOARD_PASSWORD) "
+            "are required when trading_mode=live"
+        )
+    
+    _auth_enabled = bool(_dashboard_username and _dashboard_password)
     _security = HTTPBasic() if _FASTAPI_AVAILABLE else None
 
     def _require_auth(

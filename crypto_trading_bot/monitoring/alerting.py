@@ -112,21 +112,25 @@ class AlertManager:
         # Sliding-window rate limiter: stores monotonic timestamps of sent msgs
         self._sent_times: Deque[float] = deque()
         self._rate_lock = asyncio.Lock()
+        # Per-alert-type rate limiting
+        self._alert_type_queues: Dict[AlertType, Deque[float]] = {}
+        self._queued_alerts: Dict[AlertType, List[str]] = {}
 
     # ------------------------------------------------------------------
     # Rate limiting
     # ------------------------------------------------------------------
 
-    async def _check_rate_limit(self, force: bool = False) -> bool:
+    async def _check_rate_limit(self, force: bool = False, alert_type: Optional[AlertType] = None) -> bool:
         """Return True if within the rate limit, False (and log) if exceeded.
 
         Args:
             force: When ``True``, bypass the rate limit check for critical/pinned
                 alerts.  The message is still counted toward the sliding window.
+            alert_type: Optional alert type for per-type rate limiting.
         """
         async with self._rate_lock:
             now = time.monotonic()
-            # Evict timestamps outside the sliding window
+            # Evict timestamps outside the sliding window (global)
             while self._sent_times and self._sent_times[0] < now - _RATE_LIMIT_WINDOW:
                 self._sent_times.popleft()
             if not force and len(self._sent_times) >= _RATE_LIMIT_MAX:
@@ -135,6 +139,24 @@ class AlertManager:
                     _RATE_LIMIT_MAX,
                 )
                 return False
+            
+            # Per-type rate limiting
+            if alert_type is not None:
+                if alert_type not in self._alert_type_queues:
+                    self._alert_type_queues[alert_type] = deque()
+                type_queue = self._alert_type_queues[alert_type]
+                # Evict old timestamps for this type
+                while type_queue and type_queue[0] < now - _RATE_LIMIT_WINDOW:
+                    type_queue.popleft()
+                if not force and len(type_queue) >= _RATE_LIMIT_MAX:
+                    logger.warning(
+                        "Alert rate limit reached for type {} ({} msgs/min) — queueing message",
+                        alert_type.value,
+                        _RATE_LIMIT_MAX,
+                    )
+                    return False
+                type_queue.append(now)
+            
             self._sent_times.append(now)
             return True
 
@@ -229,6 +251,15 @@ class AlertManager:
         Returns:
             ``True`` if at least one channel delivered the alert successfully.
         """
+        # Check per-type rate limit
+        if not await self._check_rate_limit(alert_type=alert_type):
+            # Queue the alert for later summary
+            message = self._format_message(alert_type, data)
+            if alert_type not in self._queued_alerts:
+                self._queued_alerts[alert_type] = []
+            self._queued_alerts[alert_type].append(message)
+            return False
+        
         message = self._format_message(alert_type, data)
         level = "critical" if alert_type == AlertType.CIRCUIT_BREAKER else "info"
         return await self.send_alert(message, level=level)
