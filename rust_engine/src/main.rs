@@ -342,6 +342,42 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         cfg.forex_server = std::env::var("GATEIO_TRADFI_SERVER").ok();
     }
 
+    // ── Strategy configuration ──
+    if let Ok(enabled_str) = std::env::var("STRATEGY_ENABLED") {
+        cfg.strategy.enabled = enabled_str.eq_ignore_ascii_case("true") || enabled_str == "1";
+    }
+
+    // ── Trading pairs override ──
+    if let Ok(pairs_str) = std::env::var("TRADING_PAIRS") {
+        let pairs: Vec<String> = pairs_str.split(',')
+            .map(|s| s.trim().replace('/', "_").to_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !pairs.is_empty() {
+            cfg.symbols = pairs.clone();
+            // Also update exchange symbols
+            for ex in cfg.exchanges.iter_mut() {
+                if ex.name == "gateio" {
+                    ex.symbols = pairs.clone();
+                }
+            }
+        }
+    }
+
+    // ── Leverage override ──
+    if let Ok(lev_str) = std::env::var("DEFAULT_LEVERAGE") {
+        if let Ok(lev) = lev_str.parse::<i32>() {
+            cfg.strategy.leverage = Some(lev.clamp(1, 125));
+        }
+    }
+
+    // ── Max open positions override ──
+    if let Ok(max_str) = std::env::var("MAX_OPEN_POSITIONS") {
+        if let Ok(max_pos) = max_str.parse::<usize>() {
+            cfg.risk.max_open_positions = max_pos.max(1);
+        }
+    }
+
     // ── Infrastructure ──
     cfg.zmq_telemetry_bind = std::env::var("ZMQ_TELEMETRY_BIND")
         .or_else(|_| std::env::var("TELEMETRY_ADDR"))
@@ -575,7 +611,7 @@ async fn ws_connect_and_ingest_gateio(
                 "time": now_secs(),
                 "channel": "futures.order_book",
                 "event": "subscribe",
-                "payload": [symbol, "20", "0"]
+                "payload": [symbol, "20", "100ms"]
             });
             w.send(Message::Text(sub_book.to_string())).await?;
 
@@ -877,8 +913,11 @@ fn strategy_evaluator_loop(
                 last_regime_check = std::time::Instant::now();
             }
 
-            // FIX 9: Feed VPIN calculator with synthetic trade flow from book snapshots.
-            // Use imbalance direction and depth as a proxy for trade flow direction/volume.
+            // FIX 9: Feed VPIN calculator with actual trade events from WS.
+            // Trade events are encoded in the SPSC ring with update_type=3.
+            // The orderbook_builder_loop should forward these to a separate trade ring,
+            // but for now we use the book snapshot's mid price as a proxy.
+            // TODO: Add dedicated trade event SPSC ring for proper VPIN calculation.
             {
                 let mid = FixedPrice(snapshot.mid_price).to_f64();
                 let bid_depth = snapshot.bid_depth_usdt as f64 / FixedPrice::PRECISION as f64;
