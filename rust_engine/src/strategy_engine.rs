@@ -42,7 +42,7 @@
 //! It does NOT generate trade signals. The Rust engine is the sole
 //! decision-maker.
 
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 
 use tracing::{debug, info};
 
@@ -123,6 +123,16 @@ pub struct MicrostructureMetrics {
     pub gamma_flip_btc: Option<f64>,
     /// Gamma flip level for ETH (from options-derived gamma exposure).
     pub gamma_flip_eth: Option<f64>,
+    /// Phase 3 Feature 11: Wyckoff phase (Accumulation, Markup, Distribution, Markdown, Unknown).
+    pub wyckoff_phase: &'static str,
+    /// Phase 3 Feature 12: Nearest Fibonacci level percentage (e.g., 0.618 for 61.8% retracement).
+    pub fib_nearest_level: f64,
+    /// Phase 3 Feature 13: Ichimoku cloud position (AboveCloud, InCloud, BelowCloud).
+    pub ichimoku_cloud_position: &'static str,
+    /// Phase 3 Feature 14: Market maker inventory pressure (-1.0 to 1.0).
+    pub mm_inventory_pressure: f64,
+    /// Phase 3 Feature 15: BTC-ETH correlation (-1.0 to 1.0).
+    pub btc_eth_correlation: f64,
 }
 
 // OrderIntent is imported from crate::execution_gateway — single source of truth.
@@ -850,6 +860,16 @@ mod tests {
             ask_depth_usdt: 48000.0,
             vpin: 0.2,
             last_trade_is_buy: None,
+            cvd_5m: 0.0,
+            cvd_15m: 0.0,
+            cvd_1h: 0.0,
+            gamma_flip_btc: None,
+            gamma_flip_eth: None,
+            wyckoff_phase: "Unknown",
+            fib_nearest_level: 0.0,
+            ichimoku_cloud_position: "InCloud",
+            mm_inventory_pressure: 0.0,
+            btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
         assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none());
@@ -866,6 +886,16 @@ mod tests {
             ask_depth_usdt: 50000.0,
             vpin: 0.1,
             last_trade_is_buy: None,
+            cvd_5m: 0.0,
+            cvd_15m: 0.0,
+            cvd_1h: 0.0,
+            gamma_flip_btc: None,
+            gamma_flip_eth: None,
+            wyckoff_phase: "Unknown",
+            fib_nearest_level: 0.0,
+            ichimoku_cloud_position: "InCloud",
+            mm_inventory_pressure: 0.0,
+            btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
         let intent = engine.evaluate(&metrics, &regime, "BTC_USDT");
@@ -885,6 +915,16 @@ mod tests {
             ask_depth_usdt: 50000.0,
             vpin: 0.8, // Toxic flow!
             last_trade_is_buy: None,
+            cvd_5m: 0.0,
+            cvd_15m: 0.0,
+            cvd_1h: 0.0,
+            gamma_flip_btc: None,
+            gamma_flip_eth: None,
+            wyckoff_phase: "Unknown",
+            fib_nearest_level: 0.0,
+            ichimoku_cloud_position: "InCloud",
+            mm_inventory_pressure: 0.0,
+            btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
         assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none(), "Should skip on toxic VPIN");
@@ -902,6 +942,16 @@ mod tests {
             ask_depth_usdt: 50000.0,
             vpin: 0.1,
             last_trade_is_buy: None,
+            cvd_5m: 0.0,
+            cvd_15m: 0.0,
+            cvd_1h: 0.0,
+            gamma_flip_btc: None,
+            gamma_flip_eth: None,
+            wyckoff_phase: "Unknown",
+            fib_nearest_level: 0.0,
+            ichimoku_cloud_position: "InCloud",
+            mm_inventory_pressure: 0.0,
+            btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
         assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none());
