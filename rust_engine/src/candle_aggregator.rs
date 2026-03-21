@@ -42,6 +42,8 @@ pub struct CandleData {
     pub ema50: f64,
     /// Relative Strength Index (14-period).
     pub rsi14: f64,
+    /// Average Directional Index (14-period).
+    pub adx14: f64,
 }
 
 impl Default for CandleData {
@@ -56,6 +58,7 @@ impl Default for CandleData {
             ema20: 0.0,
             ema50: 0.0,
             rsi14: 50.0, // Neutral RSI
+            adx14: 25.0, // Neutral ADX
         }
     }
 }
@@ -165,6 +168,30 @@ struct RsiCalculator {
     count: usize,
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ADX Calculator (Average Directional Index)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Average Directional Index calculator with O(1) updates.
+/// Measures trend strength (0-100). Higher values = stronger trend.
+#[derive(Debug, Clone)]
+struct AdxCalculator {
+    /// ADX period.
+    period: usize,
+    /// Ring buffer of +DI values.
+    plus_di: VecDeque<f64>,
+    /// Ring buffer of -DI values.
+    minus_di: VecDeque<f64>,
+    /// Ring buffer of ADX values.
+    adx_values: VecDeque<f64>,
+    /// Previous high price.
+    prev_high: f64,
+    /// Previous low price.
+    prev_low: f64,
+    /// Previous close price.
+    prev_close: f64,
+}
+
 impl RsiCalculator {
     fn new(period: usize) -> Self {
         Self {
@@ -235,6 +262,101 @@ impl RsiCalculator {
     }
 }
 
+impl AdxCalculator {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            plus_di: VecDeque::with_capacity(period),
+            minus_di: VecDeque::with_capacity(period),
+            adx_values: VecDeque::with_capacity(period),
+            prev_high: 0.0,
+            prev_low: 0.0,
+            prev_close: 0.0,
+        }
+    }
+
+    /// Update ADX with new OHLC data.
+    fn update(&mut self, high: f64, low: f64, close: f64) {
+        if self.prev_high == 0.0 {
+            // First candle - initialize
+            self.prev_high = high;
+            self.prev_low = low;
+            self.prev_close = close;
+            return;
+        }
+
+        // Calculate True Range
+        let tr1 = high - low;
+        let tr2 = (high - self.prev_close).abs();
+        let tr3 = (low - self.prev_close).abs();
+        let tr = tr1.max(tr2).max(tr3);
+
+        // Calculate directional movement
+        let plus_dm = if high - self.prev_high > self.prev_low - low {
+            (high - self.prev_high).max(0.0)
+        } else {
+            0.0
+        };
+        let minus_dm = if self.prev_low - low > high - self.prev_high {
+            (self.prev_low - low).max(0.0)
+        } else {
+            0.0
+        };
+
+        // Calculate +DI and -DI using Wilder's smoothing
+        let alpha = 1.0 / self.period as f64;
+        let plus_di_val = if tr > 0.0 { plus_dm / tr } else { 0.0 };
+        let minus_di_val = if tr > 0.0 { minus_dm / tr } else { 0.0 };
+
+        self.plus_di.push_back(plus_di_val);
+        self.minus_di.push_back(minus_di_val);
+
+        if self.plus_di.len() > self.period {
+            self.plus_di.pop_front();
+            self.minus_di.pop_front();
+        }
+
+        // Calculate DX (Directional Index)
+        if self.plus_di.len() >= self.period {
+            let avg_plus_di: f64 = self.plus_di.iter().sum::<f64>() / self.period as f64;
+            let avg_minus_di: f64 = self.minus_di.iter().sum::<f64>() / self.period as f64;
+            let di_sum = avg_plus_di + avg_minus_di;
+            let dx = if di_sum > 0.0 {
+                100.0 * (avg_plus_di - avg_minus_di).abs() / di_sum
+            } else {
+                0.0
+            };
+
+            // Smooth DX to get ADX
+            if self.adx_values.is_empty() {
+                self.adx_values.push_back(dx);
+            } else {
+                let prev_adx = *self.adx_values.back().unwrap();
+                let new_adx = alpha * dx + (1.0 - alpha) * prev_adx;
+                self.adx_values.push_back(new_adx);
+            }
+
+            if self.adx_values.len() > self.period {
+                self.adx_values.pop_front();
+            }
+        }
+
+        self.prev_high = high;
+        self.prev_low = low;
+        self.prev_close = close;
+    }
+
+    /// Get current ADX value.
+    fn get(&self) -> f64 {
+        self.adx_values.back().copied().unwrap_or(25.0)
+    }
+
+    /// Check if ADX is warmed up.
+    fn is_ready(&self) -> bool {
+        self.adx_values.len() >= self.period
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Candle Builder (Per-Timeframe)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -258,6 +380,8 @@ struct CandleBuilder {
     ema50: EmaCalculator,
     /// RSI(14) calculator.
     rsi14: RsiCalculator,
+    /// ADX(14) calculator.
+    adx14: AdxCalculator,
 }
 
 impl CandleBuilder {
@@ -271,6 +395,7 @@ impl CandleBuilder {
             ema20: EmaCalculator::new(20),
             ema50: EmaCalculator::new(50),
             rsi14: RsiCalculator::new(14),
+            adx14: AdxCalculator::new(14),
         }
     }
 
@@ -316,11 +441,13 @@ impl CandleBuilder {
         self.ema20.update(self.current.close);
         self.ema50.update(self.current.close);
         self.rsi14.update(self.current.close);
+        self.adx14.update(self.current.high, self.current.low, self.current.close);
 
         // Store indicator values in the candle
         self.current.ema20 = self.ema20.get();
         self.current.ema50 = self.ema50.get();
         self.current.rsi14 = self.rsi14.get();
+        self.current.adx14 = self.adx14.get();
 
         // Add to completed candles
         self.completed.push_back(self.current);
