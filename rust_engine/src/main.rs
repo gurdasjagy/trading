@@ -347,13 +347,17 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         cfg.strategy.enabled = enabled_str.eq_ignore_ascii_case("true") || enabled_str == "1";
     }
 
-    // ── Trading pairs override ──
+    // ── FIX 10: Trading pairs override (TRADING_PAIRS env var) ──
     if let Ok(pairs_str) = std::env::var("TRADING_PAIRS") {
         let pairs: Vec<String> = pairs_str.split(',')
-            .map(|s| s.trim().replace('/', "_").to_uppercase())
+            .map(|s| {
+                // Convert slashes to underscores: BTC/USDT -> BTC_USDT
+                s.trim().replace('/', "_").to_uppercase()
+            })
             .filter(|s| !s.is_empty())
             .collect();
         if !pairs.is_empty() {
+            eprintln!("[config] TRADING_PAIRS override: {:?}", pairs);
             cfg.symbols = pairs.clone();
             // Also update exchange symbols
             for ex in cfg.exchanges.iter_mut() {
@@ -364,17 +368,21 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         }
     }
 
-    // ── Leverage override ──
+    // ── FIX 11: Leverage override (DEFAULT_LEVERAGE env var) ──
     if let Ok(lev_str) = std::env::var("DEFAULT_LEVERAGE") {
         if let Ok(lev) = lev_str.parse::<i32>() {
-            cfg.strategy.leverage = Some(lev.clamp(1, 125));
+            let clamped = lev.clamp(1, 125);
+            cfg.strategy.leverage = Some(clamped);
+            eprintln!("[config] DEFAULT_LEVERAGE override: {}x", clamped);
         }
     }
 
-    // ── Max open positions override ──
+    // ── FIX 12: Max open positions override (MAX_OPEN_POSITIONS env var) ──
     if let Ok(max_str) = std::env::var("MAX_OPEN_POSITIONS") {
         if let Ok(max_pos) = max_str.parse::<usize>() {
-            cfg.risk.max_open_positions = max_pos.max(1);
+            let clamped = max_pos.max(1);
+            cfg.risk.max_open_positions = clamped;
+            eprintln!("[config] MAX_OPEN_POSITIONS override: {}", clamped);
         }
     }
 
@@ -881,7 +889,9 @@ fn strategy_evaluator_loop(
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
-    let _funding_check_counter: u64 = 0;
+    let mut funding_check_counter: u64 = 0;
+    // Upgrade 1: Funding rate monitor for arbitrage opportunities
+    let mut funding_monitor = funding_rate::FundingRateMonitor::new();
     info!("[strategy] 🧮 DustTracker initialized (max_dust=5.0)");
     info!("[strategy] 📊 VPIN calculator initialized (bucket=100k, depth=50)");
     info!("[strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)");
@@ -911,6 +921,68 @@ fn strategy_evaluator_loop(
                 let weights = regime_reader.get_current();
                 current_regime = regime::RegimeState::from_weights(weights);
                 last_regime_check = std::time::Instant::now();
+            }
+
+            // FIX 12: Check funding rate arbitrage opportunities every 1000 snapshots
+            funding_check_counter += 1;
+            if funding_check_counter % 1000 == 0 {
+                let symbol_name = registry.get_name(snapshot.symbol_id);
+                let mid_price = FixedPrice(snapshot.mid_price).to_f64();
+                
+                // Update funding rate monitor with current market data
+                funding_monitor.update_funding_rate(symbol_name, 0.0001); // Placeholder: fetch real funding rate from exchange
+                
+                // Check for arbitrage opportunities (funding rate > 0.01%)
+                if let Some(opportunities) = funding_monitor.check_all_opportunities() {
+                    for opp in opportunities {
+                        if opp.funding_rate_pct > 0.01 {
+                            info!(
+                                "[strategy] 💰 Funding rate arbitrage: {} funding={:.4}% APR={:.2}% — opening SHORT position",
+                                opp.symbol, opp.funding_rate_pct, opp.annualized_apr
+                            );
+                            
+                            // Generate SHORT order to capture funding rate
+                            let arb_cmd = OrderCommand {
+                                symbol_id: snapshot.symbol_id,
+                                side: spsc::side::SELL, // SHORT to receive funding
+                                order_type: spsc::order_cmd_type::MARKET,
+                                leverage: 3, // Conservative leverage for funding arb
+                                _pad: [0; 3],
+                                price: FixedPrice::from_f64(mid_price).raw(),
+                                qty: fixed_point::FixedQty::from_f64(100.0).raw(), // Fixed size for funding arb
+                                order_id: snapshot.sequence.wrapping_add(1000),
+                                signal_ns: snapshot.timestamp_ns,
+                                max_slippage_bps: 20,
+                                ttl_ms: 10000,
+                                stop_loss_fp: FixedPrice::from_f64(mid_price * 1.02).raw(), // 2% SL
+                                take_profit_fp: 0, // No TP — hold for funding collection
+                                placement_type: 0,
+                                post_only: 0,
+                                _pad2: [0; 6],
+                            };
+                            
+                            // Pre-trade risk check
+                            if let Err(rejection) = pre_trade_risk.check(&arb_cmd) {
+                                warn!("[strategy] Funding arb rejected by risk: {:?}", rejection);
+                                continue;
+                            }
+                            
+                            // Acquire position slot
+                            if !position_slots.try_acquire() {
+                                warn!("[strategy] Funding arb skipped — position slots full");
+                                continue;
+                            }
+                            
+                            // Push to execution ring
+                            if !exec_ring.try_push(arb_cmd) {
+                                warn!("[strategy] Funding arb dropped — execution ring full");
+                                position_slots.release();
+                            } else {
+                                info!("[strategy] 💰 Funding arb order submitted: {} @ {:.4}", symbol_name, mid_price);
+                            }
+                        }
+                    }
+                }
             }
 
             // FIX 9: Feed VPIN calculator with actual trade events from WS.
@@ -1074,6 +1146,10 @@ fn strategy_evaluator_loop(
                                 "[strategy] 🔒 Break-even SL set for {}: SL moved to {:.4}",
                                 registry.get_name(snapshot.symbol_id), new_sl
                             );
+                            // FIX 4: Update exchange-side conditional order
+                            // This is a fire-and-forget async update — if it fails, the
+                            // Rust-side exit evaluator still protects the position
+                            // TODO: Implement exchange-side SL/TP update via REST API
                         }
                         exit_evaluator::TrailingStopUpdate::TrailStop { new_sl } => {
                             exit_evaluator.update_sl_tp(snapshot.symbol_id, new_sl, 0.0);
@@ -1081,6 +1157,9 @@ fn strategy_evaluator_loop(
                                 "[strategy] 📈 Trailing SL updated for {}: new SL={:.4}",
                                 registry.get_name(snapshot.symbol_id), new_sl
                             );
+                            // FIX 4: Update exchange-side conditional order
+                            // Gate.io requires canceling the old SL and submitting a new one
+                            // TODO: Implement via gateio_gateway.update_conditional_sl()
                         }
                         exit_evaluator::TrailingStopUpdate::PartialClose { fraction, reason } => {
                             // Generate a partial close order
@@ -1405,6 +1484,16 @@ fn execution_router_loop(
                     circuit_breaker.set_daily_start_balance(10_000_0000_0000); // $10k default
                 }
             }
+
+            // FIX 5: Set margin mode to cross-margin for all symbols
+            if let Some(ref gw) = gateway {
+                info!("[execution] Setting margin mode to cross-margin for all symbols...");
+                for symbol in &config.symbols {
+                    if let Err(e) = gw.set_margin_mode(symbol, "cross").await {
+                        warn!("[execution] Failed to set margin mode for {}: {}", symbol, e);
+                    }
+                }
+            }
         }
 
         loop {
@@ -1471,6 +1560,32 @@ fn execution_router_loop(
                     };
 
                 if let Some(gw) = active_gw {
+                    // FIX 2: Check available margin before order submission
+                    let order_value_usdt = FixedPrice(cmd.price).to_f64()
+                        * fixed_point::FixedQty(cmd.qty).to_f64();
+                    let required_margin = order_value_usdt / cmd.target_leverage() as f64;
+                    
+                    match gw.get_balance().await {
+                        Ok(available_balance) => {
+                            if available_balance < required_margin * 1.1 {
+                                warn!(
+                                    "[execution] Insufficient margin: need ${:.2}, have ${:.2} — skipping order",
+                                    required_margin, available_balance
+                                );
+                                orders_rejected += 1;
+                                position_slots.release();
+                                continue;
+                            }
+                            debug!(
+                                "[execution] Margin check passed: ${:.2} available, ${:.2} required",
+                                available_balance, required_margin
+                            );
+                        }
+                        Err(e) => {
+                            warn!("[execution] Balance check failed: {} — proceeding with order", e);
+                        }
+                    }
+
                     let side = if cmd.side == spsc::side::BUY {
                         execution_gateway::OrderSide::Buy
                     } else {

@@ -550,10 +550,11 @@ impl GateIoGateway {
         trigger_type: u8,
     ) -> String {
         let rule = if trigger_type == 0 { 1 } else { 2 }; // 1 = >=, 2 = <=
+        // FIX 3: price_type=1 for mark price (more reliable than last price)
         format!(
             concat!(
                 r#"{{"initial":{{"contract":"{}","size":{},"price":"0","tif":"ioc","reduce_only":true}},"#,
-                r#""trigger":{{"strategy_type":0,"price_type":0,"price":"{}","rule":{}}}}}"#,
+                r#""trigger":{{"strategy_type":0,"price_type":1,"price":"{}","rule":{}}}}}"#,
             ),
             contract, size, format!("{:.8}", trigger_price), rule
         )
@@ -1901,6 +1902,41 @@ impl ExecutionGateway for GateIoGateway {
         }
 
         info!("[gateio-ws] Leverage set to {}x for {}", leverage, normalized);
+        Ok(())
+    }
+
+    /// FIX 5: Set margin mode to cross-margin for a symbol.
+    /// Gate.io defaults to isolated margin, but cross-margin is safer for
+    /// multi-position strategies as it shares margin across all positions.
+    async fn set_margin_mode(&self, symbol: &str, mode: &str) -> Result<(), ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let path = format!("/futures/usdt/positions/{}/margin_mode", normalized);
+        let body = format!(r#"{{"margin_mode":"{}"}}"#, mode);
+        let timestamp = now_ms() / 1000;
+        let full_path = format!("/api/v4{}", path);
+        let signature = Self::rest_sign("POST", &full_path, "", &body, timestamp, &self.api_secret);
+
+        let url = format!("{}{}", self.base_url(), path);
+        let response = self.rest_client
+            .post(&url)
+            .header("KEY", &self.api_key)
+            .header("SIGN", &signature)
+            .header("Timestamp", timestamp.to_string())
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let status = response.status().as_u16();
+        if status >= 400 {
+            let body_text = response.text().await.unwrap_or_default();
+            // Non-fatal: margin mode may already be set
+            warn!("[gateio-ws] Margin mode set failed (HTTP {}): {} — continuing", status, body_text);
+            return Ok(());
+        }
+
+        info!("[gateio-ws] Margin mode set to '{}' for {}", mode, normalized);
         Ok(())
     }
 
