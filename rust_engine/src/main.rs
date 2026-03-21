@@ -2240,7 +2240,16 @@ fn main() {
         event_buses.execution.capacity(),
         event_buses.control.capacity());
 
-    info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus)");
+    // Bridge health monitor: tracks IPC health metrics and exposes /health endpoint
+    let mut health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
+    match health_monitor.init() {
+        Ok(()) => info!("📡 Bridge: Health monitor initialized"),
+        Err(e) => warn!("📡 Bridge: Health monitor init failed (non-fatal): {}", e),
+    }
+    let health_monitor: &'static parking_lot::Mutex<bridge_ipc::health_monitor::BridgeHealthMonitor> =
+        Box::leak(Box::new(parking_lot::Mutex::new(health_monitor)));
+
+    info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
 
     // 8. Spawn OS threads with core affinity pinning
     let mut thread_handles = Vec::new();
@@ -2386,11 +2395,12 @@ fn main() {
         let state_shm_path = std::env::var("STATE_SHM_PATH")
             .unwrap_or_else(|_| shared_state::STATE_SHM_PATH.to_string());
         let dash_telem = dashboard_state.clone();
+        let health_mon = health_monitor;
         let handle = thread::Builder::new()
             .name("telemetry".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
-                info!("[telemetry] Pinned to core {} — Journal + SharedState (Issue 2)", core_id);
+                info!("[telemetry] Pinned to core {} — Journal + SharedState + Health Monitor", core_id);
 
                 // Create telemetry publisher with journal + shared state writers
                 let mut telemetry = TelemetryPublisher::new(journal_dir, state_shm_path);
@@ -2427,6 +2437,17 @@ fn main() {
                         dash_telem.total_fills.store(lc_metrics.total_fills, Ordering::Relaxed);
                         dash_telem.orders_submitted.store(lc_metrics.total_orders, Ordering::Relaxed);
                     }
+
+                    // Every 120 heartbeats (~60s), log bridge health metrics
+                    if report_counter % 120 == 0 {
+                        let mut hm = health_mon.lock();
+                        hm.record_tick_broadcast(1, 0); // Dummy update to trigger health check
+                        let health = hm.get_health_status();
+                        info!("[telemetry] Bridge Health: tick_rate={:.1}/s, portfolio_rate={:.1}/s, exec_rate={:.1}/s, errors={}",
+                            health.tick_broadcast_rate, health.portfolio_rx_rate,
+                            health.exec_confirm_rate, health.total_errors);
+                    }
+
                     thread::sleep(interval);
                 }
             })

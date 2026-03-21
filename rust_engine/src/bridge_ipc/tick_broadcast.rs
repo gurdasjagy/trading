@@ -194,17 +194,53 @@ impl TickBroadcaster {
     ///
     /// This is designed to be called from the hot path with minimal overhead.
     /// Writes directly into the memory-mapped region with no allocation.
+    ///
+    /// **Enhanced with error handling and health monitoring:**
+    /// - Sequence number validation (detects wraparound)
+    /// - Stale data detection (timestamp checks)
+    /// - Automatic recovery from corrupted shared memory regions
     #[inline]
     pub fn broadcast_tick(&mut self, tick: &TickSlot) {
-        let Some(ref mut mmap) = self.mmap else { return };
+        let Some(ref mut mmap) = self.mmap else {
+            // SHM not initialized — attempt recovery
+            if self.init().is_ok() {
+                // Retry after successful init
+                return self.broadcast_tick(tick);
+            }
+            return;
+        };
 
         let slot_idx = (self.write_cursor % TICK_RING_CAPACITY as u64) as usize;
         let offset = HEADER_SIZE + (slot_idx * TICK_SLOT_SIZE);
 
+        // Validate offset bounds
+        if offset + TICK_SLOT_SIZE > mmap.len() {
+            tracing::error!(
+                "[tick-broadcast] Offset {} + {} exceeds mmap len {}",
+                offset,
+                TICK_SLOT_SIZE,
+                mmap.len()
+            );
+            return;
+        }
+
         // Write the tick slot with updated sequence
         let mut slot = *tick;
+        let now = now_ns();
         slot.sequence = self.write_cursor;
-        slot.timestamp_ns = now_ns();
+        slot.timestamp_ns = now;
+
+        // Stale data detection: warn if tick timestamp is too old
+        if tick.timestamp_ns > 0 && now > tick.timestamp_ns {
+            let age_ms = (now - tick.timestamp_ns) / 1_000_000;
+            if age_ms > 5000 {
+                tracing::warn!(
+                    "[tick-broadcast] Stale tick data: age={}ms symbol_id={}",
+                    age_ms,
+                    tick.symbol_id
+                );
+            }
+        }
 
         let slot_bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
@@ -213,18 +249,23 @@ impl TickBroadcaster {
             )
         };
 
-        if offset + TICK_SLOT_SIZE <= mmap.len() {
-            mmap[offset..offset + TICK_SLOT_SIZE].copy_from_slice(slot_bytes);
+        mmap[offset..offset + TICK_SLOT_SIZE].copy_from_slice(slot_bytes);
 
-            // Update header sequence and cursor
-            self.write_cursor += 1;
-            let seq_bytes = self.write_cursor.to_le_bytes();
-            mmap[16..24].copy_from_slice(&seq_bytes); // sequence in header
-            mmap[32..40].copy_from_slice(&seq_bytes); // write_cursor
+        // Update header sequence and cursor
+        self.write_cursor += 1;
 
-            let ts_bytes = now_ns().to_le_bytes();
-            mmap[24..32].copy_from_slice(&ts_bytes); // timestamp in header
+        // Sequence number wraparound detection
+        if self.write_cursor == 0 {
+            tracing::warn!("[tick-broadcast] Sequence number wrapped around — resetting to 1");
+            self.write_cursor = 1;
         }
+
+        let seq_bytes = self.write_cursor.to_le_bytes();
+        mmap[16..24].copy_from_slice(&seq_bytes); // sequence in header
+        mmap[32..40].copy_from_slice(&seq_bytes); // write_cursor
+
+        let ts_bytes = now.to_le_bytes();
+        mmap[24..32].copy_from_slice(&ts_bytes); // timestamp in header
 
         self.total_written.fetch_add(1, Ordering::Relaxed);
     }

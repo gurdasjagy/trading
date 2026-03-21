@@ -268,11 +268,21 @@ class FeatureEngine:
 
     @staticmethod
     def _add_microstructure_features(df: pd.DataFrame) -> pd.DataFrame:
-        """Add order-book / microstructure proxy features from OHLCV."""
+        """Add order-book / microstructure proxy features from OHLCV.
+        
+        **Enhanced with institutional microstructure signals:**
+        - Order flow imbalance (bid volume - ask volume over 1min/5min windows)
+        - VPIN calculation (volume-synchronized probability of informed trading)
+        - Funding rate momentum (3-period change)
+        - Bid-ask spread volatility
+        """
         h, lo, c, o, v = df["high"], df["low"], df["close"], df["open"], df["volume"]
 
         # Bid-ask spread proxy: (high - low) / close
         df["spread_proxy"] = (h - lo) / (c + 1e-10)
+
+        # **NEW: Bid-ask spread volatility (rolling std of spread)**
+        df["spread_volatility"] = df["spread_proxy"].rolling(20).std()
 
         # Kyle's lambda proxy: abs(price change) / volume
         df["kyles_lambda"] = c.diff().abs() / (v + 1e-10)
@@ -280,6 +290,30 @@ class FeatureEngine:
 
         # Order book imbalance proxy: (close - open) / (high - low)
         df["ob_imbalance"] = (c - o) / (h - lo + 1e-10)
+
+        # **NEW: Order flow imbalance (1min and 5min windows)**
+        # Proxy: volume-weighted price change direction
+        # Positive = buying pressure, negative = selling pressure
+        price_change = c.diff()
+        signed_volume = v * np.sign(price_change)
+        df["order_flow_imbalance_1min"] = signed_volume.rolling(1).sum()
+        df["order_flow_imbalance_5min"] = signed_volume.rolling(5).sum()
+
+        # **NEW: VPIN (Volume-Synchronized Probability of Informed Trading)**
+        # Simplified version using OHLCV data
+        # VPIN = |buy_volume - sell_volume| / total_volume over rolling window
+        buy_volume = v.where(c >= o, 0)
+        sell_volume = v.where(c < o, 0)
+        total_volume = v.rolling(50).sum()
+        buy_vol_sum = buy_volume.rolling(50).sum()
+        sell_vol_sum = sell_volume.rolling(50).sum()
+        df["vpin"] = (buy_vol_sum - sell_vol_sum).abs() / (total_volume + 1e-10)
+
+        # **NEW: Funding rate momentum (3-period change)**
+        # Proxy using price momentum as funding rate correlates with price trend
+        # In real implementation, this would use actual funding rate data
+        price_momentum_3 = c.pct_change(3)
+        df["funding_rate_momentum"] = price_momentum_3.rolling(3).mean()
 
         # Amihud illiquidity: |return| / dollar_volume
         dollar_vol = c * v

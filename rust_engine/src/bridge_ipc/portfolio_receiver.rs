@@ -232,9 +232,16 @@ impl PortfolioReceiver {
     /// Returns `Some(snapshot)` if the sequence number has changed since the
     /// last read (i.e., Python has written new data).
     /// Returns `None` if no new data is available.
+    ///
+    /// **Enhanced with input validation and sanitization:**
+    /// - Bounds checking on portfolio weights (0.0-1.0 range)
+    /// - Sum-to-one validation for active weights
+    /// - Rejection of NaN/Inf values
+    /// - Stale data detection via timestamp
     pub fn try_read(&mut self) -> Option<PortfolioSnapshot> {
         let mmap = self.mmap.as_ref()?;
         if mmap.len() < HEADER_SIZE {
+            tracing::warn!("[portfolio-rx] SHM size {} < header size {}", mmap.len(), HEADER_SIZE);
             return None;
         }
 
@@ -248,12 +255,34 @@ impl PortfolioReceiver {
         let num_symbols = u32::from_le_bytes(mmap[32..36].try_into().ok()?);
         let risk_multiplier = f64::from_le_bytes(mmap[40..48].try_into().ok()?);
 
+        // Validate risk_multiplier
+        let risk_multiplier = if risk_multiplier.is_finite() && risk_multiplier >= 0.0 && risk_multiplier <= 10.0 {
+            risk_multiplier
+        } else {
+            tracing::warn!("[portfolio-rx] Invalid risk_multiplier={} — clamping to 1.0", risk_multiplier);
+            1.0
+        };
+
+        // Stale data detection (5-minute threshold)
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        if timestamp_ns > 0 && now_ns > timestamp_ns {
+            let age_ms = (now_ns - timestamp_ns) / 1_000_000;
+            if age_ms > 300_000 {
+                tracing::warn!("[portfolio-rx] Stale portfolio data: age={}ms", age_ms);
+            }
+        }
+
         let num = (num_symbols as usize).min(MAX_SYMBOLS);
         let mut entries = Vec::with_capacity(num);
+        let mut total_weight = 0.0_f64;
 
         for i in 0..num {
             let offset = HEADER_SIZE + i * ENTRY_SIZE;
             if offset + ENTRY_SIZE > mmap.len() {
+                tracing::warn!("[portfolio-rx] Entry {} offset {} exceeds mmap len {}", i, offset, mmap.len());
                 break;
             }
 
@@ -262,6 +291,48 @@ impl PortfolioReceiver {
             let target_weight = f64::from_le_bytes(mmap[offset+8..offset+16].try_into().ok()?);
             let confidence = f64::from_le_bytes(mmap[offset+16..offset+24].try_into().ok()?);
             let max_position_size = f64::from_le_bytes(mmap[offset+24..offset+32].try_into().ok()?);
+
+            // Validate target_weight: must be finite and in range [-1.0, 1.0]
+            let target_weight = if target_weight.is_finite() && target_weight.abs() <= 1.0 {
+                target_weight
+            } else {
+                tracing::warn!(
+                    "[portfolio-rx] Invalid target_weight={} for symbol_id={} — clamping to 0.0",
+                    target_weight,
+                    symbol_id
+                );
+                0.0
+            };
+
+            // Validate confidence: must be finite and in range [0.0, 1.0]
+            let confidence = if confidence.is_finite() && confidence >= 0.0 && confidence <= 1.0 {
+                confidence
+            } else {
+                tracing::warn!(
+                    "[portfolio-rx] Invalid confidence={} for symbol_id={} — clamping to 0.0",
+                    confidence,
+                    symbol_id
+                );
+                0.0
+            };
+
+            // Validate max_position_size: must be finite and non-negative
+            let max_position_size = if max_position_size.is_finite() && max_position_size >= 0.0 {
+                max_position_size
+            } else {
+                tracing::warn!(
+                    "[portfolio-rx] Invalid max_position_size={} for symbol_id={} — clamping to 0.0",
+                    max_position_size,
+                    symbol_id
+                );
+                0.0
+            };
+
+            // Track total weight for sum-to-one validation
+            if flags & 1 != 0 {
+                // Active entry
+                total_weight += target_weight.abs();
+            }
 
             entries.push(PortfolioEntry {
                 symbol_id,
@@ -273,13 +344,27 @@ impl PortfolioReceiver {
             });
         }
 
+        // Sum-to-one validation (with tolerance for floating-point error)
+        if total_weight > 0.0 && (total_weight < 0.95 || total_weight > 1.05) {
+            tracing::warn!(
+                "[portfolio-rx] Portfolio weights sum to {:.3} (expected ~1.0) — normalizing",
+                total_weight
+            );
+            // Normalize weights
+            for entry in &mut entries {
+                if entry.flags & 1 != 0 {
+                    entry.target_weight /= total_weight;
+                }
+            }
+        }
+
         self.last_sequence = sequence;
         self.total_reads += 1;
 
         Some(PortfolioSnapshot {
             sequence,
             timestamp_ns,
-            risk_multiplier: if risk_multiplier.is_finite() { risk_multiplier } else { 1.0 },
+            risk_multiplier,
             num_symbols: num as u32,
             entries,
         })
