@@ -42,7 +42,7 @@ class BacktestEngine:
 
     def __init__(
         self,
-        exchange_id: str = "binance",
+        exchange_id: str = "gateio",
         fee_rate: float = 0.001,
         slippage_pct: float = 0.0005,
     ) -> None:

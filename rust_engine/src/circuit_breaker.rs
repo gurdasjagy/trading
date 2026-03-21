@@ -128,6 +128,9 @@ pub struct CircuitBreaker {
     // ── Tracking Counters ──
     /// Consecutive losing trades.
     consecutive_losses: AtomicU32,
+    /// BUG 7 FIX: Add current_equity and peak_equity fields
+    pub current_equity: AtomicI64,
+    pub peak_equity: AtomicI64,
     /// Daily realized PnL in FixedPrice (can be negative).
     daily_pnl_fp: AtomicI64,
     /// Starting balance for daily drawdown calculation (FixedPrice).
@@ -167,6 +170,8 @@ impl CircuitBreaker {
             spread_ema: AtomicI64::new(0),
             spread_emvar: AtomicI64::new(0),
             spread_count: AtomicU64::new(0),
+            current_equity: AtomicI64::new(0),
+            peak_equity: AtomicI64::new(0),
             config,
         }
     }
@@ -381,6 +386,8 @@ impl CircuitBreaker {
             daily_pnl_fp: self.daily_pnl_fp.load(Ordering::Relaxed),
             total_exposure_fp: self.total_exposure_fp.load(Ordering::Relaxed),
             orders_this_second: self.orders_this_second.load(Ordering::Relaxed),
+            current_equity: self.current_equity.load(Ordering::Relaxed),
+            peak_equity: self.peak_equity.load(Ordering::Relaxed),
         }
     }
 
@@ -399,6 +406,8 @@ pub struct CircuitBreakerState {
     pub daily_pnl_fp: i64,
     pub total_exposure_fp: i64,
     pub orders_this_second: u32,
+    pub current_equity: i64,
+    pub peak_equity: i64,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
