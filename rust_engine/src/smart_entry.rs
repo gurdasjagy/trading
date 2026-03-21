@@ -98,6 +98,7 @@ impl SmartEntryRouter {
     /// * `vpin` — Current VPIN (0.0–1.0)
     /// * `imbalance` — Current orderflow imbalance (-1.0 to 1.0)
     /// * `adverse_paused` — Whether the adverse selection detector has paused entries
+    /// * `tick_size` — Minimum price increment for the symbol (optional)
     pub fn decide(
         &self,
         is_buy: bool,
@@ -106,6 +107,7 @@ impl SmartEntryRouter {
         vpin: f64,
         imbalance: f64,
         adverse_paused: bool,
+        tick_size: Option<f64>,
     ) -> (EntryDecision, f64) {
         // Check adverse selection pause first
         if adverse_paused {
@@ -133,8 +135,15 @@ impl SmartEntryRouter {
             return (EntryDecision::CrossSpread, best_bid);
         }
 
-        // Default: post maker order at best bid (buy) or best ask (sell)
-        let price = if is_buy { best_bid } else { best_ask };
+        // FEATURE 12: Spread-adjusted entry pricing
+        // For buy signals: best_bid + tick_size (join the bid queue ahead)
+        // For sell signals: best_ask - tick_size (join the ask queue ahead)
+        let tick = tick_size.unwrap_or(0.01); // Default to 0.01 if not provided
+        let price = if is_buy {
+            best_bid + tick
+        } else {
+            best_ask - tick
+        };
         (EntryDecision::PostMaker, price)
     }
 
@@ -563,15 +572,16 @@ mod tests {
     #[test]
     fn test_smart_entry_maker_default() {
         let router = SmartEntryRouter::default();
-        let (decision, price) = router.decide(true, 50000.0, 50010.0, 0.3, 0.1, false);
+        let (decision, price) = router.decide(true, 50000.0, 50010.0, 0.3, 0.1, false, Some(0.01));
         assert_eq!(decision, EntryDecision::PostMaker);
-        assert_eq!(price, 50000.0); // best bid for buy
+        // FEATURE 12: Price should be best_bid + tick_size = 50000.0 + 0.01 = 50000.01
+        assert!((price - 50000.01).abs() < 0.001);
     }
 
     #[test]
     fn test_smart_entry_taker_on_high_vpin() {
         let router = SmartEntryRouter::default();
-        let (decision, price) = router.decide(true, 50000.0, 50010.0, 0.8, 0.1, false);
+        let (decision, price) = router.decide(true, 50000.0, 50010.0, 0.8, 0.1, false, Some(0.01));
         assert_eq!(decision, EntryDecision::CrossSpread);
         assert_eq!(price, 50010.0); // best ask for buy (crossing spread)
     }
@@ -579,7 +589,7 @@ mod tests {
     #[test]
     fn test_smart_entry_pause_on_adverse() {
         let router = SmartEntryRouter::default();
-        let (decision, _) = router.decide(true, 50000.0, 50010.0, 0.3, 0.1, true);
+        let (decision, _) = router.decide(true, 50000.0, 50010.0, 0.3, 0.1, true, Some(0.01));
         assert_eq!(decision, EntryDecision::PauseEntry);
     }
 
