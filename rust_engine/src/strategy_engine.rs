@@ -473,6 +473,8 @@ impl StrategyEngine {
         metrics: &MicrostructureMetrics,
         regime: &RegimeState,
         symbol: &str,
+        ml_weights: &'static crate::ml_weight_receiver::MlWeightReader,
+        symbol_id: u16,
     ) -> Option<OrderIntent> {
         // ── Sanity gates ──
         if metrics.mid_price <= 0.0 {
@@ -584,11 +586,28 @@ impl StrategyEngine {
         let raw_signal = abs_imbalance * (1.0 - vpin_penalty * 0.7);
         let confidence = (raw_signal / threshold).clamp(0.0, 1.0);
 
+        // ── ML Weights Blending ──
+        let ml_w = ml_weights.get_weights(symbol_id).unwrap_or(crate::ml_weight_receiver::SymbolWeight {
+            symbol_id,
+            _pad: 0,
+            momentum_weight: 1.0,
+            mean_reversion_weight: 0.0,
+            volatility_weight: 1.0,
+            confidence_floor: 0.0,
+            max_position_scale: 1.0,
+        });
+
+        if confidence < ml_w.confidence_floor as f64 {
+            return None; // Floor not met
+        }
+
+        let is_mean_rev = ml_w.mean_reversion_weight > ml_w.momentum_weight;
+
         // ── Direction ──
-        let side = if imbalance > 0.0 {
-            OrderSide::Buy  // Bid-heavy → price likely to rise
+        let side = if is_mean_rev {
+            if imbalance > 0.0 { OrderSide::Sell } else { OrderSide::Buy }
         } else {
-            OrderSide::Sell // Ask-heavy → price likely to fall
+            if imbalance > 0.0 { OrderSide::Buy } else { OrderSide::Sell }
         };
 
         // ── Position sizing (regime-adaptive) ──
@@ -597,12 +616,14 @@ impl StrategyEngine {
         //
         // regime.momentum_weight: 0.0 (no-trade) to 1.0 (full size)
         // In high-volatility regimes, Python sets this lower.
-        let regime_scale = regime.momentum_weight();
+        let regime_scale = regime.momentum_weight() * (ml_w.volatility_weight as f64).max(0.5);
         let vpin_scale = 1.0 - vpin_penalty * 0.5; // Reduce size as VPIN increases
+        
+        let base_size = BASE_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64;
 
-        let position_size = (BASE_POSITION_SIZE * raw_signal * regime_scale * vpin_scale)
+        let position_size = (base_size * raw_signal * regime_scale * vpin_scale)
             .max(1.0)  // Minimum 1 contract
-            .min(MAX_POSITION_SIZE);
+            .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
 
         // ── Price calculation ──
         //
@@ -868,9 +889,9 @@ mod tests {
             cvd_1h: 0.0,
             gamma_flip_btc: None,
             gamma_flip_eth: None,
-            wyckoff_phase: "Unknown",
+            wyckoff_phase: "Unknown".to_string(),
             fib_nearest_level: 0.0,
-            ichimoku_cloud_position: "InCloud",
+            ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
         };
@@ -894,9 +915,9 @@ mod tests {
             cvd_1h: 0.0,
             gamma_flip_btc: None,
             gamma_flip_eth: None,
-            wyckoff_phase: "Unknown",
+            wyckoff_phase: "Unknown".to_string(),
             fib_nearest_level: 0.0,
-            ichimoku_cloud_position: "InCloud",
+            ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
         };
@@ -923,9 +944,9 @@ mod tests {
             cvd_1h: 0.0,
             gamma_flip_btc: None,
             gamma_flip_eth: None,
-            wyckoff_phase: "Unknown",
+            wyckoff_phase: "Unknown".to_string(),
             fib_nearest_level: 0.0,
-            ichimoku_cloud_position: "InCloud",
+            ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
         };
@@ -950,9 +971,9 @@ mod tests {
             cvd_1h: 0.0,
             gamma_flip_btc: None,
             gamma_flip_eth: None,
-            wyckoff_phase: "Unknown",
+            wyckoff_phase: "Unknown".to_string(),
             fib_nearest_level: 0.0,
-            ichimoku_cloud_position: "InCloud",
+            ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
         };
@@ -960,3 +981,4 @@ mod tests {
         assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none());
     }
 }
+

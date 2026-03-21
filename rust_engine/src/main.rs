@@ -35,6 +35,7 @@ mod regime;
 mod regime_shm;
 mod microstructure;
 mod strategy_engine;
+mod ml_weight_receiver;
 mod telemetry;
 mod ws_ingestion;
 mod fixed_point;
@@ -49,6 +50,12 @@ mod mbo_book;
 mod adverse_selection;
 mod smart_router;
 mod ws_order_manager;
+mod queue_position_estimator;
+mod fast_ws_parser;
+mod term_structure;
+mod calendar_spread_engine;
+mod matching_engine;
+mod synthetic_orders;
 
 // Institutional upgrades: order lifecycle, latency tracking, market impact
 mod order_lifecycle;
@@ -833,6 +840,7 @@ fn orderbook_builder_loop(
     strategy_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     books: &mut Vec<FlatOrderBook>,
     _registry: Arc<SymbolRegistry>,
+    shared_prices: Arc<Vec<AtomicU64>>,
 ) {
     info!("[book-builder] Starting orderbook builder on dedicated core");
     loop {
@@ -846,6 +854,12 @@ fn orderbook_builder_loop(
                 let is_bid = update.side == spsc::side::BID;
                 book.apply_delta_tracked(price, qty, is_bid);
                 book.set_timestamp_ns(update.recv_ns);
+                
+                // Update shared price
+                let mid = book.mid_price().to_f64();
+                if sym_idx - 1 < shared_prices.len() {
+                    shared_prices[sym_idx - 1].store(mid.to_bits(), Ordering::Relaxed);
+                }
                 
                 // Push snapshot to strategy
                 if let (Some((bid, _bid_qty)), Some((ask, _ask_qty))) = (book.best_bid(), book.best_ask()) {
@@ -889,7 +903,7 @@ fn strategy_evaluator_loop(
     book_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
     trades_ring: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY>,
-    regime_reader: &'regime_shm::SharedMemRegimeReader,
+    regime_reader: &regime_shm::SharedMemRegimeReader,
     strategy: Arc<StrategyEngine>,
     registry: Arc<SymbolRegistry>,
     latency_tracker: &'static PipelineLatencyTracker,
@@ -902,6 +916,7 @@ fn strategy_evaluator_loop(
     position_sizer: &'static PositionSizer,
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
     exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
+    ml_weights: &'static ml_weight_receiver::MlWeightReader,
 ) {
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
@@ -938,7 +953,7 @@ fn strategy_evaluator_loop(
     info!("[strategy] 📊 Gamma exposure reader initialized");
     
     // Phase 2 Feature 7: Execution Analytics initialization
-    let exec_analytics = exec_analytics.lock();
+    // let exec_analytics = exec_analytics.lock();
     info!("[strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)");
     // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
     let mut tsi_calculator = TrendStrengthIndex::new();
@@ -1431,7 +1446,7 @@ fn strategy_evaluator_loop(
                 }
             }
             
-            if let Some(mut intent) = strategy.evaluate(&metrics, &current_regime, symbol_name) {
+            if let Some(mut intent) = strategy.evaluate(&metrics, &current_regime, symbol_name, ml_weights, snapshot.symbol_id) {
                 let entry_price = intent.price.unwrap_or(metrics.mid_price);
                 let is_buy = matches!(intent.side, execution_gateway::OrderSide::Buy);
 
@@ -2028,6 +2043,7 @@ fn execution_router_loop(
     dashboard_state: Arc<DashboardState>,
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
     exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
+    shared_prices: Arc<Vec<AtomicU64>>,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2042,18 +2058,6 @@ fn execution_router_loop(
         smart_router_inst,
         ws_mgr,
     );
-
-    // Initialize Alpha Oracle signal queue consumer
-    let mut signal_queue = match signal_queue::SignalQueueConsumer::open() {
-        Ok(sq) => {
-            info!("[execution] Alpha Oracle signal queue connected");
-            Some(sq)
-        }
-        Err(e) => {
-            warn!("[execution] Alpha Oracle signal queue unavailable: {} — running without Python signals", e);
-            None
-        }
-    };
 
     // Initialize event-sourced order state machine
     let mut order_state_machine = order_state_machine::OrderStateMachine::new();
@@ -2108,7 +2112,8 @@ fn execution_router_loop(
             // FIX 5: Set margin mode to cross-margin for all symbols
             if let Some(ref gw) = gateway {
                 info!("[execution] Setting margin mode to cross-margin for all symbols...");
-                for symbol in &config.symbols {
+                for id in registry.all_ids() {
+                    let symbol = registry.get_name(id);
                     if let Err(e) = gw.set_margin_mode(symbol, "cross").await {
                         warn!("[execution] Failed to set margin mode for {}: {}", symbol, e);
                     }
@@ -2492,135 +2497,8 @@ fn execution_router_loop(
                     orders_submitted += 1;
                 }
             } else {
-                // ── Idle: Poll Alpha Oracle signal queue ──
-                if let Some(ref mut sq) = signal_queue {
-                    while let Some(intent) = sq.try_pop() {
-                        info!(
-                            "[execution] 🎯 Alpha Oracle signal: {} {:?} (R:R={:.2}, conf={:.0}%, {}/{} strats)",
-                            intent.symbol,
-                            if intent.side == 0 { "LONG" } else { "SHORT" },
-                            intent.risk_reward,
-                            intent.confidence * 100.0,
-                            intent.confluence_count,
-                            intent.total_strategies,
-                        );
-
-                        // Validate signal age (reject if older than 5s)
-                        let age_ns = now_ns().saturating_sub(intent.timestamp_ns);
-                        if age_ns > 5_000_000_000 {
-                            warn!("[execution] Stale Alpha Oracle signal (age={:.1}s) — skipping", age_ns as f64 / 1e9);
-                            continue;
-                        }
-
-                        // FIX 4: Convert TradeIntent to OrderIntent and submit through gateway.
-                        // The signal has already passed the Python confluence engine's filters
-                        // (75%+ strategy agreement, R:R > 2.0). Here we perform final validation.
-                        if !circuit_breaker.is_trading_halted() {
-                            // Track in the order state machine
-                            let client_oid = format!("alpha-{}", now_ns());
-                            order_state_machine.track_order(client_oid.clone(), intent.symbol.clone());
-
-                            // Acquire a position slot
-                            if !position_slots.try_acquire() {
-                                warn!("[execution] Position slots full — dropping Alpha Oracle signal for {}", intent.symbol);
-                                continue;
-                            }
-
-                            // Determine the active gateway for this symbol
-                            let active_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> =
-                                if config::is_forex_symbol(&intent.symbol) {
-                                    forex_gateway.as_ref()
-                                } else {
-                                    gateway.as_ref()
-                                };
-
-                            if let Some(gw) = active_gw {
-                                let side = if intent.side == 0 {
-                                    execution_gateway::OrderSide::Buy
-                                } else {
-                                    execution_gateway::OrderSide::Sell
-                                };
-
-                                let order_intent = execution_gateway::OrderIntent {
-                                    symbol: intent.symbol.clone(),
-                                    side,
-                                    size: intent.size_contracts.max(1),
-                                    order_type: execution_gateway::OrderType::Market,
-                                    price: Some(intent.entry_price),
-                                    reduce_only: intent.intent_type == 1 || intent.intent_type == 2,
-                                    leverage: Some(intent.leverage.max(1)),
-                                    time_in_force: "ioc".to_string(),
-                                    slippage_cap_pct: Some(intent.max_slippage),
-                                    placement: execution_state::PlacementType::AtBest,
-                                    stop_loss: intent.stop_loss,
-                                    take_profit: intent.take_profit,
-                                    confidence: intent.confidence,
-                                    signal_tag: intent.signal_tag.clone(),
-                                };
-
-                                // Register in lifecycle tracker
-                                let lc_order = crate::order_lifecycle::OrderLifecycle::new(
-                                    client_oid.clone(),
-                                    intent.symbol.clone(),
-                                    if intent.side == 0 { "buy".into() } else { "sell".into() },
-                                    "market".into(),
-                                    intent.size_contracts as f64,
-                                    intent.entry_price,
-                                    "alpha_oracle".into(),
-                                    intent.confidence,
-                                );
-                                lifecycle_tracker.register_order(lc_order);
-
-                                match execution_gateway::submit_with_retry(gw.as_ref(), order_intent).await {
-                                    Ok(res) => {
-                                        orders_submitted += 1;
-                                        dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
-                                        dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
-                                        lifecycle_tracker.map_exchange_id(&res.order_id, &client_oid);
-                                        lifecycle_tracker.record_fill(
-                                            &client_oid,
-                                            crate::order_lifecycle::Fill {
-                                                fill_id: format!("alpha-f-{}", orders_submitted),
-                                                price: res.avg_fill_price,
-                                                quantity: res.filled_size as f64,
-                                                fee: res.fee,
-                                                fee_currency: "USDT".into(),
-                                                timestamp_us: crate::order_lifecycle::now_micros(),
-                                                is_maker: false,
-                                            },
-                                        );
-                                        info!(
-                                            "[execution] ✅ Alpha Oracle order filled: {} {} size={} @ {:.4} latency={}μs",
-                                            intent.symbol,
-                                            if intent.side == 0 { "LONG" } else { "SHORT" },
-                                            res.filled_size, res.avg_fill_price, res.latency_us,
-                                        );
-
-                                        // Track PnL in circuit breaker
-                                        let pnl_fp = 0i64; // PnL tracked on position close
-                                        circuit_breaker.on_trade_result(pnl_fp);
-                                    }
-                                    Err(e) => {
-                                        warn!("[execution] ❌ Alpha Oracle order failed: {} — {}", intent.symbol, e);
-                                        orders_rejected += 1;
-                                        position_slots.release();
-                                        lifecycle_tracker.reject_order(&client_oid, &format!("{}", e));
-                                    }
-                                }
-                            } else {
-                                info!(
-                                    "[execution] 📝 Alpha Oracle signal-only (no gateway): {} {:?}",
-                                    intent.symbol,
-                                    if intent.side == 0 { "LONG" } else { "SHORT" },
-                                );
-                                orders_submitted += 1;
-                                position_slots.release(); // No actual position opened
-                            }
-                        } else {
-                            warn!("[execution] Circuit breaker halted — dropping Alpha Oracle signal");
-                        }
-                    }
-                }
+                // Idle backoff to prevent CPU burn
+                std::hint::spin_loop();
 
                 // ── Periodic maintenance ──
 
@@ -2636,7 +2514,16 @@ fn execution_router_loop(
 
                 // Upgrade 3: Tick the TWAP executor to submit ready slices
                 if twap_exec.active_count() > 0 {
-                    let current_prices = HashMap::new(); // TODO: populate from live tick data
+                    let mut current_prices = HashMap::new();
+                    for id in registry.all_ids() {
+                        if (id as usize) > 0 && (id as usize) <= shared_prices.len() {
+                            let price_bits = shared_prices[id as usize - 1].load(Ordering::Relaxed);
+                            let price = f64::from_bits(price_bits);
+                            if price > 0.0 {
+                                current_prices.insert(registry.get_name(id).to_string(), price);
+                            }
+                        }
+                    }
                     let ready_slices = twap_exec.tick(&current_prices);
                     for slice in ready_slices {
                         if let Some(ref gw) = gateway {
@@ -2682,7 +2569,7 @@ fn execution_router_loop(
                 if last_health_check.elapsed() > Duration::from_secs(30) {
                     if let Some(ref gw) = gateway {
                         let rates_clone = funding_rates.clone();
-                        let symbols_clone = config.symbols.clone();
+                        let symbols_clone: Vec<String> = registry.all_ids().into_iter().map(|id| registry.get_name(id).to_string()).collect();
                         tokio::spawn(async move {
                             for symbol in symbols_clone {
                                 if let Some(rate) = funding_rate::fetch_funding_rate(&reqwest::Client::new(), "https://api.gateio.ws", &symbol).await {
@@ -3096,10 +2983,23 @@ fn main() {
     info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
 
     // 7m. Initialize Execution Analytics (Phase 2 Feature 7)
-    let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
-        Box::leak(Box::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000))));
     let exec_analytics_arc = Arc::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000)));
+    let leaked_arc = exec_analytics_arc.clone();
+    let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
+        unsafe { &*Arc::into_raw(leaked_arc) };
     info!("📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)");
+
+    // Shared prices array for execution thread
+    let num_symbols = registry.len();
+    let mut prices_vec = Vec::with_capacity(num_symbols);
+    for _ in 0..num_symbols {
+        prices_vec.push(AtomicU64::new(0));
+    }
+    let shared_prices = Arc::new(prices_vec);
+
+    // Initialize ML Weight Reader
+    let ml_weights_path = std::env::var("ML_WEIGHT_SHM_PATH").unwrap_or_else(|_| "/dev/shm/ml_weights".to_string());
+    let ml_weights: &'static ml_weight_receiver::MlWeightReader = Box::leak(Box::new(ml_weight_receiver::MlWeightReader::new(&ml_weights_path)));
 
     // 8. Spawn OS threads with core affinity pinning
     let mut thread_handles = Vec::new();
@@ -3129,12 +3029,13 @@ fn main() {
         let strat_ring = book_to_strategy;
         let reg = registry.clone();
         let core_id = topology.book_builder_core;
+        let sp = shared_prices.clone();
         let handle = thread::Builder::new()
             .name("book-builder".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[book-builder] Pinned to core {}", core_id);
-                orderbook_builder_loop(ws_ring_g, strat_ring, &mut books, reg);
+                orderbook_builder_loop(ws_ring_g, strat_ring, &mut books, reg, sp);
             })
             .expect("Failed to spawn book builder thread");
         thread_handles.push(handle);
@@ -3158,6 +3059,7 @@ fn main() {
         let cb_ref = circuit_breaker; // &'static CircuitBreaker
         let funding_rates_strat = funding_rates.clone();
         let exec_analytics_strat = exec_analytics;
+        let ml_weights_strat = ml_weights;
         let handle = thread::Builder::new()
             .name("strategy".into())
             .spawn(move || {
@@ -3181,6 +3083,7 @@ fn main() {
                     position_sizer,
                     funding_rates_strat,
                     exec_analytics_strat,
+                    ml_weights_strat,
                 );
             })
             .expect("Failed to spawn strategy thread");
@@ -3222,12 +3125,13 @@ fn main() {
         let lc = lifecycle_tracker;
         let lat = latency_tracker;
         let dash_exec = dashboard_state.clone();
+        let sp = shared_prices.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[execution] Pinned to core {} (with Lifecycle + Latency)", core_id);
-                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec);
+                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp);
             })
             .expect("Failed to spawn execution thread");
         thread_handles.push(handle);

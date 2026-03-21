@@ -1,0 +1,23 @@
+[calendar_spread]
+enabled = false
+entry_basis_annualized_pct = 15.0
+exit_basis_annualized_pct = 2.0
+max_spread_positions = 2
+quarterly_symbols = ["BTC_USDT_20250328", "ETH_USDT_20250328"]
+
+[synthetic_orders]
+iceberg_visible_pct = 10
+twap_default_slices = 20
+twap_randomize_timing = true
+twap_randomize_size = true
+sniper_aggression = 0.7
+
+[queue_estimation]
+enabled = true
+cancel_threshold = 0.1
+adverse_selection_threshold = 0.7
+resubmit_delay_ms = 100
+
+[ml_weights]
+shm_path = "/dev/shm/ml_weights"
+staleness_threshold_seconds = 300
