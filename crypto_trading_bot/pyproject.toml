@@ -1,0 +1,109 @@
+[tool.poetry]
+name = "crypto-trading-bot"
+version = "0.1.0"
+description = "Autonomous AI-powered crypto futures and spot trading bot"
+authors = ["Trading Bot Team <team@example.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "crypto_trading_bot" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+ccxt = ">=4.2.0,<4.4.0"
+aiohttp = ">=3.9.0"
+websockets = ">=12.0"
+fastapi = ">=0.109.0"
+uvicorn = { version = ">=0.27.0", extras = ["standard"] }
+jinja2 = ">=3.1.0"
+python-dotenv = ">=1.0.0"
+pydantic = ">=2.5.0"
+pydantic-settings = ">=2.1.0"
+sqlalchemy = ">=2.0.0"
+alembic = ">=1.13.0"
+redis = ">=5.0.0"
+celery = ">=5.3.0"
+pandas = ">=2.1.0"
+polars = ">=0.20.0"
+numpy = ">=1.26.0"
+scipy = ">=1.12.0"
+pandas-ta = ">=0.3.14"
+scikit-learn = ">=1.4.0"
+torch = ">=2.1.0"
+transformers = ">=4.36.0"
+openai = ">=1.10.0"
+anthropic = ">=0.18.0"
+vaderSentiment = ">=3.3.2"
+textblob = ">=0.18.0"
+nltk = ">=3.8.0"
+telethon = ">=1.34.0"
+tweepy = ">=4.14.0"
+praw = ">=7.7.0"
+feedparser = ">=6.0.0"
+beautifulsoup4 = ">=4.12.0"
+aiofiles = ">=23.2.0"
+apscheduler = ">=3.10.0"
+prometheus-client = ">=0.19.0"
+httpx = ">=0.26.0"
+python-multipart = ">=0.0.6"
+cryptography = ">=42.0.0"
+loguru = ">=0.7.0"
+rich = ">=13.7.0"
+click = ">=8.1.0"
+python-socketio = ">=5.11.0"
+pyarrow = ">=15.0.0"
+orjson = ">=3.9.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0.0"
+pytest-asyncio = ">=0.23.0"
+pytest-mock = ">=3.12.0"
+hypothesis = ">=6.98.0"
+black = ">=24.0.0"
+ruff = ">=0.2.0"
+mypy = ">=1.8.0"
+
+[tool.poetry.scripts]
+trading-bot = "crypto_trading_bot.main:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["crypto_trading_bot"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_return_any = false
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,102 @@
+# ============ ENVIRONMENT & SECRETS ============
+.env
+.env.local
+.env.*.local
+
+# ============ PYTHON ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+
+# ============ VIRTUAL ENVIRONMENTS ============
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ============ DISTRIBUTION / PACKAGING ============
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+.eggs/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# ============ TESTING ============
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+nosetests.xml
+test-results/
+
+# ============ LINTING & TYPE CHECKING ============
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# ============ DATABASE & DATA ============
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/logs/
+data/paper_state.json
+data/backtest_cache/
+data/reports/
+*.log
+
+# ============ MODELS ============
+models/*
+!models/.gitkeep
+
+# ============ NODE / FRONTEND ============
+node_modules/
+static/dist/
+.npm/
+
+# ============ OS FILES ============
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V7
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ============ EDITORS ============
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# ============ JUPYTER ============
+.ipynb_checkpoints/
+*.ipynb
+
+# ============ CELERY ============
+celerybeat-schedule
+celerybeat.pid
+
+# ============ DOCKER ============
+.dockerignore
+
+# ============ MISC ============
+*.bak
+*.tmp
+*.orig
+.cache/

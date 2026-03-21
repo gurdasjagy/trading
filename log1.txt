@@ -1,0 +1,220 @@
+ rust-engine-1  | [dotenv] Loaded credentials from DOTENV_PATH=/app/.env
+ rust-engine-1  | 2026-03-19T14:21:06.448714Z  INFO trading_engine: Trading engine v0.4.0 starting (Institutional Refactor)
+ rust-engine-1  | 2026-03-19T14:21:06.448776Z  INFO trading_engine: System: 4 CPU cores detected
+ rust-engine-1  | [config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY
+ rust-engine-1  | [config] Gate.io credentials loaded: key=aa94...99f9 (32chars), secret=***64chars
+ rust-engine-1  | 2026-03-19T14:21:06.449544Z  INFO trading_engine: Loaded config from
+/etc/trading/engine_config.toml
+ rust-engine-1  | 2026-03-19T14:21:06.449601Z  INFO trading_engine: THREAD_TOPOLOGY=auto — auto-detecting optimal layout for 4 cores
+ rust-engine-1  | 2026-03-19T14:21:06.449611Z  INFO trading_engine: Thread topology validated: ws_gateio=1, book=1, strategy=2, exec=2, telemetry=3, micro=[3]
+ rust-engine-1  | 2026-03-19T14:21:06.449625Z  INFO trading_engine: Config loaded: 1 exchanges, 3 symbols
+ rust-engine-1  | 2026-03-19T14:21:06.449641Z  INFO trading_engine: Symbol registry: 3
+symbols
+ rust-engine-1  | 2026-03-19T14:21:06.449808Z  INFO trading_engine: Allocated FlatOrderBook for BTC_USDT (ID: 1)
+wrust-engine-1  | 2026-03-19T14:21:06.450015Z  INFO trading_engine: Allocated FlatOrderBook for ETH_USDT (ID: 2)
+wrust-engine-1  | 2026-03-19T14:21:06.450191Z  INFO trading_engine: Allocated FlatOrderBook for XAUT_USDT (ID: 3)
+wrust-engine-1  | 2026-03-19T14:21:06.453948Z  INFO trading_engine: SPSC ring buffers allocated: ws_to_book=0KB, book_to_strategy=0KB, strategy_to_exec=0KB
+wrust-engine-1  | 2026-03-19T14:21:06.454729Z  INFO trading_engine: 🛡️ Circuit breaker initialized and armed
+wrust-engine-1  |
+ rust-engine-1  | ============================================================
+wrust-engine-1  | [AUTH-DIAG] Gate.io TESTNET Authentication Diagnostic
+wrust-engine-1  | ============================================================
+wrust-engine-1  | [AUTH-DIAG] Step 1 — Key sanity:
+wrust-engine-1  |   API Key length:  32
+wrust-engine-1  |   API Key prefix:  aa94ae92...
+wrust-engine-1  |   API Key suffix:  ...99f9
+wrust-engine-1  |   Secret length:   64
+wrust-engine-1  |   Has non-ASCII:   false ✅
+wrust-engine-1  |   Has whitespace:  false ✅
+wrust-engine-1  |   Testnet mode:    true
+wrust-engine-1  |   Base URL:        https://fx-api-testnet.gateio.ws/api/v4
+wrust-engine-1  |
+wrust-engine-1  | [AUTH-DIAG] Step 2 — Public endpoint test (no auth):
+wrust-engine-1  |   URL: https://fx-api-testnet.gateio.ws/api/v4/futures/usdt/contracts/BTC_USDT
+wrust-engine-1  | 2026-03-19T14:21:06.455558Z  INFO trading_engine: gateio: live gateway initialising (with circuit breaker, persistent runtime)
+wrust-engine-1  | 2026-03-19T14:21:06.455619Z  INFO trading_engine::gateio_gateway: [gateio-ws] Initializing gateway: testnet=true, key_len=32, secret_len=64, key_prefix=aa94ae...
+ rust-engine-1  | 2026-03-19T14:21:06.456202Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wContainer crypto_trading_bot-rust-engine-1 Waiting
+ redis-1        | 1:C 19 Mar 2026 14:21:06.627 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+ redis-1        | 1:C 19 Mar 2026 14:21:06.627 * Redis version=7.4.8, bits=64, commit=00000000, modified=0, pid=1, just started
+wredis-1        | 1:C 19 Mar 2026 14:21:06.627 * Configuration loaded
+ redis-1        | 1:M 19 Mar 2026 14:21:06.628 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+wredis-1        | 1:M 19 Mar 2026 14:21:06.628 * monotonic clock: POSIX clock_gettime
+ redis-1        | 1:M 19 Mar 2026 14:21:06.630 * Running mode=standalone, port=6379.
+wredis-1        | 1:M 19 Mar 2026 14:21:06.631 * Server initialized
+wredis-1        | 1:M 19 Mar 2026 14:21:06.631 * Ready to accept connections tcp
+wpostgres-1     |
+wpostgres-1     | PostgreSQL Database directory appears to contain a database; Skipping initialization
+wpostgres-1     |
+ postgres-1     | 2026-03-19 14:21:06.761 UTC [1] LOG:  starting PostgreSQL 16.13 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+wpostgres-1     | 2026-03-19 14:21:06.761 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+wpostgres-1     | 2026-03-19 14:21:06.761 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+wpostgres-1     | 2026-03-19 14:21:06.799 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+wpostgres-1     | 2026-03-19 14:21:06.817 UTC [29] LOG:  database system was shut down
+at 2026-03-19 13:33:37 UTC
+wpostgres-1     | 2026-03-19 14:21:06.839 UTC [1] LOG:  database system is ready to accept connections
+wrust-engine-1  | 2026-03-19T14:21:07.265149Z ERROR trading_engine: [startup] ❌  Gate.io auth diagnostic FAILED: Gate.io TESTNET server returned HTTP 502 — server may be downwrust-engine-1  | 2026-03-19T14:21:07.265168Z ERROR trading_engine: [startup] The engine will continue in signal-only mode until auth is fixed.
+wrust-engine-1  | 2026-03-19T14:21:07.265245Z  INFO trading_engine: 📋 Order Lifecycle
+Tracker initialized (capacity=5000)
+wrust-engine-1  | 2026-03-19T14:21:07.265344Z  INFO trading_engine: ⏱️ Pipeline Latency Tracker initialized (6 histograms)
+wrust-engine-1  | 2026-03-19T14:21:07.265358Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+wrust-engine-1  | 2026-03-19T14:21:07.265362Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+wrust-engine-1  | 2026-03-19T14:21:07.265366Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=3, lock-free AtomicU32)
+wrust-engine-1  | 2026-03-19T14:21:07.265371Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+wrust-engine-1  |   Status: 502
+ rust-engine-1  |   ⚠️ Unexpected status: 502 — body: <html>
+wrust-engine-1  | <head><title>502 Bad Gateway</title></head>
+wrust-engine-1  | <body>
+wrust-engine-1  | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1  | <hr><center>openresty</center>
+wrust-engine-1  | </body>
+wrust-engine-1  | </html>
+wrust-engine-1  |
+wrust-engine-1  | 2026-03-19T14:21:07.265477Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://api.gateio.ws/api/v4/futures/usdt/contracts
+wrust-engine-1  | 2026-03-19T14:21:07.442777Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1  | 2026-03-19T14:21:07.442903Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1  | 2026-03-19T14:21:07.817050Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930067,"time_ms":1773930067734,"conn_id":"45b158fc69ca880c","trace_id":"e4e008671fba41dfea247cec573e7bff","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract
+0"},"result":{"status":"fail"}}
+ rust-engine-1  | 2026-03-19T14:21:07.817087Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wrust-engine-1  | 2026-03-19T14:21:08.320533Z ERROR trading_engine::circuit_breaker: 🚨 CIRCUIT BREAKER TRIPPED: reason=connectivity_lost, ts=1773930068320520590
+wrust-engine-1  | 2026-03-19T14:21:08.320571Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1  | 2026-03-19T14:21:08.320592Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1  | 2026-03-19T14:21:09.344961Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1  | 2026-03-19T14:21:09.345008Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+ rust-engine-1  | 2026-03-19T14:21:09.525507Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930069,"time_ms":1773930069449,"conn_id":"cf2d94b65c28f700","trace_id":"4bae00202189be279b67626ed050b67a","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract
+0"},"result":{"status":"fail"}}
+ rust-engine-1  | 2026-03-19T14:21:09.525547Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+ rust-engine-1  | 2026-03-19T14:21:10.029247Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+ rust-engine-1  | 2026-03-19T14:21:10.029316Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+ rust-engine-1  | 2026-03-19T14:21:10.714302Z  INFO trading_engine::position_sizer: [sizer] Fetched 3 contract specs (655 total available)
+ rust-engine-1  | 2026-03-19T14:21:10.718404Z  INFO trading_engine::position_sizer: [sizer] Registered ETH_USDT: quanto=0.01, min=1, max=3000000, lev=1-100x, maker=-0.0050%,
+taker=0.0750%
+ rust-engine-1  | 2026-03-19T14:21:10.718470Z  INFO trading_engine::position_sizer: [sizer] Registered XAUT_USDT: quanto=0.001, min=1, max=570000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1  | 2026-03-19T14:21:10.718480Z  INFO trading_engine::position_sizer: [sizer] Registered BTC_USDT: quanto=0.0001, min=1, max=15000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1  | 2026-03-19T14:21:10.718585Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+ rust-engine-1  | 2026-03-19T14:21:10.718740Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes, 8192 slots)
+ rust-engine-1  | 2026-03-19T14:21:10.718753Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+ rust-engine-1  | 2026-03-19T14:21:10.718826Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+wrust-engine-1  | 2026-03-19T14:21:10.719126Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+ rust-engine-1  | 2026-03-19T14:21:10.719143Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+wrust-engine-1  | 2026-03-19T14:21:10.719153Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+wrust-engine-1  | 2026-03-19T14:21:10.719161Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus)
+ rust-engine-1  | 2026-03-19T14:21:10.720347Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+wrust-engine-1  | 2026-03-19T14:21:10.720447Z  INFO trading_engine: [ws-gateio] Pinned
+to core 1
+wrust-engine-1  | 2026-03-19T14:21:10.720463Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on dedicated core
+wrust-engine-1  | 2026-03-19T14:21:10.720548Z  INFO trading_engine: [book-builder] Pinned to core 1
+wrust-engine-1  | 2026-03-19T14:21:10.720927Z  INFO trading_engine: [book-builder] Starting orderbook builder on dedicated core
+wrust-engine-1  | 2026-03-19T14:21:10.720616Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+wrust-engine-1  | 2026-03-19T14:21:10.720957Z  INFO trading_engine: [telemetry] Pinned
+to core 3 — Journal + SharedState (Issue 2)
+wrust-engine-1  | 2026-03-19T14:21:10.720699Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+wrust-engine-1  | 2026-03-19T14:21:10.721144Z  INFO trading_engine: [execution] Pinned
+to core 2 (with Lifecycle + Latency)
+wrust-engine-1  | 2026-03-19T14:21:10.720776Z  INFO trading_engine: All 6 threads spawned. Engine running. Press Ctrl+C to stop.
+wrust-engine-1  | 2026-03-19T14:21:10.721277Z  INFO trading_engine: [strategy] Starting strategy evaluator on dedicated core
+wrust-engine-1  | 2026-03-19T14:21:10.721315Z  INFO trading_engine: [strategy] 🧮 DustTracker initialized (max_dust=5.0)
+wrust-engine-1  | 2026-03-19T14:21:10.721472Z  INFO trading_engine::telemetry: Journal
+writer initialized at /dev/shm/trading_journal (segment 0)
+wrust-engine-1  | 2026-03-19T14:21:10.721513Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+wrust-engine-1  | 2026-03-19T14:21:10.721325Z  INFO trading_engine: [strategy] 📊 VPIN
+calculator initialized (bucket=100k, depth=50)
+wrust-engine-1  | 2026-03-19T14:21:10.721677Z  INFO trading_engine: [strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)
+wrust-engine-1  | 2026-03-19T14:21:10.721683Z  INFO trading_engine: [strategy] 💰 Funding rate checks every ~1000 book snapshots
+wrust-engine-1  | 2026-03-19T14:21:10.721688Z  INFO trading_engine: [strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)
+wrust-engine-1  | 2026-03-19T14:21:10.721694Z  INFO trading_engine: [strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)
+wrust-engine-1  | 2026-03-19T14:21:10.721700Z  INFO trading_engine: [strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)
+wrust-engine-1  | 2026-03-19T14:21:10.721705Z  INFO trading_engine: [strategy] 📈 VolatilityTrailingStop initialized (ATR-based)
+wrust-engine-1  | 2026-03-19T14:21:10.721711Z  INFO trading_engine: [strategy] 🛡️ AdverseSelectionGuard initialized (spoofing detection)
+wrust-engine-1  | 2026-03-19T14:21:10.721991Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+wrust-engine-1  | 2026-03-19T14:21:10.722207Z  INFO trading_engine::signal_queue: [signal_queue] Initialized SHM at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+wrust-engine-1  | 2026-03-19T14:21:10.722227Z  INFO trading_engine: [execution] Alpha Oracle signal queue connected
+wrust-engine-1  | 2026-03-19T14:21:10.722231Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+wrust-engine-1  | 2026-03-19T14:21:10.722303Z  INFO trading_engine: [execution] Testing Gate.io authentication with balance check...
+wrust-engine-1  | 2026-03-19T14:21:10.723942Z  INFO trading_engine: [ws-gateio] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1  | 2026-03-19T14:21:10.822649Z  INFO trading_engine::dashboard_server: [dashboard] Loaded 13 templates from /app/templates: ["risk.html", "advanced_features.html", "forex_dashboard.html", "forex_trades.html", "forex_settings.html", "performance.html", "forex_performance.html", "settings.html", "base.html", "logs.html", "trades.html", "dashboard.html", "forex_risk.html"]
+ rust-engine-1  | 2026-03-19T14:21:10.822789Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io market data: always mainnet for public data (trading_mode=testnet, pairs=["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+ rust-engine-1  | 2026-03-19T14:21:10.822799Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+wrust-engine-1  | 2026-03-19T14:21:10.824558Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+wrust-engine-1  | 2026-03-19T14:21:10.826429Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+wrust-engine-1  | 2026-03-19T14:21:10.900091Z ERROR trading_engine::gateio_gateway: [gateio-rest] HTTP 401 on /futures/usdt/accounts: label=INVALID_KEY, msg=Invalid key provided, key=aa94ae…99f9 (32ch), ts=1773930070, url=https://fx-api-testnet.gateio.ws/api/v4/futures/usdt/accounts
+ rust-engine-1  | 2026-03-19T14:21:10.900123Z ERROR trading_engine::gateio_gateway: [gateio-rest] ══════════════════════════════════════════════
+wrust-engine-1  | 2026-03-19T14:21:10.900129Z ERROR trading_engine::gateio_gateway: [gateio-rest] INVALID_KEY — TESTNET key not recognized by Gate.io
+wrust-engine-1  | 2026-03-19T14:21:10.900133Z ERROR trading_engine::gateio_gateway: [gateio-rest] Full API key being sent: "aa94ae92780baa07f5758de12bf799f9"
+wrust-engine-1  | 2026-03-19T14:21:10.900138Z ERROR trading_engine::gateio_gateway: [gateio-rest] Key byte analysis: len=32, first_byte=0x61, last_byte=0x39
+wrust-engine-1  | 2026-03-19T14:21:10.900144Z ERROR trading_engine::gateio_gateway: [gateio-rest] Base URL: https://fx-api-testnet.gateio.ws/api/v4
+wrust-engine-1  | 2026-03-19T14:21:10.900148Z ERROR trading_engine::gateio_gateway: [gateio-rest] Are you using TESTNET keys with TESTNET endpoint?
+wrust-engine-1  | 2026-03-19T14:21:10.900155Z ERROR trading_engine::gateio_gateway: [gateio-rest] Sign payload: "GET\n/api/v4/futures/usdt/accounts\n\n...\n1773930070"
+wrust-engine-1  | 2026-03-19T14:21:10.900161Z ERROR trading_engine::gateio_gateway: [gateio-rest] ══════════════════════════════════════════════
+wrust-engine-1  | 2026-03-19T14:21:10.900172Z ERROR trading_engine: [execution] ❌  INVALID_KEY from Gate.io. Troubleshooting:
+wrust-engine-1  | 2026-03-19T14:21:10.900177Z ERROR trading_engine: [execution]   1. Ensure GATEIO_TESTNET_API_KEY is a FUTURES testnet key (not spot, not mainnet)
+wrust-engine-1  | 2026-03-19T14:21:10.900182Z ERROR trading_engine: [execution]   2. Gate.io has separate API keys for Spot vs Futures — you need the FUTURES key
+wrust-engine-1  | 2026-03-19T14:21:10.900189Z ERROR trading_engine: [execution]   3. Generate keys at: https://www.gate.io/testnet/futures_trade/USDT/BTC_USDT (testnet site)
+wrust-engine-1  | 2026-03-19T14:21:10.900194Z ERROR trading_engine: [execution]   4. Check for whitespace/newlines in your .env file around the key values
+wrust-engine-1  | 2026-03-19T14:21:10.900198Z ERROR trading_engine: [execution]   5. Ensure the key has 'Futures' permission enabled
+wrust-engine-1  | 2026-03-19T14:21:10.900202Z  WARN trading_engine: [execution] Failed
+to fetch initial balance: Unknown error INVALID_KEY: Invalid key provided — using $10k
+default
+ rust-engine-1  | 2026-03-19T14:21:11.095571Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1  | 2026-03-19T14:21:11.095618Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1  | 2026-03-19T14:21:11.265310Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930071,"time_ms":1773930071188,"conn_id":"ea6f493b179a051e","trace_id":"385e48cf56d60e91aa1baf9ae5f85b93","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract
+0"},"result":{"status":"fail"}}
+ rust-engine-1  | 2026-03-19T14:21:11.265352Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wrust-engine-1  | 2026-03-19T14:21:11.783450Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1  | 2026-03-19T14:21:11.783508Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wContainer crypto_trading_bot-rust-engine-1 Healthy
+ rust-engine-1  | 2026-03-19T14:21:12.295599Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+ rust-engine-1  | 2026-03-19T14:21:12.961961Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1  | 2026-03-19T14:21:12.963764Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1  | 2026-03-19T14:21:13.169176Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930073,"time_ms":1773930073086,"conn_id":"1c35ef386581d47b","trace_id":"82ab15f4fd2268de4640f022dba6c00f","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract
+0"},"result":{"status":"fail"}}
+ rust-engine-1  | 2026-03-19T14:21:13.169219Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wpython-services-1  | 2026-03-19 14:21:13.446 | INFO     | __main__:start:58 - ============================================================
+wpython-services-1  | 2026-03-19 14:21:13.446 | INFO     | __main__:start:59 - Cold Path Orchestrator starting (4vCPU VPS mode)
+wpython-services-1  | 2026-03-19 14:21:13.446 | INFO     | __main__:start:60 - ============================================================
+wpython-services-1  | 2026-03-19 14:21:13.504 | INFO     | core.graceful_degradation:__init__:164 - GracefulDegradationManager initialized: check_interval=5.0s
+wpython-services-1  | 2026-03-19 14:21:13.505 | INFO     | core.graceful_degradation:start:188 - GracefulDegradationManager started
+wpython-services-1  | 2026-03-19 14:21:13.505 | INFO     | __main__:_start_degradation_manager:150 - Graceful Degradation Manager started
+wrust-engine-1      | 2026-03-19T14:21:13.673180Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1      | 2026-03-19T14:21:13.673651Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1      | 2026-03-19T14:21:14.755661Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1      | 2026-03-19T14:21:14.755700Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wpython-services-1  | 2026-03-19 14:21:14.814 | INFO     | __main__:_start_fallback_health_server:177 - Fallback health server listening on :8081
+wpython-services-1  | 2026-03-19 14:21:14.831 | INFO     | analytics.pnl_attribution:__init__:197 - PnLAttributionEngine initialized
+wpython-services-1  | 2026-03-19 14:21:14.831 | INFO     | __main__:_start_pnl_engine:186 - PnL Attribution Engine initialized
+wpython-services-1  | 2026-03-19 14:21:14.927 | INFO     | core.alpha_oracle:open:201 - Signal queue initialized at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+wpython-services-1  | 2026-03-19 14:21:14.927 | INFO     | core.alpha_oracle:start:518
+- Alpha Oracle started (confluence=75%, min_rr=2.0)
+wpython-services-1  | 2026-03-19 14:21:14.928 | INFO     | __main__:_start_alpha_oracle:553 - Alpha Oracle initialized — ready to emit signals to SHM queue
+wpython-services-1  | 2026-03-19 14:21:14.928 | INFO     | __main__:start:110 - All cold-path services started (5 tasks)
+wpython-services-1  | 2026-03-19 14:21:14.929 | INFO     | __main__:_regime_detection_loop:255 - Regime detection loop starting (interval=300s)
+wpython-services-1  | 2026-03-19 14:21:14.933 | INFO     | __main__:_sentiment_analysis_loop:288 - Sentiment analysis loop starting (interval=900s)
+wpython-services-1  | 2026-03-19 14:21:14.934 | INFO     | __main__:_alert_dispatcher_loop:364 - Alert dispatcher starting
+wrust-engine-1      | 2026-03-19T14:21:14.941788Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930074,"time_ms":1773930074864,"conn_id":"7724a88030001d74","trace_id":"12e8f91deecdbca86566813419108332","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract 0"},"result":{"status":"fail"}}
+ rust-engine-1      | 2026-03-19T14:21:14.941956Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wpython-services-1  | 2026-03-19 14:21:15.244 | INFO     | __main__:_journal_sync_loop:419 - Trade journal sync starting (reading binary segment_*.dat files)
+wpython-services-1  | 2026-03-19 14:21:15.244 | INFO     | __main__:_alpha_oracle_loop:568 - Alpha Oracle loop starting (60s evaluation cycle)
+wrust-engine-1      | 2026-03-19T14:21:15.446400Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1      | 2026-03-19T14:21:15.446786Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1      | 2026-03-19T14:21:16.457792Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] REST reconciliation thread started (60s interval)
+wrust-engine-1      | 2026-03-19T14:21:16.482782Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1      | 2026-03-19T14:21:16.482960Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1      | 2026-03-19T14:21:16.695591Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930076,"time_ms":1773930076587,"conn_id":"c91b8d88d47bab06","trace_id":"23666304b20cd2891b6364304fee60cb","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract 0"},"result":{"status":"fail"}}
+ rust-engine-1      | 2026-03-19T14:21:16.695765Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wrust-engine-1      | 2026-03-19T14:21:17.198774Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1      | 2026-03-19T14:21:17.199163Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1      | 2026-03-19T14:21:18.270291Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1      | 2026-03-19T14:21:18.270344Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1      | 2026-03-19T14:21:18.457275Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930078,"time_ms":1773930078374,"conn_id":"b838fd84c6cc4239","trace_id":"27ef21284877ad2f71a5629c35691104","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract 0"},"result":{"status":"fail"}}
+ rust-engine-1      | 2026-03-19T14:21:18.457311Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wrust-engine-1      | 2026-03-19T14:21:18.960302Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1      | 2026-03-19T14:21:18.960394Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1      | 2026-03-19T14:21:20.036387Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1      | 2026-03-19T14:21:20.036434Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1      | 2026-03-19T14:21:20.218014Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930080,"time_ms":1773930080141,"conn_id":"18344bd2647e1e36","trace_id":"9f88ef6ff91ba858fe65a9301d3c678e","channel":"futures.orders","event":"subscribe","payload":["0"],"error":{"code":2,"message":"unknown contract 0"},"result":{"status":"fail"}}
+ rust-engine-1      | 2026-03-19T14:21:20.218062Z  WARN trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe failed, reconnecting...
+wrust-engine-1      | 2026-03-19T14:21:20.722036Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+wrust-engine-1      | 2026-03-19T14:21:20.722078Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+wrust-engine-1      | 2026-03-19T14:21:21.770038Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+wrust-engine-1      | 2026-03-19T14:21:21.770134Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+wrust-engine-1      | 2026-03-19T14:21:21.950426Z ERROR trading_engine::gateio_gateway: [gateio-ws] Auth/subscribe rejected: {"time":1773930081,"time_ms":1773930081874,"conn_id":"cb3d4dfe34839bc5","trace_id":"8b4ea1ea7139306143d2ac

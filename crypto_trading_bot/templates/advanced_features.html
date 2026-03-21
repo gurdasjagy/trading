@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+
+{% block title %}Advanced Features{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-stars me-2"></i>Institutional Features</h2>
+  <span class="badge bg-success fs-6">ALL SYSTEMS OPERATIONAL</span>
+</div>
+
+<!-- Feature Cards Grid -->
+<div class="row g-4 mb-4">
+  <!-- VaR/CVaR Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-shield-check me-2"></i>Risk Analytics (VaR/CVaR)
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Portfolio risk metrics using historical simulation</p>
+        <div id="var-metrics">
+          <div class="d-flex justify-content-between mb-2">
+            <span>Portfolio VaR (95%):</span>
+            <strong id="portfolio-var">-</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span>Portfolio CVaR:</span>
+            <strong id="portfolio-cvar">-</strong>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-primary mt-2" onclick="calculateVaR()">
+          <i class="bi bi-calculator me-1"></i>Calculate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Liquidation Monitor Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-danger text-white">
+        <i class="bi bi-exclamation-triangle me-2"></i>Liquidation Risk
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Real-time liquidation proximity monitoring</p>
+        <div id="liquidation-metrics">
+          <div class="d-flex justify-content-between mb-2">
+            <span>At Risk:</span>
+            <strong id="positions-at-risk">0</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-danger">Critical:</span>
+            <strong id="critical-count" class="text-danger">0</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-warning">High:</span>
+            <strong id="high-count" class="text-warning">0</strong>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-danger mt-2" onclick="checkLiquidationRisk()">
+          <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Execution Algorithms Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-info text-white">
+        <i class="bi bi-graph-up-arrow me-2"></i>Smart Execution
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Institutional execution algorithms</p>
+        <ul class="list-unstyled small">
+          <li><i class="bi bi-check-circle text-success me-1"></i>TWAP (Time-Weighted)</li>
+          <li><i class="bi bi-check-circle text-success me-1"></i>VWAP (Volume-Weighted)</li>
+          <li><i class="bi bi-check-circle text-success me-1"></i>Iceberg Orders</li>
+          <li><i class="bi bi-check-circle text-success me-1"></i>Adaptive Execution</li>
+        </ul>
+        <button class="btn btn-sm btn-info mt-2" data-bs-toggle="modal" data-bs-target="#executionModal">
+          <i class="bi bi-play-fill me-1"></i>Execute Order
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Smart Order Routing Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-success text-white">
+        <i class="bi bi-diagram-3 me-2"></i>Smart Order Routing
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Multi-exchange best execution</p>
+        <div class="small">
+          <div class="mb-2">Supported Exchanges:</div>
+          <span class="badge bg-secondary me-1">MEXC</span>
+          <span class="badge bg-secondary me-1">Gate.io</span>
+          <span class="badge bg-secondary me-1">BingX</span>
+          <span class="badge bg-secondary me-1">Bitget</span>
+        </div>
+        <button class="btn btn-sm btn-success mt-3" onclick="viewRoutingStats()">
+          <i class="bi bi-bar-chart me-1"></i>View Stats
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advanced Analytics Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-warning text-dark">
+        <i class="bi bi-graph-up me-2"></i>Advanced Analytics
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Institutional-grade performance metrics</p>
+        <div id="advanced-analytics">
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>Sortino Ratio:</span>
+            <strong id="sortino-ratio">-</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>Calmar Ratio:</span>
+            <strong id="calmar-ratio">-</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>Omega Ratio:</span>
+            <strong id="omega-ratio">-</strong>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-warning mt-2" onclick="loadAdvancedAnalytics()">
+          <i class="bi bi-arrow-clockwise me-1"></i>Calculate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monte Carlo Card -->
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header bg-secondary text-white">
+        <i class="bi bi-dice-5 me-2"></i>Monte Carlo Simulation
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">Probabilistic returns analysis</p>
+        <div id="monte-carlo-results">
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>Mean Return:</span>
+            <strong id="mc-mean-return">-</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>P(Profit):</span>
+            <strong id="mc-prob-profit">-</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2 small">
+            <span>VaR 95%:</span>
+            <strong id="mc-var95">-</strong>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-secondary mt-2" onclick="runMonteCarlo()">
+          <i class="bi bi-play-fill me-1"></i>Run Simulation
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Market Impact Analysis Section -->
+<div class="card mb-4">
+  <div class="card-header">
+    <i class="bi bi-bullseye me-2"></i>Market Impact Analysis
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6">
+        <label class="form-label">Symbol:</label>
+        <input type="text" class="form-control mb-2" id="impact-symbol" value="BTC/USDT" />
+
+        <label class="form-label">Order Size (USDT):</label>
+        <input type="number" class="form-control mb-3" id="impact-size" value="10000" />
+
+        <button class="btn btn-primary" onclick="estimateMarketImpact()">
+          <i class="bi bi-calculator me-1"></i>Estimate Impact
+        </button>
+      </div>
+      <div class="col-md-6">
+        <div id="impact-results" class="d-none">
+          <h6>Estimated Impact:</h6>
+          <table class="table table-sm">
+            <tr>
+              <td>Slippage:</td>
+              <td><strong id="impact-slippage">-</strong></td>
+            </tr>
+            <tr>
+              <td>Liquidity Score:</td>
+              <td><strong id="impact-liquidity">-</strong></td>
+            </tr>
+            <tr>
+              <td>Recommended Method:</td>
+              <td><strong id="impact-method">-</strong></td>
+            </tr>
+            <tr>
+              <td>Est. Time:</td>
+              <td><strong id="impact-time">-</strong></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Audit Trail Section -->
+<div class="card mb-4">
+  <div class="card-header">
+    <i class="bi bi-shield-lock me-2"></i>Audit Trail & Compliance
+  </div>
+  <div class="card-body">
+    <p class="text-muted">Immutable cryptographic audit trail for regulatory compliance</p>
+    <div class="row">
+      <div class="col-md-3">
+        <div class="text-center p-3 bg-light rounded">
+          <h4 id="audit-total-entries">0</h4>
+          <small class="text-muted">Total Entries</small>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="text-center p-3 bg-light rounded">
+          <h4 id="audit-integrity" class="text-success">VALID</h4>
+          <small class="text-muted">Integrity Status</small>
+        </div>
+      </div>
+      <div class="col-md-6 d-flex align-items-center">
+        <button class="btn btn-primary me-2" onclick="verifyAuditTrail()">
+          <i class="bi bi-check-circle me-1"></i>Verify Integrity
+        </button>
+        <button class="btn btn-secondary" onclick="viewAuditLog()">
+          <i class="bi bi-eye me-1"></i>View Log
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Regime Detection Section -->
+<div class="card mb-4">
+  <div class="card-header">
+    <i class="bi bi-radar me-2"></i>Market Regime Detection
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6">
+        <h5 id="regime-status">Current Regime: <span class="badge bg-info">ANALYZING...</span></h5>
+        <div class="mt-3">
+          <div class="d-flex justify-content-between mb-2">
+            <span>Confidence Level:</span>
+            <strong id="regime-confidence">-</strong>
+          </div>
+          <div class="progress" style="height: 25px;">
+            <div id="regime-confidence-bar" class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <h6>Regime Characteristics:</h6>
+        <ul class="small" id="regime-characteristics">
+          <li>Analyzing market conditions...</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Execution Modal -->
+<div class="modal fade" id="executionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Advanced Order Execution</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Symbol:</label>
+          <input type="text" class="form-control" id="exec-symbol" value="BTC/USDT" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Side:</label>
+          <select class="form-select" id="exec-side">
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Amount:</label>
+          <input type="number" class="form-control" id="exec-amount" value="0.1" step="0.001" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Algorithm:</label>
+          <select class="form-select" id="exec-algorithm">
+            <option value="twap">TWAP (Time-Weighted)</option>
+            <option value="vwap">VWAP (Volume-Weighted)</option>
+            <option value="iceberg">Iceberg</option>
+            <option value="adaptive">Adaptive</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Duration (minutes):</label>
+          <input type="number" class="form-control" id="exec-duration" value="60" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="executeAdvancedOrder()">Execute</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// VaR/CVaR Calculation
+async function calculateVaR() {
+  try {
+    const response = await fetch('/api/v1/advanced/var', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        symbols: [],
+        confidence_level: 0.95,
+        method: 'historical'
+      })
+    });
+    const data = await response.json();
+
+    document.getElementById('portfolio-var').textContent = `$${data.portfolio_var.toFixed(2)}`;
+    document.getElementById('portfolio-cvar').textContent = `$${data.portfolio_cvar.toFixed(2)}`;
+
+    showToast('VaR/CVaR calculated successfully', 'success');
+  } catch (error) {
+    showToast('Failed to calculate VaR: ' + error.message, 'error');
+  }
+}
+
+// Liquidation Risk Check
+async function checkLiquidationRisk() {
+  try {
+    const response = await fetch('/api/v1/advanced/liquidation-risk');
+    const data = await response.json();
+
+    document.getElementById('positions-at-risk').textContent = data.total_positions_at_risk;
+    document.getElementById('critical-count').textContent = data.critical_count;
+    document.getElementById('high-count').textContent = data.high_count;
+
+    if (data.critical_count > 0) {
+      showToast(`WARNING: ${data.critical_count} positions at critical liquidation risk!`, 'error');
+    }
+  } catch (error) {
+    showToast('Failed to check liquidation risk: ' + error.message, 'error');
+  }
+}
+
+// Market Impact Estimation
+async function estimateMarketImpact() {
+  const symbol = document.getElementById('impact-symbol').value;
+  const size = parseFloat(document.getElementById('impact-size').value);
+
+  try {
+    const response = await fetch('/api/v1/advanced/market-impact', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol, order_size_usdt: size})
+    });
+    const data = await response.json();
+
+    document.getElementById('impact-slippage').textContent =
+      `${data.estimated_slippage_pct.toFixed(3)}% ($${data.estimated_slippage_usdt.toFixed(2)})`;
+    document.getElementById('impact-liquidity').textContent =
+      (data.market_depth_score * 100).toFixed(1) + '%';
+    document.getElementById('impact-method').textContent = data.recommended_execution_method;
+    document.getElementById('impact-time').textContent =
+      data.estimated_execution_time_minutes.toFixed(0) + ' min';
+
+    document.getElementById('impact-results').classList.remove('d-none');
+  } catch (error) {
+    showToast('Failed to estimate market impact: ' + error.message, 'error');
+  }
+}
+
+// Advanced Analytics
+async function loadAdvancedAnalytics() {
+  try {
+    const response = await fetch('/api/v1/advanced/analytics/BTC/USDT');
+    const data = await response.json();
+
+    document.getElementById('sortino-ratio').textContent = data.sortino_ratio.toFixed(2);
+    document.getElementById('calmar-ratio').textContent = data.calmar_ratio.toFixed(2);
+    document.getElementById('omega-ratio').textContent = data.omega_ratio.toFixed(2);
+
+    updateRegimeStatus(data.regime, data.regime_confidence);
+  } catch (error) {
+    showToast('Failed to load analytics: ' + error.message, 'error');
+  }
+}
+
+// Monte Carlo Simulation
+async function runMonteCarlo() {
+  try {
+    showToast('Running Monte Carlo simulation...', 'info');
+
+    const response = await fetch('/api/v1/advanced/monte-carlo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        n_simulations: 10000,
+        n_trades: 100,
+        starting_capital: 10000
+      })
+    });
+    const data = await response.json();
+
+    document.getElementById('mc-mean-return').textContent = data.mean_return.toFixed(2) + '%';
+    document.getElementById('mc-prob-profit').textContent = data.probability_of_profit.toFixed(1) + '%';
+    document.getElementById('mc-var95').textContent = data.var_95.toFixed(2) + '%';
+
+    showToast('Monte Carlo simulation complete', 'success');
+  } catch (error) {
+    showToast('Failed to run Monte Carlo: ' + error.message, 'error');
+  }
+}
+
+// Execute Advanced Order
+async function executeAdvancedOrder() {
+  const symbol = document.getElementById('exec-symbol').value;
+  const side = document.getElementById('exec-side').value;
+  const amount = parseFloat(document.getElementById('exec-amount').value);
+  const algorithm = document.getElementById('exec-algorithm').value;
+  const duration = parseInt(document.getElementById('exec-duration').value);
+
+  try {
+    showToast(`Starting ${algorithm.toUpperCase()} execution...`, 'info');
+
+    const response = await fetch('/api/v1/advanced/execute', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol, side, amount, algorithm, duration_minutes: duration})
+    });
+    const data = await response.json();
+
+    showToast(
+      `Execution complete: Filled ${data.filled_amount} @ avg ${data.average_price}`,
+      'success'
+    );
+
+    bootstrap.Modal.getInstance(document.getElementById('executionModal')).hide();
+  } catch (error) {
+    showToast('Execution failed: ' + error.message, 'error');
+  }
+}
+
+// Audit Trail
+async function verifyAuditTrail() {
+  try {
+    const response = await fetch('/api/v1/advanced/audit/verify');
+    const data = await response.json();
+
+    document.getElementById('audit-total-entries').textContent = data.total_entries;
+    document.getElementById('audit-integrity').textContent = data.is_valid ? 'VALID' : 'INVALID';
+    document.getElementById('audit-integrity').className = data.is_valid ? 'text-success' : 'text-danger';
+
+    showToast(
+      data.is_valid ? 'Audit trail integrity verified' : 'Audit trail integrity check FAILED',
+      data.is_valid ? 'success' : 'error'
+    );
+  } catch (error) {
+    showToast('Verification failed: ' + error.message, 'error');
+  }
+}
+
+function updateRegimeStatus(regime, confidence) {
+  const badgeClass = {
+    'trending_up': 'bg-success',
+    'trending_down': 'bg-danger',
+    'ranging': 'bg-warning text-dark',
+    'volatile': 'bg-info',
+    'unknown': 'bg-secondary'
+  }[regime] || 'bg-secondary';
+
+  document.getElementById('regime-status').innerHTML =
+    `Current Regime: <span class="badge ${badgeClass}">${regime.toUpperCase().replace('_', ' ')}</span>`;
+
+  const confidencePct = (confidence * 100).toFixed(0);
+  document.getElementById('regime-confidence').textContent = confidencePct + '%';
+  document.getElementById('regime-confidence-bar').style.width = confidencePct + '%';
+  document.getElementById('regime-confidence-bar').textContent = confidencePct + '%';
+}
+
+// Auto-refresh every 30 seconds
+setInterval(() => {
+  checkLiquidationRisk();
+  loadAdvancedAnalytics();
+}, 30000);
+
+// Initial load
+document.addEventListener('DOMContentLoaded', () => {
+  checkLiquidationRisk();
+  loadAdvancedAnalytics();
+  verifyAuditTrail();
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,2820 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Auto-refresh every 5 seconds via HTMX -->
+<div hx-get="/api/v1/status" hx-trigger="every 5s" hx-target="#bot-status" hx-swap="innerHTML"></div>
+
+<!-- ── Real-time price ticker bar ───────────────────────────────────────── -->
+<div id="price-ticker-bar" class="mb-3 text-muted">
+  {% if positions %}
+    {% for pos in positions %}
+    <span class="ticker-item me-4">
+      <span class="fw-semibold">{{ pos.symbol }}</span>
+      <span class="ms-1">${{ pos.current_price  | round(precision=4) }}</span>
+      <span class="ms-1 small {% if pos.pnl  >= 0 %}text-success{% else %}text-danger{% endif %}">
+        {{ pos.pnl  | round(precision=2) }}
+      </span>
+    </span>
+    {% endfor %}
+  {% else %}
+    <span class="text-muted small"><i class="bi bi-activity me-1"></i>Awaiting price data…</span>
+  {% endif %}
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <h2 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <span id="trading-mode-badge" class="badge fs-6
+      {% if trading_mode == 'live' %}bg-danger{% else %}bg-info{% endif %}">
+      <i class="bi bi-circle-fill me-1"></i>{% if trading_mode %}{{ trading_mode | upper }}{% else %}PAPER{% endif %} MODE
+    </span>
+    <button class="btn btn-sm btn-outline-warning" onclick="pauseBot()" title="Pause trading">
+      <i class="bi bi-pause-fill me-1"></i>Pause
+    </button>
+    <button class="btn btn-sm btn-outline-success" onclick="resumeBot()" title="Resume trading">
+      <i class="bi bi-play-fill me-1"></i>Resume
+    </button>
+    <button class="btn btn-sm btn-outline-info" onclick="resetCircuitBreaker()" title="Reset circuit breaker">
+      <i class="bi bi-arrow-clockwise me-1"></i>Reset CB
+    </button>
+    <button class="btn btn-sm btn-danger" onclick="emergencyStop()" title="Emergency stop — closes all positions">
+      <i class="bi bi-stop-circle me-1"></i>Emergency Stop
+    </button>
+    <span id="circuit-breaker-status" class="badge bg-success">CB OK</span>
+    <small class="text-muted" id="last-updated">Updating…</small>
+  </div>
+</div>
+
+<!-- ── Metric cards ──────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card metric-card border-0 h-100">
+      <div class="card-body">
+        <p class="card-subtitle text-muted small mb-1">
+          <i class="bi bi-wallet2 me-1"></i>Portfolio Value
+        </p>
+        <h3 class="card-title mb-0 fw-bold" id="metric-portfolio-value">
+          {{ portfolio_value | default(value="$0.00") }}
+        </h3>
+        <small class="text-muted">USDT</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card metric-card border-0 h-100">
+      <div class="card-body">
+        <p class="card-subtitle text-muted small mb-1">
+          <i class="bi bi-calendar-day me-1"></i>Today's P&L
+        </p>
+        <h3 class="card-title mb-0 fw-bold pnl-value" id="metric-daily-pnl">
+          {{ daily_pnl | default(value=0) | round(precision=2) }}%
+        </h3>
+        <small class="text-muted">since midnight UTC</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card metric-card border-0 h-100">
+      <div class="card-body">
+        <p class="card-subtitle text-muted small mb-1">
+          <i class="bi bi-layers me-1"></i>Open Positions
+        </p>
+        <h3 class="card-title mb-0 fw-bold" id="metric-open-positions">
+          {{ open_positions | default(value=0) }}
+        </h3>
+        <small class="text-muted">of {{ max_positions | default(value=5) }} max</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card metric-card border-0 h-100">
+      <div class="card-body">
+        <p class="card-subtitle text-muted small mb-1">
+          <i class="bi bi-trophy me-1"></i>Win Rate
+        </p>
+        <h3 class="card-title mb-0 fw-bold" id="metric-win-rate">
+          {{ win_rate | default(value="0.0%") }}
+        </h3>
+        <small class="text-muted">all-time</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Multi-Timeframe Analysis Widget ───────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Multi-Timeframe Analysis</h5>
+        <div class="d-flex align-items-center gap-2">
+          <select id="mtf-symbol-select" class="form-select form-select-sm bg-dark text-light border-secondary" style="width:auto;" onchange="loadMultiTimeframeData()">
+            {% set_global mtf_symbols = trading_pairs | default(value=[]) %}
+            {% if mtf_symbols %}
+              {% for sym in mtf_symbols %}
+              {% if sym is not containing("XAU") %}
+              <option value="{{ sym }}">{{ sym }}</option>
+              {% endif %}
+              {% endfor %}
+            {% else %}
+              <option value="BTC/USDT">BTC/USDT</option>
+              <option value="ETH/USDT">ETH/USDT</option>
+              <option value="SOL/USDT">SOL/USDT</option>
+            {% endif %}
+          </select>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadMultiTimeframeData()" title="Refresh">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Timeframe</th>
+                <th>Trend</th>
+                <th>RSI</th>
+                <th>MACD</th>
+                <th>EMA Cross</th>
+                <th>Volume</th>
+                <th>Alignment Score</th>
+              </tr>
+            </thead>
+            <tbody id="mtf-tbody">
+              <tr>
+                <td colspan="7" class="text-center text-muted py-3">
+                  <i class="bi bi-hourglass-split me-2"></i>Loading multi-timeframe data...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-3 p-3 rounded" style="background:rgba(88,166,255,0.08); border:1px solid rgba(88,166,255,0.2);">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <strong class="text-info">Overall Alignment:</strong>
+              <span id="mtf-overall-score" class="ms-2 fs-5 fw-bold">--%</span>
+            </div>
+            <div class="text-end">
+              <span id="mtf-signal-badge" class="badge bg-secondary">Analyzing...</span>
+              <p class="mb-0 small text-muted mt-1" id="mtf-signal-description">Checking timeframe alignment</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Market Overview ───────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Market Overview</h5>
+        <span class="badge bg-secondary" id="market-symbols-count">0</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Price</th>
+                <th>24h Change</th>
+                <th>24h High</th>
+                <th>24h Low</th>
+                <th>Volume</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="market-overview-tbody">
+              <tr>
+                <td colspan="7" class="text-center text-muted py-3">
+                  <i class="bi bi-hourglass-split me-2"></i>Loading market data...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── K-Line Chart + Manual Trade Panel ────────────────────────────── -->
+<div class="row g-3 mb-4" id="kline-row">
+  <!-- Candlestick Chart -->
+  <div class="col-12 col-xl-8">
+    <div class="card border-0 h-100" style="min-height:400px;">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center gap-2">
+          <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>K-Line Chart</h5>
+          <select id="kline-symbol-select" class="form-select form-select-sm bg-dark text-light border-secondary" style="width:auto;" onchange="onKlineParamChange()">
+            {% set_global raw_syms = trading_pairs_raw | default(value=[]) %}
+            {% if raw_syms %}
+              {% for sym in raw_syms %}
+              {% if sym is not containing("XAU") %}
+              <option value="{{ sym }}">{{ sym | replace(from="_", to="/") }}</option>
+              {% endif %}
+              {% endfor %}
+            {% else %}
+              <option value="">No symbols configured</option>
+            {% endif %}
+          </select>
+          <div class="btn-group btn-group-sm" role="group" id="kline-tf-group">
+            <button type="button" class="btn btn-outline-secondary active" data-tf="1m" onclick="setKlineTf('1m', this)">1m</button>
+            <button type="button" class="btn btn-outline-secondary" data-tf="5m" onclick="setKlineTf('5m', this)">5m</button>
+            <button type="button" class="btn btn-outline-secondary" data-tf="15m" onclick="setKlineTf('15m', this)">15m</button>
+            <button type="button" class="btn btn-outline-secondary" data-tf="1h" onclick="setKlineTf('1h', this)">1h</button>
+            <button type="button" class="btn btn-outline-secondary" data-tf="4h" onclick="setKlineTf('4h', this)">4h</button>
+            <button type="button" class="btn btn-outline-secondary" data-tf="1d" onclick="setKlineTf('1d', this)">1d</button>
+          </div>
+        </div>
+        <div id="kline-price-display" class="fw-semibold text-light small"></div>
+      </div>
+      <div class="card-body p-0 position-relative" style="height:380px;">
+        <div id="kline-chart-container" style="width:100%;height:100%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Trade Override Panel — REMOVED (100% Autonomous Operation) -->
+  <div class="col-12 col-xl-4">
+    <div class="card border-0 h-100" style="border-color: rgba(0,255,136,0.3) !important;">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0 text-success"><i class="bi bi-robot me-2"></i>Alpha Oracle Status</h5>
+        <small class="text-muted">Autonomous execution — no manual intervention</small>
+      </div>
+      <div class="card-body text-center">
+        <div class="mb-3 p-3 rounded" style="background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.15);">
+          <i class="bi bi-shield-check text-success" style="font-size:2.5rem;"></i>
+          <h6 class="mt-2 text-success fw-bold">Fully Autonomous</h6>
+          <p class="small text-muted mb-0">
+            All trade execution flows through the Rust hot-path via the Alpha Oracle
+            signal queue. The Python confluence engine evaluates 60+ strategies and
+            writes TradeIntent signals to shared memory for zero-latency execution.
+          </p>
+        </div>
+        <div id="alpha-oracle-stats" class="small text-start">
+          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
+            <span class="text-muted">Signal Queue Depth:</span>
+            <span id="signal-queue-depth" class="text-light">—</span>
+          </div>
+          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
+            <span class="text-muted">Confluence Threshold:</span>
+            <span class="text-warning">75%+</span>
+          </div>
+          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
+            <span class="text-muted">Min Risk/Reward:</span>
+            <span class="text-warning">2.0:1</span>
+          </div>
+          <div class="d-flex justify-content-between py-1">
+            <span class="text-muted">Execution Path:</span>
+            <span class="text-info">SHM → Rust Hot-Path</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Open Positions table ──────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-layers me-2"></i>Active Positions</h5>
+        <span class="badge bg-secondary">{% if positions %}{{ positions | length }}{% else %}0{% endif %}</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-striped table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Size</th>
+                <th>Entry</th>
+                <th>Mark Price</th>
+                <th>Unr. P&amp;L</th>
+                <th>ROE%</th>
+                <th>Leverage</th>
+                <th>Mode</th>
+                <th>Margin</th>
+                <th>Liq. Price</th>
+                <th>Stop Loss</th>
+                <th>Take Profit</th>
+                <th>Duration</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="positions-tbody">
+              {% if positions %}
+                {% for pos in positions %}
+                <tr data-symbol="{{ pos.symbol }}">
+                  <td class="fw-semibold">{{ pos.symbol }}</td>
+                  <td>
+                    <span class="badge direction-badge direction-badge--{{ pos.direction | lower }}">
+                      {{ pos.direction | upper }}
+                    </span>
+                  </td>
+                  <td class="small">${{ pos.notional_size | default(value=0) | round(precision=2) }}</td>
+                  <td>${{ pos.entry_price  | round(precision=4) }}</td>
+                  <td>{% if pos.mark_price %}${{ pos.mark_price | round(precision=4) }}{% else %}${{ pos.current_price | default(value=0) | round(precision=4) }}{% endif %}</td>
+                  <td class="pnl-value {% if pos.pnl  >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ pos.pnl  | round(precision=2) }}
+                  </td>
+                  <td class="{% if pos.roe_pct | default(value=0) >= 0 %}text-success{% else %}text-danger{% endif %} small">
+                    {{ pos.roe_pct | default(value=0) | round(precision=2) }}%
+                  </td>
+                  <td>
+                    <span class="badge bg-info">{{ pos.leverage }}×</span>
+                  </td>
+                  <td>
+                    {% if pos.strategy == 'manual' %}
+                      <span class="badge bg-warning text-dark">Manual</span>
+                    {% elif pos.strategy %}
+                      <span class="badge bg-success">Auto</span>
+                    {% else %}
+                      <span class="badge bg-secondary">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="small">${{ pos.margin | default(value=0) | round(precision=2) }}</td>
+                  <td class="small text-warning">
+                    {% if pos.liquidation_price and pos.liquidation_price  > 0 %}
+                      ${{ pos.liquidation_price  | round(precision=4) }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td class="small">
+                    {% if pos.stop_loss %}${{ pos.stop_loss | round(precision=4) }}{% else %}—{% endif %}
+                  </td>
+                  <td class="small">
+                    {% if pos.take_profit %}${{ pos.take_profit | round(precision=4) }}{% else %}—{% endif %}
+                  </td>
+                  <td class="small text-muted">
+                    {{ pos.duration | default(value="—") }}
+                  </td>
+                  <td>
+                    <div class="btn-group btn-group-sm" role="group">
+                      <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-gear"></i>
+                      </button>
+                      <ul class="dropdown-menu dropdown-menu-dark">
+                        <li><a class="dropdown-item" href="#" onclick="openModifySLModal('{{ pos.symbol }}', {{ pos.stop_loss | default(value=0) }})"><i class="bi bi-shield-exclamation me-2"></i>Modify SL</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openModifyTPModal('{{ pos.symbol }}', {{ pos.take_profit | default(value=0) }})"><i class="bi bi-trophy me-2"></i>Modify TP</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openAdjustLeverageModal('{{ pos.symbol }}', {{ pos.leverage }})"><i class="bi bi-sliders me-2"></i>Adjust Leverage</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" onclick="reducePosition('{{ pos.symbol }}', 50)"><i class="bi bi-dash-circle me-2"></i>Reduce 50%</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="reducePosition('{{ pos.symbol }}', 75)"><i class="bi bi-dash-circle me-2"></i>Reduce 75%</a></li>
+                      </ul>
+                      <button class="btn btn-danger" onclick="closePosition('{{ pos.symbol }}')" title="Close position">
+                        <i class="bi bi-x-circle"></i> Close
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="14" class="text-center text-muted py-3">No active positions</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Recent Signals ────────────────────────────────────────────── -->
+  <div class="col-12 col-xl-4">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Recent Signals</h5>
+        <span class="badge bg-secondary">{% if signals %}{{ signals | length }}{% else %}0{% endif %}</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-striped table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Dir.</th>
+                <th>Str.</th>
+                <th>Strategy</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="signals-tbody">
+              {% if signals %}
+                {% for sig in signals %}
+                <tr>
+                  <td class="fw-semibold">{{ sig.symbol }}</td>
+                  <td>
+                    <span class="badge direction-badge direction-badge--{{ sig.direction | lower }}">
+                      {{ sig.direction | truncate(length=1, end="") | upper }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="progress" style="width:50px;height:8px;">
+                      <div class="progress-bar bg-warning"
+                           style="width:{{ sig.strength_pct | default(value=0) }}%"></div>
+                    </div>
+                  </td>
+                  <td class="small text-muted">{{ sig.strategy_name }}</td>
+                  <td class="small text-muted">{% if sig.timestamp %}{{ sig.timestamp }}{% else %}--{% endif %}</td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="5" class="text-center text-muted py-3">No signals yet</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Open Orders section ───────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Open Orders</h5>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge bg-secondary" id="open-orders-count">0</span>
+          <button class="btn btn-sm btn-outline-warning" onclick="cancelAllOrders()"
+                  title="Cancel all open orders">
+            <i class="bi bi-slash-circle me-1"></i>Cancel All
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-striped table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Type</th>
+                <th>Side</th>
+                <th>Price</th>
+                <th>Amount</th>
+                <th>Cancel</th>
+              </tr>
+            </thead>
+            <tbody id="open-orders-tbody">
+              <tr><td colspan="6" class="text-center text-muted py-2">No open orders</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Execution Quality Metrics ──────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-speedometer me-2"></i>Execution Quality</h5>
+        <small class="text-muted">Updated every 10s</small>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Avg Slippage</p>
+            <h4 class="fw-bold mb-0" id="avg-slippage">—</h4>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Fill Rate</p>
+            <h4 class="fw-bold mb-0" id="fill-rate">—</h4>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Avg Latency</p>
+            <h4 class="fw-bold mb-0" id="avg-latency">—</h4>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Maker Rate</p>
+            <h4 class="fw-bold mb-0" id="maker-rate">—</h4>
+          </div>
+        </div>
+        <div class="mt-2">
+          <span id="total-pnl" class="fs-5 fw-bold">—</span>
+          <small class="text-muted ms-1">Unrealized P&amp;L (live)</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Social Sentiment Analysis ─────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Social Sentiment Analysis</h5>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <!-- Fear & Greed Index -->
+          <div class="col-md-4">
+            <div class="card border border-secondary h-100">
+              <div class="card-header bg-transparent border-secondary">
+                <h6 class="mb-0"><i class="bi bi-thermometer-half me-2"></i>Fear & Greed Index</h6>
+              </div>
+              <div class="card-body text-center">
+                <div class="position-relative d-inline-block">
+                  <canvas id="fearGreedGauge" width="180" height="180"></canvas>
+                  <div class="position-absolute top-50 start-50 translate-middle text-center">
+                    <div class="fs-1 fw-bold" id="fear-greed-value">--</div>
+                    <div class="small text-muted" id="fear-greed-label">Loading...</div>
+                  </div>
+                </div>
+                <p class="mt-3 small text-muted mb-0" id="fear-greed-desc">Analyzing market sentiment...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Social Media Sentiment -->
+          <div class="col-md-4">
+            <div class="card border border-secondary h-100">
+              <div class="card-header bg-transparent border-secondary">
+                <h6 class="mb-0"><i class="bi bi-twitter me-2"></i>Social Media Sentiment</h6>
+              </div>
+              <div class="card-body">
+                <div class="mb-3">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small">Bitcoin</span>
+                    <span class="badge bg-success" id="btc-sentiment-score">Loading...</span>
+                  </div>
+                  <div class="progress" style="height: 8px;">
+                    <div id="btc-sentiment-bar" class="progress-bar bg-success" style="width: 0%"></div>
+                  </div>
+                  <div class="d-flex justify-content-between mt-1">
+                    <small class="text-muted" id="btc-sentiment-volume">0 mentions</small>
+                    <small class="text-muted" id="btc-sentiment-trend">--</small>
+                  </div>
+                </div>
+
+                <div class="mb-3">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small">Ethereum</span>
+                    <span class="badge bg-success" id="eth-sentiment-score">Loading...</span>
+                  </div>
+                  <div class="progress" style="height: 8px;">
+                    <div id="eth-sentiment-bar" class="progress-bar bg-success" style="width: 0%"></div>
+                  </div>
+                  <div class="d-flex justify-content-between mt-1">
+                    <small class="text-muted" id="eth-sentiment-volume">0 mentions</small>
+                    <small class="text-muted" id="eth-sentiment-trend">--</small>
+                  </div>
+                </div>
+
+                <div class="mb-0">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small">Market</span>
+                    <span class="badge bg-info" id="market-sentiment-score">Loading...</span>
+                  </div>
+                  <div class="progress" style="height: 8px;">
+                    <div id="market-sentiment-bar" class="progress-bar bg-info" style="width: 0%"></div>
+                  </div>
+                  <div class="d-flex justify-content-between mt-1">
+                    <small class="text-muted" id="market-sentiment-volume">0 mentions</small>
+                    <small class="text-muted">Last 24h</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trending Topics -->
+          <div class="col-md-4">
+            <div class="card border border-secondary h-100">
+              <div class="card-header bg-transparent border-secondary">
+                <h6 class="mb-0"><i class="bi bi-fire me-2"></i>Trending Topics</h6>
+              </div>
+              <div class="card-body p-0">
+                <div class="list-group list-group-flush" id="trending-topics-list">
+                  <div class="list-group-item bg-dark border-secondary text-center text-muted small py-3">
+                    Loading trending topics...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── News Feed & AI Trade Suggestions ─────────────────────────────────── -->
+<div class="row g-3">
+  <!-- News Feed -->
+  <div class="col-12 col-lg-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-newspaper me-2"></i>Crypto News Feed</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadCryptoNews()" title="Refresh">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+        <ul class="list-group list-group-flush" id="crypto-news-feed">
+          <li class="list-group-item bg-dark border-secondary text-center text-muted py-3">
+            <i class="bi bi-hourglass-split me-2"></i>Loading crypto news...
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Trade Suggestions -->
+  <div class="col-12 col-lg-6">
+    <div class="card border-0 border-warning" style="border:2px solid rgba(255,193,7,0.3) !important;">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 text-warning"><i class="bi bi-robot me-2"></i>AI Trade Suggestions</h5>
+        <button class="btn btn-sm btn-outline-warning" onclick="loadAITradeSuggestions()" title="Refresh">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+        <div id="ai-suggestions-container">
+          <div class="text-center text-muted py-3">
+            <i class="bi bi-hourglass-split me-2"></i>Analyzing market conditions...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── New Dashboard Widgets ─────────────────────────────────────────────── -->
+
+<!-- Orderbook, Recent Trades, Funding Rates Row -->
+<div class="row g-3 mb-4">
+  <!-- Order Book Depth -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-list-columns me-2"></i>Order Book</h5>
+        <small class="text-muted" id="orderbook-symbol">BTC/USDT</small>
+      </div>
+      <div class="card-body p-2" style="max-height: 400px; overflow-y: auto;">
+        <div id="orderbook-container">
+          <div class="text-center text-muted py-3">Loading orderbook...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Trades Feed -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>Recent Trades</h5>
+        <small class="text-muted" id="recent-trades-symbol">BTC/USDT</small>
+      </div>
+      <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
+        <div class="table-responsive">
+          <table class="table table-dark table-sm mb-0">
+            <thead class="sticky-top bg-dark">
+              <tr>
+                <th class="text-muted small">Price</th>
+                <th class="text-muted small text-end">Amount</th>
+                <th class="text-muted small text-end">Time</th>
+              </tr>
+            </thead>
+            <tbody id="recent-trades-tbody">
+              <tr><td colspan="3" class="text-center text-muted py-3">Loading trades...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Funding Rates Tracker -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-percent me-2"></i>Funding Rates</h5>
+        <button class="btn btn-xs btn-outline-secondary" onclick="loadFundingRates()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
+        <div class="table-responsive">
+          <table class="table table-dark table-sm mb-0">
+            <thead class="sticky-top bg-dark">
+              <tr>
+                <th class="text-muted small">Symbol</th>
+                <th class="text-muted small text-end">Rate %</th>
+                <th class="text-muted small text-end">Annual %</th>
+              </tr>
+            </thead>
+            <tbody id="funding-rates-tbody">
+              <tr><td colspan="3" class="text-center text-muted py-3">Loading rates...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Portfolio Allocation Chart -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-pie-chart me-2"></i>Portfolio Allocation</h5>
+      </div>
+      <div class="card-body">
+        <canvas id="portfolioAllocationChart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Metrics Summary -->
+  <div class="col-12 col-md-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-shield-exclamation me-2"></i>Risk Metrics</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-dark mb-0">
+          <tbody>
+            <tr>
+              <td class="text-muted">Total Exposure</td>
+              <td class="fw-semibold text-end" id="risk-total-exposure">$0.00</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Exposure %</td>
+              <td class="fw-semibold text-end" id="risk-exposure-pct">0%</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Margin Usage</td>
+              <td class="fw-semibold text-end" id="risk-margin-usage">0%</td>
+            </tr>
+            <tr>
+              <td class="text-muted">VaR (95%)</td>
+              <td class="fw-semibold text-end text-danger" id="risk-var-95">$0.00</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Max Drawdown Limit</td>
+              <td class="fw-semibold text-end" id="risk-max-drawdown">10%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Equity Curve & Real-Time P&L ───────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-8">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-graph-up-arrow me-2"></i>Equity Curve</h5>
+        <div class="d-flex gap-2 align-items-center">
+          <select id="equity-timerange" class="form-select form-select-sm bg-dark text-light border-secondary" style="width:auto;" onchange="renderEquityCurve()">
+            <option value="24h">24h</option>
+            <option value="7d" selected>7d</option>
+            <option value="30d">30d</option>
+            <option value="all">All</option>
+          </select>
+          <small class="text-muted ms-2">Updated every 5 s</small>
+        </div>
+      </div>
+      <div class="card-body p-0 p-sm-2">
+        <div id="equity-curve-container" style="width:100%;height:260px;"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-bar-chart-steps me-2"></i>Daily P&amp;L Waterfall</h5>
+      </div>
+      <div class="card-body">
+        <div id="pnl-waterfall-container" style="width:100%;height:220px;"></div>
+        <div class="d-flex justify-content-between mt-2 small">
+          <span class="text-muted">Sharpe</span>
+          <span class="fw-semibold" id="sharpe-ratio-val">—</span>
+          <span class="text-muted ms-3">Sortino</span>
+          <span class="fw-semibold" id="sortino-ratio-val">—</span>
+          <span class="text-muted ms-3">Calmar</span>
+          <span class="fw-semibold" id="calmar-ratio-val">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Strategy Performance Analytics ────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-cpu me-2"></i>Strategy Performance Analytics</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadStrategyAnalytics()" title="Refresh">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body">
+        <!-- Strategy performance cards grid -->
+        <div id="strategy-perf-cards" class="row g-3 mb-3">
+          <div class="col-12 text-center text-muted py-3">
+            <i class="bi bi-hourglass-split me-2"></i>Loading strategy analytics…
+          </div>
+        </div>
+        <!-- Regime performance breakdown -->
+        <div class="mt-3">
+          <h6 class="text-muted mb-2 small text-uppercase fw-semibold">
+            <i class="bi bi-grid-3x3 me-1"></i>Regime Performance Breakdown
+          </h6>
+          <div class="table-responsive">
+            <table class="table table-dark table-hover table-sm mb-0">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th>Trending ↑</th>
+                  <th>Trending ↓</th>
+                  <th>Ranging</th>
+                  <th>High Vol</th>
+                  <th>Best Regime</th>
+                </tr>
+              </thead>
+              <tbody id="regime-perf-tbody">
+                <tr><td colspan="6" class="text-center text-muted py-2">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Risk Dashboard ────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <!-- VaR / CVaR gauges -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-speedometer me-2"></i>VaR / CVaR</h5>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-muted">Daily VaR (95%)</span>
+            <span id="var-95-pct" class="fw-semibold text-warning">—</span>
+          </div>
+          <div class="progress" style="height:8px;">
+            <div id="var-bar-95" class="progress-bar bg-warning" role="progressbar" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-muted">CVaR (95%)</span>
+            <span id="cvar-95-pct" class="fw-semibold text-danger">—</span>
+          </div>
+          <div class="progress" style="height:8px;">
+            <div id="cvar-bar-95" class="progress-bar bg-danger" role="progressbar" style="width:0%"></div>
+          </div>
+        </div>
+        <div>
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-muted">Margin Utilization</span>
+            <span id="margin-util-pct" class="fw-semibold">—</span>
+          </div>
+          <div class="progress" style="height:8px;">
+            <div id="margin-util-bar" class="progress-bar bg-info" role="progressbar" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="mt-3 small">
+          <div class="d-flex justify-content-between">
+            <span class="text-muted">Max Drawdown</span>
+            <span id="max-drawdown-val" class="fw-semibold text-danger">—</span>
+          </div>
+          <div class="d-flex justify-content-between mt-1">
+            <span class="text-muted">Current Drawdown</span>
+            <span id="current-drawdown-val" class="fw-semibold">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Liquidation distances -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-exclamation-octagon me-2"></i>Liquidation Distances</h5>
+      </div>
+      <div class="card-body p-2">
+        <div id="liquidation-table-wrapper" class="table-responsive">
+          <table class="table table-dark table-sm mb-0">
+            <thead><tr><th>Symbol</th><th class="text-end">Liq. Price</th><th class="text-end">Distance</th><th>Safety</th></tr></thead>
+            <tbody id="liquidation-tbody">
+              <tr><td colspan="4" class="text-center text-muted py-2">No positions</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profit Compounder status -->
+  <div class="col-12 col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Profit Compounder</h5>
+      </div>
+      <div class="card-body">
+        <div class="text-center mb-3">
+          <div class="display-6 fw-bold" id="compound-multiplier">1.00×</div>
+          <small class="text-muted">Current size multiplier</small>
+        </div>
+        <div class="small">
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted">Daily P&amp;L</span>
+            <span class="fw-semibold" id="compounder-daily-pnl">—</span>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span class="text-muted">Weekly P&amp;L</span>
+            <span class="fw-semibold" id="compounder-weekly-pnl">—</span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="text-muted">Extra Allocation</span>
+            <span class="fw-semibold text-info" id="compounder-extra-alloc">+0%</span>
+          </div>
+        </div>
+        <div class="mt-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-muted">Compound Progress</span>
+            <span id="compounder-progress-pct" class="small text-muted">0%</span>
+          </div>
+          <div class="progress" style="height:6px;">
+            <div id="compound-progress-bar" class="progress-bar bg-success" role="progressbar" style="width:0%"></div>
+          </div>
+          <div class="d-flex justify-content-between small text-muted mt-1">
+            <span>1.0× base</span><span>2.0× cap</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modals for Position Management ────────────────────────────────────── -->
+
+<!-- Modify Stop-Loss Modal -->
+<div class="modal fade" id="modifySLModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title"><i class="bi bi-shield-exclamation me-2"></i>Modify Stop-Loss</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sl-modal-symbol">
+        <div class="mb-3">
+          <label for="sl-modal-price" class="form-label">Stop-Loss Price (USDT)</label>
+          <input type="number" class="form-control bg-dark text-light border-secondary" id="sl-modal-price" step="0.01" placeholder="Enter stop-loss price">
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" onclick="submitModifySL()">Update Stop-Loss</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modify Take-Profit Modal -->
+<div class="modal fade" id="modifyTPModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title"><i class="bi bi-trophy me-2"></i>Modify Take-Profit</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="tp-modal-symbol">
+        <div class="mb-3">
+          <label for="tp-modal-price" class="form-label">Take-Profit Price (USDT)</label>
+          <input type="number" class="form-control bg-dark text-light border-secondary" id="tp-modal-price" step="0.01" placeholder="Enter take-profit price">
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" onclick="submitModifyTP()">Update Take-Profit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Adjust Leverage Modal -->
+<div class="modal fade" id="adjustLeverageModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title"><i class="bi bi-sliders me-2"></i>Adjust Leverage</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="leverage-modal-symbol">
+        <div class="mb-3">
+          <label for="leverage-modal-value" class="form-label d-flex justify-content-between">
+            <span>Leverage</span>
+            <span id="leverage-modal-display" class="fw-semibold text-info">1×</span>
+          </label>
+          <input type="range" class="form-range" id="leverage-modal-value" min="1" max="50" step="1" value="1" oninput="document.getElementById('leverage-modal-display').textContent = this.value + '×'">
+          <div class="d-flex justify-content-between small text-muted">
+            <span>1×</span><span>25×</span><span>50×</span>
+          </div>
+        </div>
+        <div class="alert alert-warning small" role="alert">
+          <i class="bi bi-exclamation-triangle me-2"></i>Changing leverage affects your margin and liquidation price. Use with caution.
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-info" onclick="submitAdjustLeverage()">Adjust Leverage</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── K-Line chart state ─────────────────────────────────────────────────────
+let _klineChart = null;
+let _klineSeries = null;
+let _klineLines = {};  // { entry: lineObj, sl: lineObj, tp: lineObj }
+let _klineSymbol = '';
+let _klineTf = '1m';
+let _klineUpdateInterval = null;
+
+// ── Initialise the TradingView Lightweight Charts candlestick chart ─────────
+(function initKlineOnLoad() {
+  const container = document.getElementById('kline-chart-container');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+
+  _klineChart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { color: '#0d1117' },
+      textColor:  '#8b949e',
+      fontSize: 12,
+    },
+    grid: {
+      vertLines: { color: '#21262d', style: 1 },
+      horzLines: { color: '#21262d', style: 1 },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: {
+        width: 1,
+        color: '#758696',
+        style: 3,
+      },
+      horzLine: {
+        width: 1,
+        color: '#758696',
+        style: 3,
+      },
+    },
+    rightPriceScale: {
+      borderColor: '#30363d',
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.2,
+      },
+    },
+    timeScale: {
+      borderColor: '#30363d',
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 10,
+      barSpacing: 10,
+      minBarSpacing: 5,
+    },
+    handleScroll:   { mouseWheel: true, pressedMouseMove: true, vertTouchDrag: true },
+    handleScale:    { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+    width:  container.offsetWidth,
+    height: container.offsetHeight || 380,
+  });
+
+  _klineSeries = _klineChart.addCandlestickSeries({
+    upColor:          '#26a69a',
+    downColor:        '#ef5350',
+    borderUpColor:    '#26a69a',
+    borderDownColor:  '#ef5350',
+    wickUpColor:      '#26a69a',
+    wickDownColor:    '#ef5350',
+    borderVisible: true,
+    wickVisible: true,
+  });
+
+  // Add volume indicator (optional)
+  const volumeSeries = _klineChart.addHistogramSeries({
+    color: '#26a69a',
+    priceFormat: {
+      type: 'volume',
+    },
+    priceScaleId: '',
+    scaleMargins: {
+      top: 0.8,
+      bottom: 0,
+    },
+  });
+
+  // Resize chart when container changes
+  const ro = new ResizeObserver(() => {
+    if (_klineChart && container.offsetWidth > 0) {
+      _klineChart.applyOptions({ width: container.offsetWidth, height: container.offsetHeight || 380 });
+    }
+  });
+  ro.observe(container);
+
+  // Load initial symbol from select
+  const sel = document.getElementById('kline-symbol-select');
+  _klineSymbol = sel ? sel.value : '';
+  if (_klineSymbol) {
+    _fetchAndLoadKlines(_klineSymbol, _klineTf);
+    // Start auto-refresh for real-time updates
+    _startKlineAutoRefresh();
+  }
+})();
+
+/** Start automatic chart data refresh for real-time updates. */
+function _startKlineAutoRefresh() {
+  if (_klineUpdateInterval) clearInterval(_klineUpdateInterval);
+
+  // Refresh every 1 second for real-time updates
+  _klineUpdateInterval = setInterval(() => {
+    if (_klineSymbol && _klineSeries) {
+      _fetchAndUpdateLatestKline(_klineSymbol, _klineTf);
+    }
+  }, 1000);
+}
+
+/** Stop automatic chart data refresh. */
+function _stopKlineAutoRefresh() {
+  if (_klineUpdateInterval) {
+    clearInterval(_klineUpdateInterval);
+    _klineUpdateInterval = null;
+  }
+}
+
+/** Fetch the latest candle and update the chart in real-time. */
+async function _fetchAndUpdateLatestKline(symbol, timeframe) {
+  if (!_klineSeries || !symbol) return;
+  const safeSym = symbol.replace(/:[A-Z]+$/, '').replace(/\//g, '_').toUpperCase();
+  const enc = encodeURIComponent(safeSym);
+  try {
+    const response = await fetch(`/api/market/${enc}/klines?timeframe=${timeframe}&limit=1`);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data && data.candles && data.candles.length > 0) {
+      const latestCandle = data.candles[0];
+      // Update the last candle on the chart
+      _klineSeries.update(latestCandle);
+    }
+  } catch (err) {
+    // Silently fail for real-time updates
+  }
+}
+
+/** Return the optimal candle limit for a given timeframe.
+ *  Reduced limits for snappy chart loading — the user can always scroll. */
+function _klineLimit(timeframe) {
+  const limits = {
+    '1m':  300,    // ~5 hours of 1-min candles (fast load)
+    '5m':  288,    // ~1 day of 5-min candles
+    '15m': 384,    // ~4 days of 15-min candles
+    '1h':  336,    // 14 days of 1-hour candles
+    '4h':  180,    // 30 days of 4-hour candles
+    '1d':  180,    // 6 months of daily candles
+  };
+  return limits[timeframe] || 200;
+}
+
+/** Fetch candles from the REST API and set them on the chart. */
+function _fetchAndLoadKlines(symbol, timeframe) {
+  if (!_klineSeries || !symbol) return;
+  // Normalize symbol to underscore format (BTC/USDT → BTC_USDT, BTC/USDT:USDT → BTC_USDT)
+  // This prevents %2F in URL paths which breaks axum route matching.
+  const safeSym = symbol.replace(/:[A-Z]+$/, '').replace(/\//g, '_').toUpperCase();
+  const limit = _klineLimit(timeframe);
+  const url = `/api/market/${encodeURIComponent(safeSym)}/klines?timeframe=${timeframe}&limit=${limit}`;
+  console.log('[kline] Loading', safeSym, timeframe, 'from', url);
+  // Clear stale data before loading new symbol to avoid rendering glitches
+  _klineSeries.setData([]);
+  fetch(url)
+    .then(r => {
+      if (!r.ok) {
+        console.error('[kline] HTTP error', r.status, 'for', safeSym);
+        return null;
+      }
+      return r.json();
+    })
+    .then(data => {
+      if (data && data.candles && data.candles.length) {
+        console.log('[kline] Loaded', data.candles.length, 'candles for', safeSym);
+        _klineSeries.setData(data.candles);
+        if (_klineChart) _klineChart.timeScale().fitContent();
+      } else {
+        console.warn('[kline] No candles returned for', safeSym, data);
+      }
+    })
+    .catch(err => {
+      console.error('[kline] Fetch error for', safeSym, err);
+    });
+}
+
+/** Called when the symbol selector changes. */
+function onKlineParamChange() {
+  const sel = document.getElementById('kline-symbol-select');
+  _klineSymbol = sel ? sel.value : '';
+  _fetchAndLoadKlines(_klineSymbol, _klineTf);
+  // Restart auto-refresh for the new symbol
+  _startKlineAutoRefresh();
+}
+
+/** Switch chart timeframe. */
+function setKlineTf(tf, btn) {
+  _klineTf = tf;
+  // Update active button styling
+  document.querySelectorAll('#kline-tf-group .btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  _fetchAndLoadKlines(_klineSymbol, _klineTf);
+  // Restart auto-refresh for the new timeframe
+  _startKlineAutoRefresh();
+}
+
+/**
+ * Draw (or update) horizontal price lines for a position's entry, SL, and TP.
+ * @param {Object} pos - Position dict with entry_price, stop_loss, take_profit, symbol.
+ */
+function drawPositionLines(pos) {
+  if (!_klineSeries || !pos || pos.symbol !== _klineSymbol) return;
+
+  // Remove old price lines (ignore errors if lines are already detached)
+  ['entry', 'sl', 'tp'].forEach(function(key) {
+    if (_klineLines[key]) {
+      try {
+        _klineSeries.removePriceLine(_klineLines[key]);
+      } catch (_) {
+        // Line may already be removed — safe to ignore
+      }
+      _klineLines[key] = null;
+    }
+  });
+
+  if (pos.entry_price && pos.entry_price > 0) {
+    _klineLines.entry = _klineSeries.createPriceLine({
+      price:     pos.entry_price,
+      color:     '#58a6ff',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title:     'Entry',
+    });
+  }
+  if (pos.stop_loss && pos.stop_loss > 0) {
+    _klineLines.sl = _klineSeries.createPriceLine({
+      price:     pos.stop_loss,
+      color:     '#f85149',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: true,
+      title:     'SL',
+    });
+  }
+  if (pos.take_profit && pos.take_profit > 0) {
+    _klineLines.tp = _klineSeries.createPriceLine({
+      price:     pos.take_profit,
+      color:     '#3fb950',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: true,
+      title:     'TP',
+    });
+  }
+}
+
+/** Handle a kline_update WebSocket message. */
+function _handleKlineUpdate(data) {
+  if (!_klineSeries) return;
+  if (data.symbol !== _klineSymbol || data.timeframe !== _klineTf) return;
+  const candles = data.candles;
+  if (!candles || !candles.length) return;
+  // Update the last candle (and optionally add new ones)
+  const last = candles[candles.length - 1];
+  if (last) {
+    _klineSeries.update(last);
+    // Update price display
+    const priceEl = document.getElementById('kline-price-display');
+    if (priceEl) {
+      const close = parseFloat(last.close || 0);
+      priceEl.textContent = '$' + close.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    }
+  }
+}
+
+// Hook into the global WebSocket handler to process kline_update messages
+(function patchHandleUpdate() {
+  const _orig = window._handleUpdate || (typeof _handleUpdate === 'function' ? _handleUpdate : null);
+  window._handleKlineUpdate = _handleKlineUpdate;
+
+  // Override _handleUpdate to also handle kline and position_update messages
+  const origOnMessage = _onWsMessage;
+  // Patch via event listener — intercept after main.js processes its messages
+  document.addEventListener('ws-kline', function(e) {
+    _handleKlineUpdate(e.detail);
+  });
+  document.addEventListener('ws-positions', function(e) {
+    const positions = e.detail;
+    if (positions && positions.length > 0) {
+      // Draw price lines for the first position that matches the chart symbol
+      const matching = positions.find(p => normalizeChartSymbol(p.symbol) === _klineSymbol);
+      if (matching) drawPositionLines(matching);
+      // Also sync symbol selector if no symbol yet
+      if (!_klineSymbol && positions[0]) {
+        _klineSymbol = normalizeChartSymbol(positions[0].symbol);
+        const sel = document.getElementById('kline-symbol-select');
+        if (sel) {
+          // Try to find the normalised symbol in existing options
+          const existing = Array.from(sel.options).find(o => o.value === _klineSymbol);
+          if (existing) {
+            sel.value = _klineSymbol;
+          }
+        }
+        _fetchAndLoadKlines(_klineSymbol, _klineTf);
+      }
+    }
+  });
+})();
+
+// ── Manual Trade Override — REMOVED (100% Autonomous Operation) ──────────
+// All manual trading functions have been eradicated. The bot operates
+// autonomously via the Alpha Oracle signal queue (Python → SHM → Rust).
+function togglePriceInput() { /* no-op: manual trading removed */ }
+function placeManualTrade() { alert('Manual trading has been permanently disabled. Bot operates autonomously.'); }
+
+// (Old placeManualTrade function body removed — see stub above)
+
+// ── Open orders count badge observer ─────────────────────────────────────────
+(function() {
+  const observer = new MutationObserver(function() {
+    const tbody = document.getElementById('open-orders-tbody');
+    const badge = document.getElementById('open-orders-count');
+    if (tbody && badge) {
+      const placeholder = tbody.querySelector('td[colspan]');
+      badge.textContent = placeholder ? '0' : tbody.querySelectorAll('tr').length;
+    }
+  });
+  const tbody = document.getElementById('open-orders-tbody');
+  if (tbody) observer.observe(tbody, { childList: true });
+})();
+
+window.addEventListener('positions-updated', function(e) {
+  const badge = document.getElementById('open-orders-count');
+  if (badge) {
+    const tbody = document.getElementById('open-orders-tbody');
+    if (tbody) {
+      const placeholder = tbody.querySelector('td[colspan]');
+      badge.textContent = placeholder ? '0' : tbody.querySelectorAll('tr').length;
+    }
+  }
+  // Forward positions to kline chart for price lines
+  if (e.detail) document.dispatchEvent(new CustomEvent('ws-positions', { detail: e.detail }));
+});
+
+// Update symbol selectors when positions change
+document.addEventListener('ws-positions', function(e) {
+  const positions = e.detail;
+  if (!positions || !positions.length) return;
+  ['kline-symbol-select'].forEach(function(id) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const currentVal = sel.value;
+    const existingSymbols = new Set(Array.from(sel.options).map(o => o.value));
+    positions.forEach(function(pos) {
+      // Normalise the symbol (strip :USDT suffix) before adding to the dropdown
+      // so that e.g. "ETH/USDT:USDT" from the exchange maps to the existing
+      // "ETH/USDT" option and does not create a duplicate entry.
+      const normSym = normalizeChartSymbol(pos.symbol);
+      if (normSym && !existingSymbols.has(normSym)) {
+        const opt = document.createElement('option');
+        opt.value = normSym;
+        opt.textContent = normSym;
+        sel.appendChild(opt);
+        existingSymbols.add(normSym);
+      }
+    });
+    // Restore previous selection or pick first valid symbol
+    const firstNorm = (positions[0] && positions[0].symbol)
+      ? (normalizeChartSymbol(positions[0].symbol) || '')
+      : '';
+    if (currentVal && existingSymbols.has(currentVal)) {
+      sel.value = currentVal;
+    } else if (firstNorm) {
+      sel.value = firstNorm;
+      if (id === 'kline-symbol-select') {
+        _klineSymbol = firstNorm;
+        _fetchAndLoadKlines(_klineSymbol, _klineTf);
+      }
+    }
+  });
+});
+
+// ── Market Overview ──────────────────────────────────────────────────────
+let _marketTickers = {};
+let _marketUpdateInterval = null;
+
+/**
+ * Fetch and display market overview data for all tradeable symbols.
+ */
+async function loadMarketOverview() {
+  try {
+    const res = await fetch('/api/market/tickers');
+    const data = await res.json();
+    if (data.success && data.tickers) {
+      _marketTickers = data.tickers;
+      renderMarketOverview();
+    }
+  } catch (err) {
+    console.error('Failed to load market overview:', err);
+  }
+}
+
+/**
+ * Render the market overview table.
+ */
+function renderMarketOverview() {
+  const tbody = document.getElementById('market-overview-tbody');
+  const badge = document.getElementById('market-symbols-count');
+  if (!tbody) return;
+
+  const symbols = Object.keys(_marketTickers).filter(s => !s.includes('XAU')).sort();
+  if (!symbols.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No market data available</td></tr>';
+    if (badge) badge.textContent = '0';
+    return;
+  }
+
+  if (badge) badge.textContent = symbols.length.toString();
+
+  tbody.innerHTML = symbols.map(sym => {
+    const ticker = _marketTickers[sym];
+    const last = parseFloat(ticker.last || 0);
+    const change24h = parseFloat(ticker.change_24h || 0);
+    const high = parseFloat(ticker.high || 0);
+    const low = parseFloat(ticker.low || 0);
+    const volume = parseFloat(ticker.volume || 0);
+    const changeClass = change24h >= 0 ? 'text-success' : 'text-danger';
+    const changeIcon = change24h >= 0 ? '▲' : '▼';
+
+    return `
+      <tr style="cursor: pointer;" onclick="selectSymbolForChart('${escapeHtml(sym)}')">
+        <td class="fw-semibold">${escapeHtml(sym)}</td>
+        <td>$${last.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 6})}</td>
+        <td class="${changeClass} fw-semibold">
+          ${changeIcon} ${Math.abs(change24h).toFixed(2)}%
+        </td>
+        <td class="text-muted small">$${high.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 6})}</td>
+        <td class="text-muted small">$${low.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 6})}</td>
+        <td class="text-muted small">${volume.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2})}</td>
+        <td>
+          <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); openTradeModal('${escapeHtml(sym)}', 'long')" title="Open long">
+              <i class="bi bi-arrow-up-circle"></i>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openTradeModal('${escapeHtml(sym)}', 'short')" title="Open short">
+              <i class="bi bi-arrow-down-circle"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/**
+ * Normalise a trading symbol by stripping the settlement-currency suffix
+ * that Gate.io appends to perpetual-swap symbols (e.g. "ETH/USDT:USDT"
+ * → "ETH/USDT").  If the dropdown already contains the base symbol the
+ * ":USDT" variant will map to the same option instead of creating a new one.
+ */
+function normalizeChartSymbol(symbol) {
+  if (!symbol) return symbol;
+  // Remove ":USDT", ":BTC", ":ETH" etc. settlement suffixes
+  let s = symbol.replace(/:[A-Z]+$/, '');
+  // Convert slash format (BTC/USDT) to underscore (BTC_USDT) for API compatibility
+  return s.replace(/\//g, '_');
+}
+
+/**
+ * Select a symbol for the chart display.
+ */
+function selectSymbolForChart(symbol) {
+  // Normalise the symbol so "ETH/USDT:USDT" maps to the existing "ETH/USDT" option
+  const normSymbol = normalizeChartSymbol(symbol);
+  _klineSymbol = normSymbol;
+  const sel = document.getElementById('kline-symbol-select');
+  if (sel) {
+    // Add the normalised symbol to the dropdown if it's not already there
+    const existingOption = Array.from(sel.options).find(o => o.value === normSymbol);
+    if (!existingOption) {
+      const opt = document.createElement('option');
+      opt.value = normSymbol;
+      opt.textContent = normSymbol;
+      sel.appendChild(opt);
+    }
+    sel.value = normSymbol;
+  }
+  // Update manual trade symbol selector too
+  const manualSel = document.getElementById('manual-trade-symbol');
+  if (manualSel) {
+    const existingOption = Array.from(manualSel.options).find(o => o.value === normSymbol);
+    if (!existingOption) {
+      const opt = document.createElement('option');
+      opt.value = normSymbol;
+      opt.textContent = normSymbol;
+      manualSel.appendChild(opt);
+    }
+    manualSel.value = normSymbol;
+  }
+  // Load the chart for this symbol
+  _fetchAndLoadKlines(normSymbol, _klineTf);
+  // Scroll to chart
+  document.getElementById('kline-row')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * Open a quick trade modal for the given symbol and side.
+ */
+function openTradeModal(symbol, side) {
+  // Update manual trade form
+  const symbolEl = document.getElementById('manual-trade-symbol');
+  if (symbolEl) {
+    // Ensure symbol is in dropdown
+    const existingOption = Array.from(symbolEl.options).find(o => o.value === symbol);
+    if (!existingOption) {
+      const opt = document.createElement('option');
+      opt.value = symbol;
+      opt.textContent = symbol;
+      symbolEl.appendChild(opt);
+    }
+    symbolEl.value = symbol;
+  }
+
+  // Scroll to manual trade panel
+  document.getElementById('kline-row')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Show a quick confirm dialog
+  const ticker = _marketTickers[symbol];
+  const price = ticker ? parseFloat(ticker.last || 0).toFixed(4) : '?';
+  const sideLabel = side === 'long' ? 'LONG' : 'SHORT';
+  const amountEl = document.getElementById('manual-trade-amount');
+  const leverageEl = document.getElementById('manual-trade-leverage');
+  const amount = amountEl ? parseFloat(amountEl.value) : 100;
+  const leverage = leverageEl ? parseInt(leverageEl.value) : 5;
+
+  const confirm = window.confirm(
+    `Quick ${sideLabel} Trade?\n\nSymbol: ${symbol}\nCurrent Price: $${price}\nAmount: $${amount} USDT\nLeverage: ${leverage}x\n\nThis will place a real market order.`
+  );
+
+  if (confirm) {
+    placeManualTrade(side);
+  }
+}
+
+// Load market overview on page load
+window.addEventListener('DOMContentLoaded', function() {
+  loadMarketOverview();
+  // Update every 3 seconds (fast because we only fetch 3 trading pairs, not 100+)
+  _marketUpdateInterval = setInterval(loadMarketOverview, 3000);
+});
+
+// Cleanup interval on page unload
+window.addEventListener('beforeunload', function() {
+  if (_marketUpdateInterval) clearInterval(_marketUpdateInterval);
+});
+
+// Listen for WebSocket ticker updates
+document.addEventListener('ws-tickers', function(e) {
+  const tickers = e.detail;
+  if (!tickers || typeof tickers !== 'object') return;
+
+  // Merge with existing tickers
+  Object.assign(_marketTickers, tickers);
+
+  // Re-render the table with updated data
+  renderMarketOverview();
+});
+
+// ── Position Management Functions ──────────────────────────────────────────
+
+/**
+ * Open modal to modify stop-loss for a position.
+ */
+function openModifySLModal(symbol, currentSL) {
+  const modal = new bootstrap.Modal(document.getElementById('modifySLModal'));
+  document.getElementById('sl-modal-symbol').value = symbol;
+  document.getElementById('sl-modal-price').value = currentSL || '';
+  modal.show();
+}
+
+/**
+ * Open modal to modify take-profit for a position.
+ */
+function openModifyTPModal(symbol, currentTP) {
+  const modal = new bootstrap.Modal(document.getElementById('modifyTPModal'));
+  document.getElementById('tp-modal-symbol').value = symbol;
+  document.getElementById('tp-modal-price').value = currentTP || '';
+  modal.show();
+}
+
+/**
+ * Open modal to adjust leverage for a position.
+ */
+function openAdjustLeverageModal(symbol, currentLeverage) {
+  const modal = new bootstrap.Modal(document.getElementById('adjustLeverageModal'));
+  document.getElementById('leverage-modal-symbol').value = symbol;
+  document.getElementById('leverage-modal-value').value = currentLeverage || 1;
+  document.getElementById('leverage-modal-display').textContent = (currentLeverage || 1) + '×';
+  modal.show();
+}
+
+/**
+ * Submit stop-loss modification.
+ */
+async function submitModifySL() {
+  const symbol = document.getElementById('sl-modal-symbol').value;
+  const price = parseFloat(document.getElementById('sl-modal-price').value);
+
+  if (!symbol || !price || price <= 0) {
+    showToast('Please enter a valid stop-loss price', 'warning');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/positions/${encodeURIComponent(symbol)}/stop-loss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stop_loss: price })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Stop-loss updated for ${symbol}`, 'success');
+      bootstrap.Modal.getInstance(document.getElementById('modifySLModal')).hide();
+      // Refresh page data
+      setTimeout(() => location.reload(), 1000);
+    } else {
+      showToast(`Failed to update SL: ${data.error || 'Unknown error'}`, 'danger');
+    }
+  } catch (err) {
+    showToast('Network error while updating stop-loss', 'danger');
+  }
+}
+
+/**
+ * Submit take-profit modification.
+ */
+async function submitModifyTP() {
+  const symbol = document.getElementById('tp-modal-symbol').value;
+  const price = parseFloat(document.getElementById('tp-modal-price').value);
+
+  if (!symbol || !price || price <= 0) {
+    showToast('Please enter a valid take-profit price', 'warning');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/positions/${encodeURIComponent(symbol)}/take-profit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ take_profit: price })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Take-profit updated for ${symbol}`, 'success');
+      bootstrap.Modal.getInstance(document.getElementById('modifyTPModal')).hide();
+      // Refresh page data
+      setTimeout(() => location.reload(), 1000);
+    } else {
+      showToast(`Failed to update TP: ${data.error || 'Unknown error'}`, 'danger');
+    }
+  } catch (err) {
+    showToast('Network error while updating take-profit', 'danger');
+  }
+}
+
+/**
+ * Submit leverage adjustment.
+ */
+async function submitAdjustLeverage() {
+  const symbol = document.getElementById('leverage-modal-symbol').value;
+  const leverage = parseInt(document.getElementById('leverage-modal-value').value);
+
+  if (!symbol || !leverage || leverage < 1) {
+    showToast('Please enter a valid leverage value', 'warning');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/positions/${encodeURIComponent(symbol)}/leverage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leverage: leverage })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Leverage adjusted to ${leverage}× for ${symbol}`, 'success');
+      bootstrap.Modal.getInstance(document.getElementById('adjustLeverageModal')).hide();
+      // Refresh page data
+      setTimeout(() => location.reload(), 1000);
+    } else {
+      showToast(`Failed to adjust leverage: ${data.error || 'Unknown error'}`, 'danger');
+    }
+  } catch (err) {
+    showToast('Network error while adjusting leverage', 'danger');
+  }
+}
+
+// ── New Widget Functions ───────────────────────────────────────────────────
+
+let _widgetSymbol = 'BTC/USDT';
+let _portfolioChart = null;
+
+/**
+ * Load order book for current symbol
+ */
+async function loadOrderbook(symbol = _widgetSymbol) {
+  try {
+    const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/orderbook`);
+    const data = await res.json();
+
+    if (!data.success || !data.bids || !data.asks) {
+      document.getElementById('orderbook-container').innerHTML = '<div class="text-center text-muted py-3">No orderbook data</div>';
+      return;
+    }
+
+    const bids = data.bids.slice(0, 10);
+    const asks = data.asks.slice(0, 10);
+
+    let html = '<div class="small">';
+
+    // Asks (reversed to show highest first)
+    asks.reverse().forEach(([price, amount]) => {
+      html += `<div class="d-flex justify-content-between py-1 border-bottom border-secondary">
+        <span class="text-danger">${parseFloat(price).toFixed(2)}</span>
+        <span class="text-muted">${parseFloat(amount).toFixed(4)}</span>
+      </div>`;
+    });
+
+    // Spread
+    const bestBid = bids[0] ? parseFloat(bids[0][0]) : 0;
+    const bestAsk = asks[0] ? parseFloat(asks[0][0]) : 0;
+    const spread = bestAsk - bestBid;
+    const spreadPct = bestBid > 0 ? (spread / bestBid * 100).toFixed(3) : 0;
+
+    html += `<div class="text-center py-2 bg-secondary bg-opacity-10 my-1">
+      <strong>Spread: ${spread.toFixed(2)} (${spreadPct}%)</strong>
+    </div>`;
+
+    // Bids
+    bids.forEach(([price, amount]) => {
+      html += `<div class="d-flex justify-content-between py-1 border-bottom border-secondary">
+        <span class="text-success">${parseFloat(price).toFixed(2)}</span>
+        <span class="text-muted">${parseFloat(amount).toFixed(4)}</span>
+      </div>`;
+    });
+
+    html += '</div>';
+    document.getElementById('orderbook-container').innerHTML = html;
+    document.getElementById('orderbook-symbol').textContent = symbol;
+  } catch (err) {
+    console.error('Failed to load orderbook:', err);
+  }
+}
+
+/**
+ * Load recent trades for current symbol
+ */
+async function loadRecentTrades(symbol = _widgetSymbol) {
+  try {
+    const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/recent-trades`);
+    const data = await res.json();
+
+    const tbody = document.getElementById('recent-trades-tbody');
+    if (!data.success || !data.trades || data.trades.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No trades</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.trades.slice(0, 20).map(trade => {
+      const side = (trade.side || '').toLowerCase();
+      const color = side === 'buy' ? 'text-success' : 'text-danger';
+      const time = trade.timestamp ? new Date(trade.timestamp).toLocaleTimeString() : '';
+
+      return `<tr>
+        <td class="${color}">${parseFloat(trade.price || 0).toFixed(2)}</td>
+        <td class="text-end">${parseFloat(trade.amount || 0).toFixed(4)}</td>
+        <td class="text-end small text-muted">${time}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('recent-trades-symbol').textContent = symbol;
+  } catch (err) {
+    console.error('Failed to load recent trades:', err);
+  }
+}
+
+/**
+ * Load funding rates for all pairs
+ */
+async function loadFundingRates() {
+  try {
+    const res = await fetch('/api/funding-rates');
+    const data = await res.json();
+
+    const tbody = document.getElementById('funding-rates-tbody');
+    if (!data.success || !data.funding_rates) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No rates available</td></tr>';
+      return;
+    }
+
+    const rates = Object.entries(data.funding_rates);
+    tbody.innerHTML = rates.map(([symbol, info]) => {
+      const ratePct = info.rate_pct || 0;
+      const color = ratePct < 0 ? 'text-danger' : ratePct > 0.05 ? 'text-warning' : 'text-muted';
+
+      return `<tr>
+        <td>${symbol}</td>
+        <td class="text-end ${color}">${ratePct.toFixed(4)}%</td>
+        <td class="text-end">${(info.annual_pct || 0).toFixed(2)}%</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load funding rates:', err);
+  }
+}
+
+/**
+ * Load risk metrics
+ */
+async function loadRiskMetrics() {
+  try {
+    const res = await fetch('/api/risk/metrics');
+    const data = await res.json();
+
+    if (data.success) {
+      document.getElementById('risk-total-exposure').textContent = '$' + (data.total_exposure || 0).toFixed(2);
+      document.getElementById('risk-exposure-pct').textContent = (data.exposure_pct || 0).toFixed(2) + '%';
+      document.getElementById('risk-margin-usage').textContent = (data.margin_usage_pct || 0).toFixed(2) + '%';
+      document.getElementById('risk-var-95').textContent = '$' + (data.var_95 || 0).toFixed(2);
+      document.getElementById('risk-max-drawdown').textContent = (data.max_drawdown_pct || 10).toFixed(1) + '%';
+    }
+  } catch (err) {
+    console.error('Failed to load risk metrics:', err);
+  }
+}
+
+/**
+ * Load portfolio allocation chart
+ */
+async function loadPortfolioAllocation() {
+  try {
+    const res = await fetch('/api/risk/metrics');
+    const data = await res.json();
+
+    if (!data.success || !data.symbol_exposure) {
+      return;
+    }
+
+    const symbols = Object.keys(data.symbol_exposure);
+    const exposures = symbols.map(sym => data.symbol_exposure[sym].exposure);
+    const colors = [
+      '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+      '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
+    ];
+
+    const ctx = document.getElementById('portfolioAllocationChart');
+    if (!ctx) return;
+
+    // Destroy previous chart if exists
+    if (_portfolioChart) {
+      _portfolioChart.destroy();
+    }
+
+    _portfolioChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: symbols,
+        datasets: [{
+          data: exposures,
+          backgroundColor: colors.slice(0, symbols.length),
+          borderColor: '#1a1d24',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#c9d1d9', font: { size: 12 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const label = context.label || '';
+                const value = context.parsed || 0;
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = total > 0 ? (value / total * 100).toFixed(1) : 0;
+                return `${label}: $${value.toFixed(2)} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Failed to load portfolio allocation:', err);
+  }
+}
+
+/**
+ * Load multi-timeframe analysis data
+ */
+async function loadMultiTimeframeData() {
+  const symbolEl = document.getElementById('mtf-symbol-select');
+  const symbol = symbolEl ? symbolEl.value : 'BTC/USDT';
+  const tbody = document.getElementById('mtf-tbody');
+
+  try {
+    const res = await fetch(`/api/market/${encodeURIComponent(symbol)}/multi-timeframe`);
+    const data = await res.json();
+
+    if (!data.success || !data.timeframes) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Failed to load data</td></tr>';
+      return;
+    }
+
+    const timeframes = data.timeframes;
+    const timeframeOrder = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
+    let totalAlignment = 0;
+    let trendScores = [];
+
+    tbody.innerHTML = timeframeOrder.map(tf => {
+      const tfData = timeframes[tf];
+      if (!tfData) return '';
+
+      // Determine trend direction based on indicators
+      const rsi = tfData.rsi || 50;
+      const macdSignal = tfData.macd_signal || 'neutral';
+      const emaSignal = tfData.ema_cross || 'neutral';
+      const volumeTrend = tfData.volume_trend || 'normal';
+
+      // Calculate trend
+      let trend = 'neutral';
+      let trendScore = 0;
+      if (rsi > 60 && macdSignal === 'bullish' && emaSignal === 'bullish') {
+        trend = 'bullish';
+        trendScore = 1;
+      } else if (rsi < 40 && macdSignal === 'bearish' && emaSignal === 'bearish') {
+        trend = 'bearish';
+        trendScore = -1;
+      }
+
+      trendScores.push(trendScore);
+
+      // Color coding
+      const trendColor = trend === 'bullish' ? 'text-success' : trend === 'bearish' ? 'text-danger' : 'text-muted';
+      const rsiColor = rsi > 70 ? 'text-danger' : rsi < 30 ? 'text-success' : 'text-muted';
+      const macdColor = macdSignal === 'bullish' ? 'text-success' : macdSignal === 'bearish' ? 'text-danger' : 'text-muted';
+      const emaColor = emaSignal === 'bullish' ? 'text-success' : emaSignal === 'bearish' ? 'text-danger' : 'text-muted';
+      const volumeColor = volumeTrend === 'increasing' ? 'text-info' : 'text-muted';
+
+      // Alignment score per timeframe (0-100)
+      const alignmentScore = tfData.alignment_score || 50;
+      totalAlignment += alignmentScore;
+
+      const scoreColor = alignmentScore >= 70 ? 'text-success' : alignmentScore <= 30 ? 'text-danger' : 'text-warning';
+
+      return `<tr>
+        <td class="fw-semibold">${tf.toUpperCase()}</td>
+        <td class="${trendColor}">
+          ${trend === 'bullish' ? '<i class="bi bi-arrow-up-circle-fill"></i>' : trend === 'bearish' ? '<i class="bi bi-arrow-down-circle-fill"></i>' : '<i class="bi bi-dash-circle"></i>'}
+          ${trend.toUpperCase()}
+        </td>
+        <td class="${rsiColor}">${rsi.toFixed(1)}</td>
+        <td class="${macdColor}">${macdSignal.toUpperCase()}</td>
+        <td class="${emaColor}">${emaSignal.toUpperCase()}</td>
+        <td class="${volumeColor}">${volumeTrend.toUpperCase()}</td>
+        <td class="${scoreColor} fw-semibold">${alignmentScore.toFixed(0)}%</td>
+      </tr>`;
+    }).join('');
+
+    // Calculate overall alignment
+    const overallAlignment = totalAlignment / timeframeOrder.length;
+    const scoreEl = document.getElementById('mtf-overall-score');
+    const badgeEl = document.getElementById('mtf-signal-badge');
+    const descEl = document.getElementById('mtf-signal-description');
+
+    if (scoreEl) {
+      const scoreColor = overallAlignment >= 70 ? 'text-success' : overallAlignment <= 30 ? 'text-danger' : 'text-warning';
+      scoreEl.className = `ms-2 fs-5 fw-bold ${scoreColor}`;
+      scoreEl.textContent = overallAlignment.toFixed(0) + '%';
+    }
+
+    // Determine overall signal
+    const avgTrendScore = trendScores.reduce((a, b) => a + b, 0) / trendScores.length;
+    let signal = 'NEUTRAL';
+    let badgeClass = 'bg-secondary';
+    let description = 'Mixed signals across timeframes';
+
+    if (overallAlignment >= 70) {
+      if (avgTrendScore > 0.5) {
+        signal = 'STRONG BULLISH';
+        badgeClass = 'bg-success';
+        description = 'Most timeframes aligned bullish - strong uptrend confirmation';
+      } else if (avgTrendScore < -0.5) {
+        signal = 'STRONG BEARISH';
+        badgeClass = 'bg-danger';
+        description = 'Most timeframes aligned bearish - strong downtrend confirmation';
+      }
+    } else if (overallAlignment >= 50) {
+      if (avgTrendScore > 0.3) {
+        signal = 'BULLISH';
+        badgeClass = 'bg-success bg-opacity-75';
+        description = 'Moderate bullish alignment - uptrend developing';
+      } else if (avgTrendScore < -0.3) {
+        signal = 'BEARISH';
+        badgeClass = 'bg-danger bg-opacity-75';
+        description = 'Moderate bearish alignment - downtrend developing';
+      }
+    }
+
+    if (badgeEl) {
+      badgeEl.className = `badge ${badgeClass}`;
+      badgeEl.textContent = signal;
+    }
+    if (descEl) {
+      descEl.textContent = description;
+    }
+
+  } catch (err) {
+    console.error('Failed to load multi-timeframe data:', err);
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Error loading data</td></tr>';
+  }
+}
+
+
+/**
+ * Load social sentiment analysis data
+ */
+let _fearGreedGauge = null;
+
+async function loadSocialSentiment() {
+  try {
+    const res = await fetch('/api/sentiment/social');
+    const data = await res.json();
+
+    if (!data.success) {
+      console.error('Failed to load sentiment data');
+      return;
+    }
+
+    // Update Fear & Greed Index
+    if (data.fear_greed) {
+      const fearGreed = data.fear_greed;
+      updateFearGreedGauge(fearGreed.value, fearGreed.classification);
+      document.getElementById('fear-greed-value').textContent = fearGreed.value;
+      document.getElementById('fear-greed-label').textContent = fearGreed.classification;
+      document.getElementById('fear-greed-desc').textContent = fearGreed.description || 'Market sentiment indicator';
+    }
+
+    // Update social media sentiment
+    if (data.social_sentiment) {
+      const social = data.social_sentiment;
+
+      // Bitcoin sentiment
+      if (social.bitcoin) {
+        updateSentimentBar('btc', social.bitcoin);
+      }
+
+      // Ethereum sentiment
+      if (social.ethereum) {
+        updateSentimentBar('eth', social.ethereum);
+      }
+
+      // Market sentiment
+      if (social.market) {
+        updateSentimentBar('market', social.market);
+      }
+    }
+
+    // Update trending topics
+    if (data.trending_topics) {
+      const list = document.getElementById('trending-topics-list');
+      if (data.trending_topics.length === 0) {
+        list.innerHTML = '<div class="list-group-item bg-dark border-secondary text-center text-muted small py-3">No trending topics</div>';
+      } else {
+        list.innerHTML = data.trending_topics.slice(0, 5).map((topic, idx) => {
+          const trendIcon = topic.trend === 'up' ? '<i class="bi bi-arrow-up-short text-success"></i>' :
+                            topic.trend === 'down' ? '<i class="bi bi-arrow-down-short text-danger"></i>' :
+                            '<i class="bi bi-dash text-muted"></i>';
+          return `
+            <div class="list-group-item list-group-item-action bg-dark border-secondary d-flex justify-content-between align-items-center">
+              <div>
+                <span class="badge bg-secondary me-2">${idx + 1}</span>
+                <span class="small fw-semibold">${escapeHtml(topic.name)}</span>
+              </div>
+              <div class="text-end">
+                <span class="small text-muted me-2">${topic.mentions.toLocaleString()}</span>
+                ${trendIcon}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+  } catch (err) {
+    console.error('Failed to load social sentiment:', err);
+  }
+}
+
+function updateFearGreedGauge(value, label) {
+  const canvas = document.getElementById('fearGreedGauge');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radius = 70;
+
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw background arc
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0.75 * Math.PI, 2.25 * Math.PI);
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = '#21262d';
+  ctx.stroke();
+
+  // Determine color based on value
+  let color = '#8b949e';
+  if (value < 25) color = '#ef5350'; // Extreme fear - red
+  else if (value < 45) color = '#ff9800'; // Fear - orange
+  else if (value < 55) color = '#ffc107'; // Neutral - yellow
+  else if (value < 75) color = '#8bc34a'; // Greed - light green
+  else color = '#4caf50'; // Extreme greed - green
+
+  // Draw value arc
+  const angle = 0.75 * Math.PI + (value / 100) * 1.5 * Math.PI;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0.75 * Math.PI, angle);
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // Draw needle
+  const needleAngle = 0.75 * Math.PI + (value / 100) * 1.5 * Math.PI;
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY);
+  const needleX = centerX + Math.cos(needleAngle) * (radius - 10);
+  const needleY = centerY + Math.sin(needleAngle) * (radius - 10);
+  ctx.lineTo(needleX, needleY);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Draw center dot
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+}
+
+function updateSentimentBar(prefix, sentimentData) {
+  const score = sentimentData.score || 50;
+  const volume = sentimentData.volume || 0;
+  const trend = sentimentData.trend || 'neutral';
+
+  // Determine color
+  let colorClass = 'bg-secondary';
+  let badgeClass = 'bg-secondary';
+  if (score >= 60) {
+    colorClass = 'bg-success';
+    badgeClass = 'bg-success';
+  } else if (score <= 40) {
+    colorClass = 'bg-danger';
+    badgeClass = 'bg-danger';
+  } else {
+    colorClass = 'bg-warning';
+    badgeClass = 'bg-warning';
+  }
+
+  // Update score badge
+  const scoreEl = document.getElementById(`${prefix}-sentiment-score`);
+  if (scoreEl) {
+    scoreEl.className = `badge ${badgeClass}`;
+    scoreEl.textContent = score.toFixed(0) + '/100';
+  }
+
+  // Update progress bar
+  const barEl = document.getElementById(`${prefix}-sentiment-bar`);
+  if (barEl) {
+    barEl.className = `progress-bar ${colorClass}`;
+    barEl.style.width = score + '%';
+  }
+
+  // Update volume
+  const volumeEl = document.getElementById(`${prefix}-sentiment-volume`);
+  if (volumeEl) {
+    volumeEl.textContent = volume.toLocaleString() + ' mentions';
+  }
+
+  // Update trend
+  const trendEl = document.getElementById(`${prefix}-sentiment-trend`);
+  if (trendEl) {
+    const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→';
+    const trendColor = trend === 'up' ? 'text-success' : trend === 'down' ? 'text-danger' : 'text-muted';
+    trendEl.className = `text-muted ${trendColor}`;
+    trendEl.textContent = trendIcon + ' ' + trend;
+  }
+}
+
+/**
+ * Load crypto news feed
+ */
+async function loadCryptoNews() {
+  try {
+    const res = await fetch('/api/news/crypto');
+    const data = await res.json();
+
+    const feedEl = document.getElementById('crypto-news-feed');
+    if (!data.success || !data.news || data.news.length === 0) {
+      feedEl.innerHTML = '<li class="list-group-item bg-dark border-secondary text-center text-muted py-3">No news available</li>';
+      return;
+    }
+
+    feedEl.innerHTML = data.news.map(article => {
+      const timeAgo = getTimeAgo(new Date(article.published_at));
+      const sourceColor = article.sentiment === 'positive' ? 'success' : article.sentiment === 'negative' ? 'danger' : 'info';
+
+      return `
+        <li class="list-group-item list-group-item-action bg-dark border-secondary">
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="flex-grow-1">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="badge bg-${sourceColor}">${escapeHtml(article.source)}</span>
+                ${article.sentiment ? `<span class="badge bg-secondary">${article.sentiment}</span>` : ''}
+              </div>
+              <h6 class="mb-1">
+                <a href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer" class="text-light text-decoration-none">
+                  ${escapeHtml(article.title)}
+                </a>
+              </h6>
+              <p class="mb-1 small text-muted">${escapeHtml(article.summary || '').substring(0, 150)}...</p>
+              <div class="d-flex gap-2 small text-muted">
+                <span><i class="bi bi-clock me-1"></i>${timeAgo}</span>
+                ${article.symbols ? article.symbols.map(s => `<span class="badge badge-sm bg-dark">${s}</span>`).join('') : ''}
+              </div>
+            </div>
+          </div>
+        </li>
+      `;
+    }).join('');
+
+  } catch (err) {
+    console.error('Failed to load crypto news:', err);
+  }
+}
+
+/**
+ * Load AI trade suggestions
+ */
+async function loadAITradeSuggestions() {
+  try {
+    const res = await fetch('/api/ai/trade-suggestions');
+    const data = await res.json();
+
+    const container = document.getElementById('ai-suggestions-container');
+    if (!data.success || !data.suggestions || data.suggestions.length === 0) {
+      container.innerHTML = '<div class="text-center text-muted py-3">No trade suggestions at this time</div>';
+      return;
+    }
+
+    container.innerHTML = data.suggestions.map(suggestion => {
+      const directionClass = suggestion.direction === 'long' ? 'success' : 'danger';
+      const directionIcon = suggestion.direction === 'long' ? 'arrow-up-circle' : 'arrow-down-circle';
+      const confidenceColor = suggestion.confidence >= 80 ? 'success' : suggestion.confidence >= 60 ? 'warning' : 'secondary';
+
+      return `
+        <div class="list-group-item bg-dark border-secondary">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div>
+              <h6 class="mb-1">
+                <i class="bi bi-${directionIcon} text-${directionClass} me-1"></i>
+                <span class="fw-bold">${escapeHtml(suggestion.symbol)}</span>
+                <span class="badge bg-${directionClass} ms-2">${suggestion.direction.toUpperCase()}</span>
+              </h6>
+              <p class="mb-1 small">${escapeHtml(suggestion.reasoning)}</p>
+            </div>
+            <div class="text-end">
+              <div class="badge bg-${confidenceColor}">${suggestion.confidence}% confidence</div>
+            </div>
+          </div>
+
+          <div class="row g-2 small">
+            <div class="col-6">
+              <div class="p-2 rounded" style="background:rgba(88,166,255,0.08);">
+                <div class="text-muted">Entry Price</div>
+                <div class="fw-semibold">$${suggestion.entry_price.toFixed(2)}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-2 rounded" style="background:rgba(88,166,255,0.08);">
+                <div class="text-muted">Target</div>
+                <div class="fw-semibold text-success">$${suggestion.target_price.toFixed(2)}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-2 rounded" style="background:rgba(88,166,255,0.08);">
+                <div class="text-muted">Stop Loss</div>
+                <div class="fw-semibold text-danger">$${suggestion.stop_loss.toFixed(2)}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-2 rounded" style="background:rgba(88,166,255,0.08);">
+                <div class="text-muted">Risk/Reward</div>
+                <div class="fw-semibold">${suggestion.risk_reward_ratio.toFixed(2)}:1</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-2 d-flex gap-2">
+            <button class="btn btn-sm btn-outline-${directionClass} flex-grow-1"
+                    onclick="executeSuggestion('${escapeHtml(suggestion.symbol)}', '${suggestion.direction}', ${suggestion.entry_price})">
+              <i class="bi bi-play-circle me-1"></i>Execute Trade
+            </button>
+            <button class="btn btn-sm btn-outline-secondary"
+                    onclick="dismissSuggestion('${suggestion.id}')">
+              Dismiss
+            </button>
+          </div>
+
+          <div class="mt-2">
+            <small class="text-muted">
+              <i class="bi bi-lightbulb me-1"></i>
+              <strong>Strategy:</strong> ${escapeHtml(suggestion.strategy)}
+            </small>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    console.error('Failed to load AI trade suggestions:', err);
+  }
+}
+
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return `${seconds}s ago`;
+}
+
+function executeSuggestion(symbol, direction, entryPrice) {
+  // Pre-fill manual trade form with suggestion
+  document.getElementById('manual-trade-symbol').value = symbol;
+  document.getElementById('manual-trade-price').value = entryPrice;
+
+  // Scroll to manual trade panel
+  document.getElementById('kline-row')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  showToast(`Ready to place ${direction} trade for ${symbol}`, 'info');
+}
+
+function dismissSuggestion(suggestionId) {
+  showToast('Suggestion dismissed', 'info');
+  loadAITradeSuggestions();
+}
+
+// Auto-load widgets on page load
+window.addEventListener('DOMContentLoaded', function() {
+  // Load all widgets initially
+  loadOrderbook();
+  loadRecentTrades();
+  loadFundingRates();
+  loadRiskMetrics();
+  loadPortfolioAllocation();
+  loadMultiTimeframeData();
+  loadSocialSentiment();
+  loadCryptoNews();
+  loadAITradeSuggestions();
+  refreshExecutionQuality();
+
+  // Refresh widgets every 10 seconds
+  setInterval(() => {
+    loadOrderbook();
+    loadRecentTrades();
+    loadFundingRates();
+    loadRiskMetrics();
+    loadPortfolioAllocation();
+    loadMultiTimeframeData();
+    }, 10000);
+
+  // Refresh sentiment, news, AI every 60 seconds (less frequently)
+  setInterval(() => {
+    loadSocialSentiment();
+    loadCryptoNews();
+    loadAITradeSuggestions();
+  }, 60000);
+
+  // Refresh execution quality every 10 seconds
+  setInterval(refreshExecutionQuality, 10000);
+});
+
+// ── Real-time position P&L (driven by positions_update WebSocket messages) ──
+
+/**
+ * Update the positions table from a positions_update WebSocket payload.
+ * @param {Array} positions - Array of position objects from the server.
+ */
+function updatePositionsTable(positions) {
+  const tbody = document.getElementById('positions-tbody');
+  if (!tbody) return;
+  if (!positions || !positions.length) {
+    tbody.innerHTML = '<tr><td colspan="15" class="text-center text-muted py-3">No active positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(pos => {
+    const pnlClass = (pos.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger';
+    const roeClass = (pos.roe_pct || 0) >= 0 ? 'text-success' : 'text-danger';
+    const side = (pos.side || '').toUpperCase();
+    const sideClass = side === 'LONG' ? 'success' : 'danger';
+    const sym = escapeHtml(pos.symbol || '');
+    const entry = parseFloat(pos.entry_price || 0);
+    const current = parseFloat(pos.current_price || 0);
+    const pnl = parseFloat(pos.unrealized_pnl || 0);
+    const roe = parseFloat(pos.roe_pct || 0);
+    const sl = pos.stop_loss ? '$' + parseFloat(pos.stop_loss).toFixed(4) : '—';
+    const tp = pos.take_profit ? '$' + parseFloat(pos.take_profit).toFixed(4) : '—';
+    return `<tr>
+      <td class="fw-semibold">${sym}</td>
+      <td><span class="badge bg-${sideClass}">${side}</span></td>
+      <td>${parseFloat(pos.amount || 0).toFixed(4)}</td>
+      <td>$${entry.toFixed(4)}</td>
+      <td>$${current.toFixed(4)}</td>
+      <td class="${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT</td>
+      <td class="${roeClass}">${roe >= 0 ? '+' : ''}${roe.toFixed(2)}%</td>
+      <td><span class="badge bg-info">${pos.leverage || 1}×</span></td>
+      <td>—</td><td>—</td><td>—</td>
+      <td class="small">${sl}</td>
+      <td class="small">${tp}</td>
+      <td class="small text-muted">—</td>
+      <td>—</td>
+    </tr>`;
+  }).join('');
+}
+
+/**
+ * Update the total unrealized P&L display from a positions_update payload.
+ * @param {Array} positions - Array of position objects from the server.
+ */
+function updateTotalPnL(positions) {
+  const totalPnl = (positions || []).reduce((sum, p) => sum + parseFloat(p.unrealized_pnl || 0), 0);
+  const pnlEl = document.getElementById('total-pnl');
+  if (pnlEl) {
+    pnlEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT';
+    pnlEl.className = 'fs-5 fw-bold ' + (totalPnl >= 0 ? 'text-success' : 'text-danger');
+  }
+}
+
+// Expose for WebSocket dispatcher in main.js
+window.updatePositionsTable = updatePositionsTable;
+window.updateTotalPnL = updateTotalPnL;
+
+// ── Execution Quality fetch ────────────────────────────────────────────────
+
+async function refreshExecutionQuality() {
+  try {
+    const resp = await fetch('/api/execution-quality');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.quality) {
+      const slippageEl = document.getElementById('avg-slippage');
+      if (slippageEl) slippageEl.textContent = ((data.quality.avg_slippage_pct || 0)).toFixed(3) + '%';
+      const fillEl = document.getElementById('fill-rate');
+      if (fillEl) fillEl.textContent = ((data.quality.fill_rate || 0)).toFixed(1) + '%';
+      const makerEl = document.getElementById('maker-rate');
+      if (makerEl) makerEl.textContent = ((data.quality.maker_rate || 0)).toFixed(1) + '%';
+    }
+    if (data.latency) {
+      const latEl = document.getElementById('avg-latency');
+      if (latEl) {
+        const avgMs = data.latency.avg_ms || (data.latency.total_latency && data.latency.total_latency.avg_ms) || 0;
+        latEl.textContent = parseFloat(avgMs).toFixed(0) + 'ms';
+      }
+    }
+  } catch (e) {
+    console.debug('Execution quality fetch error:', e);
+  }
+}
+
+// ── Equity Curve ────────────────────────────────────────────────────────────
+
+let _equityChart = null;
+let _equitySeries = null;
+let _equityPoints = [];
+
+/** Initialise the TradingView equity curve chart. */
+function initEquityChart() {
+  const container = document.getElementById('equity-curve-container');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+  if (_equityChart) { _equityChart.remove(); _equityChart = null; }
+  _equityChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 260,
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e' },
+    grid: { vertLines: { color: '#30363d' }, horzLines: { color: '#30363d' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+  });
+  _equitySeries = _equityChart.addAreaSeries({
+    topColor: 'rgba(38,166,65,0.3)',
+    bottomColor: 'rgba(38,166,65,0.0)',
+    lineColor: '#26a641',
+    lineWidth: 2,
+  });
+  window.addEventListener('resize', () => {
+    if (_equityChart) _equityChart.applyOptions({ width: container.clientWidth });
+  });
+}
+
+/**
+ * Add a new equity data point and update the chart.
+ * @param {number} equity - Current total equity in USDT.
+ */
+function pushEquityPoint(equity) {
+  const ts = Math.floor(Date.now() / 1000);
+  _equityPoints.push({ time: ts, value: parseFloat(equity) });
+  // Keep last 5000 points (~7h at 5s resolution or ~14h at 10s resolution)
+  if (_equityPoints.length > 5000) _equityPoints = _equityPoints.slice(-5000);
+  if (_equitySeries) _equitySeries.update({ time: ts, value: parseFloat(equity) });
+}
+
+/** Render equity curve from server history. */
+async function renderEquityCurve() {
+  try {
+    const range = document.getElementById('equity-timerange')?.value || '7d';
+    const resp = await fetch(`/api/equity-history?range=${range}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const points = (data.history || []).map(p => ({ time: Math.floor(new Date(p.ts).getTime() / 1000), value: parseFloat(p.equity) }));
+    if (_equitySeries && points.length > 0) {
+      _equitySeries.setData(points);
+      _equityChart.timeScale().fitContent();
+    }
+    // Update Sharpe / Sortino / Calmar
+    const m = data.metrics || {};
+    const setVal = (id, v, decimals=2) => { const el = document.getElementById(id); if (el) el.textContent = v != null ? parseFloat(v).toFixed(decimals) : '—'; };
+    setVal('sharpe-ratio-val', m.sharpe_ratio);
+    setVal('sortino-ratio-val', m.sortino_ratio);
+    setVal('calmar-ratio-val', m.calmar_ratio);
+  } catch (e) {
+    console.debug('Equity curve fetch error:', e);
+  }
+}
+
+// ── Strategy Performance Analytics ─────────────────────────────────────────
+
+/** Fetch and render strategy performance cards. */
+async function loadStrategyAnalytics() {
+  try {
+    const resp = await fetch('/api/strategy-performance');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const strategies = data.strategies || {};
+    const cardsEl = document.getElementById('strategy-perf-cards');
+    if (!cardsEl) return;
+
+    const entries = Object.entries(strategies);
+    if (entries.length === 0) {
+      cardsEl.innerHTML = '<div class="col-12 text-center text-muted py-3">No strategy data available yet.</div>';
+      return;
+    }
+
+    cardsEl.innerHTML = entries.map(([name, s]) => {
+      const wins = s.wins || 0;
+      const total = wins + (s.losses || 0);
+      const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : '—';
+      const pnl = parseFloat(s.pnl || 0);
+      const pnlClass = pnl >= 0 ? 'text-success' : 'text-danger';
+      const pf = s.profit_factor != null ? parseFloat(s.profit_factor).toFixed(2) : '—';
+      const sharpe = s.sharpe != null ? parseFloat(s.sharpe).toFixed(2) : '—';
+      return `<div class="col-6 col-md-4 col-xl-3">
+        <div class="card border-0 bg-dark h-100">
+          <div class="card-body p-2">
+            <div class="fw-semibold small mb-1 text-truncate">${escapeHtml(name)}</div>
+            <div class="row g-1 small">
+              <div class="col-6 text-muted">Win Rate</div>
+              <div class="col-6 text-end fw-semibold">${winRate}%</div>
+              <div class="col-6 text-muted">P&amp;L</div>
+              <div class="col-6 text-end fw-semibold ${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</div>
+              <div class="col-6 text-muted">Profit Factor</div>
+              <div class="col-6 text-end fw-semibold">${pf}</div>
+              <div class="col-6 text-muted">Sharpe</div>
+              <div class="col-6 text-end fw-semibold">${sharpe}</div>
+              <div class="col-6 text-muted">Trades</div>
+              <div class="col-6 text-end fw-semibold">${total}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Regime breakdown
+    const regimeTbody = document.getElementById('regime-perf-tbody');
+    if (regimeTbody && data.regime_performance) {
+      const regimes = data.regime_performance;
+      regimeTbody.innerHTML = Object.entries(regimes).map(([name, rm]) => {
+        const regimeKeys = ['trending_up', 'trending_down', 'ranging', 'high'];
+        const cells = regimeKeys.map(r => {
+          const wr = rm[r] ? `${(rm[r].win_rate * 100).toFixed(0)}%` : '—';
+          return `<td class="text-center small">${wr}</td>`;
+        }).join('');
+        const best = rm.best_regime ? escapeHtml(rm.best_regime) : '—';
+        return `<tr><td class="small fw-semibold">${escapeHtml(name)}</td>${cells}<td class="small text-info">${best}</td></tr>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.debug('Strategy analytics fetch error:', e);
+  }
+}
+
+// ── Risk Dashboard update ───────────────────────────────────────────────────
+
+/** Fetch and render risk dashboard metrics. */
+async function loadRiskDashboard() {
+  try {
+    const resp = await fetch('/api/risk-dashboard');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    const setBar = (id, pct, maxPct = 100) => {
+      const el = document.getElementById(id);
+      if (el) el.style.width = Math.min(100, (pct / maxPct) * 100).toFixed(1) + '%';
+    };
+    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+
+    const varPct = parseFloat(data.var_95_pct || 0);
+    const cvarPct = parseFloat(data.cvar_95_pct || 0);
+    const marginPct = parseFloat(data.margin_utilization_pct || 0);
+    const maxDd = parseFloat(data.max_drawdown_pct || 0);
+    const curDd = parseFloat(data.current_drawdown_pct || 0);
+
+    setText('var-95-pct', varPct.toFixed(2) + '%');
+    setText('cvar-95-pct', cvarPct.toFixed(2) + '%');
+    setText('margin-util-pct', marginPct.toFixed(1) + '%');
+    setText('max-drawdown-val', '-' + maxDd.toFixed(2) + '%');
+    setText('current-drawdown-val', '-' + curDd.toFixed(2) + '%');
+    setBar('var-bar-95', varPct, 10);    // scale: 10% fills bar to 100% (practical VaR cap)
+    setBar('cvar-bar-95', cvarPct, 15); // scale: 15% fills bar to 100%
+    setBar('margin-util-bar', marginPct, 100);
+
+    // Liquidation table
+    const liqTbody = document.getElementById('liquidation-tbody');
+    if (liqTbody && data.positions) {
+      liqTbody.innerHTML = data.positions.map(p => {
+        const dist = parseFloat(p.liquidation_distance_pct || 0);
+        const safeClass = dist > 50 ? 'success' : dist > 20 ? 'warning' : 'danger';
+        return `<tr>
+          <td class="small fw-semibold">${escapeHtml(p.symbol || '')}</td>
+          <td class="text-end small">${p.liquidation_price ? '$' + parseFloat(p.liquidation_price).toFixed(2) : '—'}</td>
+          <td class="text-end small">${dist.toFixed(1)}%</td>
+          <td><span class="badge bg-${safeClass}">${dist > 50 ? 'Safe' : dist > 20 ? 'Warn' : 'Risk'}</span></td>
+        </tr>`;
+      }).join('');
+    } else if (liqTbody) {
+      liqTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-2">No positions</td></tr>';
+    }
+
+    // Profit compounder
+    const cm = data.compound_multiplier != null ? parseFloat(data.compound_multiplier) : null;
+    if (cm != null) {
+      setText('compound-multiplier', cm.toFixed(2) + '×');
+      const pct = ((cm - 1.0) / 1.0) * 100;
+      setBar('compound-progress-bar', pct, 100);
+      setText('compounder-progress-pct', pct.toFixed(0) + '%');
+    }
+    const dailyPnl = parseFloat(data.daily_pnl_pct || 0);
+    const weeklyPnl = parseFloat(data.weekly_pnl_pct || 0);
+    const extraAlloc = parseFloat(data.extra_allocation_pct || 0);
+    const pnlFmt = (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+    const pnlClass = (v) => v >= 0 ? 'text-success' : 'text-danger';
+    const dailyEl = document.getElementById('compounder-daily-pnl');
+    if (dailyEl) { dailyEl.textContent = pnlFmt(dailyPnl); dailyEl.className = 'fw-semibold ' + pnlClass(dailyPnl); }
+    const weeklyEl = document.getElementById('compounder-weekly-pnl');
+    if (weeklyEl) { weeklyEl.textContent = pnlFmt(weeklyPnl); weeklyEl.className = 'fw-semibold ' + pnlClass(weeklyPnl); }
+    setText('compounder-extra-alloc', '+' + extraAlloc.toFixed(1) + '%');
+  } catch (e) {
+    console.debug('Risk dashboard fetch error:', e);
+  }
+}
+
+// ── Toast notifications for trade events ───────────────────────────────────
+
+/**
+ * Display a Bootstrap toast notification.
+ * @param {string} title - Toast title.
+ * @param {string} message - Toast body text.
+ * @param {'success'||'danger'||'warning'||'info'} type - Background colour class suffix.
+ */
+function showToast(title, message, type = 'info') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'position-fixed bottom-0 end-0 p-3';
+    container.style.zIndex = '9999';
+    document.body.appendChild(container);
+  }
+  const toastId = 'toast-' + Date.now();
+  const html = `<div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body"><strong>${escapeHtml(title)}</strong><br>${escapeHtml(message)}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>`;
+  container.insertAdjacentHTML('beforeend', html);
+  const toastEl = document.getElementById(toastId);
+  if (toastEl && window.bootstrap) {
+    const bsToast = new bootstrap.Toast(toastEl, { delay: 4000 });
+    bsToast.show();
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+  }
+}
+
+// ── Init hooks ─────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  initEquityChart();
+  renderEquityCurve();
+  loadStrategyAnalytics();
+  loadRiskDashboard();
+  // Refresh periodically
+  setInterval(renderEquityCurve, 30000);
+  setInterval(loadStrategyAnalytics, 60000);
+  setInterval(loadRiskDashboard, 10000);
+});
+
+// Push equity point when bot status updates arrive
+const _origUpdateBotStatus = typeof updateBotStatus === 'function' ? updateBotStatus : null;
+window._pushEquityFromStatus = function(data) {
+  if (data && data.total_equity != null) pushEquityPoint(data.total_equity);
+};
+
+</script>
+{% endblock %}

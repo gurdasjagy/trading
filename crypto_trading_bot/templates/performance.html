@@ -1,0 +1,537 @@
+{% extends "base.html" %}
+
+{% block title %}Performance{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-graph-up-arrow me-2"></i>Bot Performance</h2>
+  <div class="d-flex gap-2 align-items-center">
+    <span class="text-muted small" id="perf-last-updated"></span>
+    <div class="btn-group" role="group" id="time-range-selector">
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadPerformanceData('7d')">7D</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary active" onclick="loadPerformanceData('30d')">30D</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadPerformanceData('90d')">90D</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadPerformanceData('1y')">1Y</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadPerformanceData('all')">ALL</button>
+    </div>
+    <button class="btn btn-sm btn-outline-success" id="btn-refresh-perf" onclick="refreshPerformanceMetrics()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+    <button class="btn btn-sm btn-primary" onclick="exportPerformanceData()">
+      <i class="bi bi-download me-1"></i>Export CSV
+    </button>
+  </div>
+</div>
+
+<!-- ── Summary KPI cards ────────────────────────────────────────────── -->
+<div class="row g-3 mb-4" id="perf-kpi-row">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 text-center py-3">
+      <div class="text-muted small mb-1">Total Return</div>
+      <div class="h4 fw-bold pnl-value" id="kpi-total-return">
+        {{ metrics.total_return_pct | default(value=0) | round(precision=2) }}%
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 text-center py-3">
+      <div class="text-muted small mb-1">Total P&amp;L</div>
+      <div class="h4 fw-bold pnl-value" id="kpi-total-pnl">
+        ${{ metrics.total_pnl | default(value=0) | round(precision=2) }}
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 text-center py-3">
+      <div class="text-muted small mb-1">Win Rate</div>
+      <div class="h4 fw-bold" id="kpi-win-rate">
+        {{ (metrics.win_rate | default(value=0) | round(precision=1)) }}%
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 text-center py-3">
+      <div class="text-muted small mb-1">Total Trades</div>
+      <div class="h4 fw-bold" id="kpi-total-trades">{{ metrics.total_trades | default(value=0) }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Key metrics + equity curve ───────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-xl-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Key Metrics</h5>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-dark mb-0" id="perf-metrics-table">
+          <tbody>
+            <tr>
+              <td class="text-muted">Sharpe Ratio</td>
+              <td class="fw-semibold text-end" id="m-sharpe">{{ metrics.sharpe_ratio | default(value=0) | round(precision=2) }}</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Sortino Ratio</td>
+              <td class="fw-semibold text-end" id="m-sortino">{{ metrics.sortino_ratio | default(value=0) | round(precision=2) }}</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Max Drawdown</td>
+              <td class="fw-semibold text-end text-danger" id="m-maxdd">{{ metrics.max_drawdown_pct | default(value=0) | round(precision=2) }}%</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Calmar Ratio</td>
+              <td class="fw-semibold text-end" id="m-calmar">{{ metrics.calmar_ratio | default(value=0) | round(precision=2) }}</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Profit Factor</td>
+              <td class="fw-semibold text-end" id="m-pf">{{ metrics.profit_factor | default(value=0) | round(precision=2) }}</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Expectancy / Trade</td>
+              <td class="fw-semibold text-end pnl-value" id="m-expectancy">
+                ${{ metrics.expectancy | default(value=0) | round(precision=4) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Recovery Factor</td>
+              <td class="fw-semibold text-end" id="m-recovery">{{ metrics.recovery_factor | default(value=0) | round(precision=2) }}</td>
+            </tr>
+            <tr>
+              <td class="text-muted">Avg Win</td>
+              <td class="fw-semibold text-end text-success" id="m-avg-win">
+                ${{ metrics.avg_win | default(value=0) | round(precision=4) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Avg Loss</td>
+              <td class="fw-semibold text-end text-danger" id="m-avg-loss">
+                ${{ metrics.avg_loss | default(value=0) | round(precision=4) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Best Trade</td>
+              <td class="fw-semibold text-end text-success" id="m-best">
+                ${{ metrics.best_trade | default(value=0) | round(precision=4) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Worst Trade</td>
+              <td class="fw-semibold text-end text-danger" id="m-worst">
+                ${{ metrics.worst_trade | default(value=0) | round(precision=4) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Avg Trade Duration</td>
+              <td class="fw-semibold text-end" id="m-avg-dur">
+                {{ metrics.avg_trade_duration_mins | default(value=0) | round(precision=0) }}m
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Max Win Streak</td>
+              <td class="fw-semibold text-end text-success" id="m-max-wins">
+                {{ metrics.max_consecutive_wins | default(value=0) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Max Loss Streak</td>
+              <td class="fw-semibold text-end text-danger" id="m-max-losses">
+                {{ metrics.max_consecutive_losses | default(value=0) }}
+              </td>
+            </tr>
+            <tr>
+              <td class="text-muted">Current Streak</td>
+              <td class="fw-semibold text-end" id="m-cur-streak">
+                {% set s = metrics.current_streak | default(value=0) %}
+                {% if s > 0 %}<span class="text-success">+{{ s }} wins</span>
+                {% elif s < 0 %}<span class="text-danger">{{ s }} losses</span>
+                {% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Equity curve with drawdown overlay ───────────────────────── -->
+  <div class="col-12 col-xl-8">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Equity Curve &amp; Drawdown</h5>
+      </div>
+      <div class="card-body">
+        <canvas id="equityChart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Daily P&L bar chart ───────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Daily P&amp;L</h5>
+      </div>
+      <div class="card-body">
+        <canvas id="dailyPnlChart" height="120"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Per-pair / per-strategy P&L ─────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-6">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-currency-exchange me-2"></i>P&amp;L by Pair</h5>
+      </div>
+      <div class="card-body p-0" id="pair-pnl-container">
+        {% if pair_pnl %}
+          <table class="table table-dark mb-0">
+            <thead><tr><th>Pair</th><th class="text-end">P&amp;L (USDT)</th><th class="text-end">% of Total</th></tr></thead>
+            <tbody id="pair-pnl-tbody">
+              {% for symbol, pnl in pair_pnl %}
+              <tr>
+                <td class="fw-semibold">{{ symbol }}</td>
+                <td class="text-end pnl-value {% if pnl > 0 %}text-success{% elif pnl < 0 %}text-danger{% endif %}">
+                  {{ pnl | round(precision=2) }}
+                </td>
+                <td class="text-end text-muted small">—</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="text-center text-muted py-3" id="pair-pnl-empty">No trade data available</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-6">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>P&amp;L by Strategy</h5>
+      </div>
+      <div class="card-body p-0" id="strategy-pnl-container">
+        {% if strategy_pnl %}
+          <table class="table table-dark mb-0">
+            <thead><tr><th>Strategy</th><th class="text-end">P&amp;L (USDT)</th><th class="text-end">% of Total</th></tr></thead>
+            <tbody id="strategy-pnl-tbody">
+              {% for strategy, pnl in strategy_pnl %}
+              <tr>
+                <td class="fw-semibold">{{ strategy }}</td>
+                <td class="text-end pnl-value {% if pnl > 0 %}text-success{% elif pnl < 0 %}text-danger{% endif %}">
+                  {{ pnl | round(precision=2) }}
+                </td>
+                <td class="text-end text-muted small">—</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="text-center text-muted py-3" id="strategy-pnl-empty">No trade data available</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Win rate by hour + trade distribution ────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Win Rate by Hour (UTC)</h5>
+      </div>
+      <div class="card-body">
+        <canvas id="winRateByHourChart" height="160"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Strategy Performance Comparison</h5>
+      </div>
+      <div class="card-body">
+        <canvas id="strategyCompareChart" height="160"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Monthly returns heatmap ───────────────────────────────────────── -->
+<div class="row g-3">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-grid-3x3 me-2"></i>Monthly Returns</h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-bordered mb-0">
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th>
+                <th>May</th><th>Jun</th><th>Jul</th><th>Aug</th>
+                <th>Sep</th><th>Oct</th><th>Nov</th><th>Dec</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if monthly_returns %}
+                {% for row in monthly_returns %}
+                <tr>
+                  <td class="fw-semibold">{{ row.year }}</td>
+                  {% for val in row.months %}
+                    <td class="text-center
+                      {% if val and val > 0 %}text-success
+                      {% elif val and val < 0 %}text-danger
+                      {% else %}text-muted{% endif %}">
+                      {% if val %}{{ val | round(precision=1) }}%{% else %}—{% endif %}
+                    </td>
+                  {% endfor %}
+                  <td class="fw-semibold pnl-value">
+                    {% if row.total %}{{ row.total | round(precision=1) }}%{% else %}0.0%{% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="14" class="text-center text-muted py-3">No monthly return data available</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  'use strict';
+
+  let currentRange = '30d';
+  let _perfRefreshTimer = null;
+  const PERF_REFRESH_INTERVAL_MS = 30000;  // Auto-refresh metrics every 30 s
+
+  // ── Chart initialisation from server-side data ──────────────────────
+  const equityLabels  = {{ equity_labels   | json_encode() | default(value="[]") }};
+  const equityData    = {{ equity_data     | json_encode() | default(value="[]") }};
+  const drawdownData  = {{ drawdown_data   | json_encode() | default(value="[]") }};
+  const pnlLabels     = {{ pnl_labels      | json_encode() | default(value="[]") }};
+  const pnlData       = {{ pnl_data        | json_encode() | default(value="[]") }};
+  const winRateByHour = {{ win_rate_by_hour | json_encode() | default(value="{}") }};
+  const strategyPnl   = {{ strategy_pnl    | json_encode() | default(value="{}") }};
+
+  if (equityLabels.length) {
+    initEquityDrawdownChart('equityChart', equityLabels, equityData, drawdownData);
+  }
+  if (pnlLabels.length) {
+    initDailyPnlChart('dailyPnlChart', pnlLabels, pnlData);
+  }
+
+  // Win rate by hour chart
+  const hourLabels = Array.from({length: 24}, (_, i) => i + ':00');
+  const hourData   = hourLabels.map((_, i) => {
+    // Backend may return integer keys (Python) which become strings in JSON
+    return Number(winRateByHour[i] ?? winRateByHour[String(i)] ?? 0);
+  });
+  if (hourData.some(v => v > 0)) {
+    initWinRateByHourChart('winRateByHourChart', hourLabels, hourData);
+  }
+
+  // Strategy comparison chart (bar chart of P&L per strategy)
+  _renderStrategyCompareChart(strategyPnl);
+
+  function _renderStrategyCompareChart(spnl) {
+    const ctx = document.getElementById('strategyCompareChart');
+    if (!ctx || !spnl || !Object.keys(spnl).length) return;
+    const labels = Object.keys(spnl);
+    const values = labels.map(k => spnl[k]);
+    const colors = values.map(v => v >= 0 ? 'rgba(25, 200, 100, 0.75)' : 'rgba(220, 60, 60, 0.75)');
+    // Destroy old chart if it exists
+    if (window._strategyCompareChart) window._strategyCompareChart.destroy();
+    window._strategyCompareChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'P&L (USDT)',
+          data: values,
+          backgroundColor: colors,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => `$${c.parsed.y.toFixed(4)}` } }
+        },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { color: '#333' } },
+          y: { ticks: { color: '#aaa' }, grid: { color: '#333' } }
+        }
+      }
+    });
+  }
+
+  // ── Live metrics refresh ─────────────────────────────────────────────
+
+  async function refreshPerformanceMetrics() {
+    try {
+      const btn = document.getElementById('btn-refresh-perf');
+      if (btn) { btn.disabled = true; }
+      const res = await fetch('/api/performance');
+      if (!res.ok) return;
+      const data = await res.json();
+      _applyMetrics(data);
+      const el = document.getElementById('perf-last-updated');
+      if (el) el.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+      console.warn('Perf refresh error:', err);
+    } finally {
+      const btn = document.getElementById('btn-refresh-perf');
+      if (btn) { btn.disabled = false; }
+    }
+  }
+
+  function _applyMetrics(m) {
+    const fmt2 = v => parseFloat(v || 0).toFixed(2);
+    const fmt4 = v => parseFloat(v || 0).toFixed(4);
+    const pnlCls = v => parseFloat(v || 0) >= 0 ? 'text-success' : 'text-danger';
+
+    // KPI row
+    _setTextPnl('kpi-total-return', (parseFloat(m.total_return_pct || 0) >= 0 ? '+' : '') + fmt2(m.total_return_pct) + '%');
+    _setTextPnl('kpi-total-pnl', '$' + fmt2(m.total_pnl));
+    _setText('kpi-win-rate', fmt2(m.win_rate) + '%');
+    _setText('kpi-total-trades', m.total_trades ?? '—');
+
+    // Metric table
+    _setText('m-sharpe', fmt2(m.sharpe_ratio));
+    _setText('m-sortino', fmt2(m.sortino_ratio));
+    _setText('m-maxdd', fmt2(m.max_drawdown_pct) + '%');
+    _setText('m-calmar', fmt2(m.calmar_ratio));
+    _setText('m-pf', fmt2(m.profit_factor));
+    _setTextPnl('m-expectancy', '$' + fmt4(m.expectancy));
+    _setText('m-recovery', fmt2(m.recovery_factor));
+    _setTextEl('m-avg-win', '$' + fmt4(m.avg_win), 'text-success');
+    _setTextEl('m-avg-loss', '$' + fmt4(m.avg_loss), 'text-danger');
+    _setTextEl('m-best', '$' + fmt4(m.best_trade), 'text-success');
+    _setTextEl('m-worst', '$' + fmt4(m.worst_trade), 'text-danger');
+    _setText('m-avg-dur', Math.round(parseFloat(m.avg_trade_duration_mins || 0)) + 'm');
+    _setTextEl('m-max-wins', m.max_consecutive_wins ?? 0, 'text-success');
+    _setTextEl('m-max-losses', m.max_consecutive_losses ?? 0, 'text-danger');
+
+    // Streak badge
+    const streakEl = document.getElementById('m-cur-streak');
+    if (streakEl) {
+      const s = parseInt(m.current_streak || 0);
+      if (s > 0) streakEl.innerHTML = `<span class="text-success">+${s} wins</span>`;
+      else if (s < 0) streakEl.innerHTML = `<span class="text-danger">${Math.abs(s)} losses</span>`;
+      else streakEl.innerHTML = '<span class="text-muted">—</span>';
+    }
+
+    // Strategy comparison chart
+    if (m.strategy_pnl) _renderStrategyCompareChart(m.strategy_pnl);
+  }
+
+  function _setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+
+  function _setTextEl(id, val, cls) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = val; el.className = 'fw-semibold text-end ' + cls; }
+  }
+
+  function _setTextPnl(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val;
+    // Remove non-numeric chars except leading minus sign and decimal point
+    const num = parseFloat(val) || 0;
+    el.classList.remove('text-success', 'text-danger', 'text-muted');
+    el.classList.add(num >= 0 ? 'text-success' : 'text-danger');
+  }
+
+  // ── Time range selector ──────────────────────────────────────────────
+
+  async function loadPerformanceData(range) {
+    try {
+      currentRange = range;
+      document.querySelectorAll('#time-range-selector button').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      event.target.classList.add('active');
+
+      const res = await fetch(`/api/performance/charts?range=${range}`);
+      const data = await res.json();
+
+      if (data.success) {
+        if (data.dates && data.balance) {
+          initEquityDrawdownChart('equityChart', data.dates, data.balance,
+            data.dates.map(() => 0));
+        }
+        if (data.dates && data.pnl) {
+          initDailyPnlChart('dailyPnlChart', data.dates, data.pnl);
+        }
+        showToast(`Loaded ${range} performance data`, 'success');
+      } else {
+        showToast('Failed to load performance data: ' + (data.error || 'Unknown error'), 'danger');
+      }
+    } catch (err) {
+      console.error('Failed to load performance data:', err);
+      showToast('Failed to load performance data', 'danger');
+    }
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────
+
+  async function exportPerformanceData() {
+    try {
+      const res = await fetch(`/api/performance/export?range=${currentRange}`);
+      if (!res.ok) { showToast('Export failed', 'danger'); return; }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `performance_${currentRange}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      showToast('Performance data exported', 'success');
+    } catch (err) {
+      console.error('Export failed:', err);
+      showToast('Export failed', 'danger');
+    }
+  }
+
+  // ── Auto-refresh ─────────────────────────────────────────────────────
+
+  function startPerfAutoRefresh() {
+    if (_perfRefreshTimer) return;
+    _perfRefreshTimer = setInterval(refreshPerformanceMetrics, PERF_REFRESH_INTERVAL_MS);
+    // Initial refresh on page load
+    refreshPerformanceMetrics();
+  }
+
+  // Also refresh when a WS position_update or update arrives
+  window.addEventListener('positions-updated', () => {
+    refreshPerformanceMetrics();
+  });
+
+  document.addEventListener('DOMContentLoaded', startPerfAutoRefresh);
+</script>
+{% endblock %}

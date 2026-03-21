@@ -1,0 +1,269 @@
+ rust-engine-1  | [dotenv] Loaded credentials from DOTENV_PATH=/app/.env
+ rust-engine-1  | 2026-03-19T10:38:44.811113Z  INFO trading_engine: Trading engine v0.4.0 starting (Institutional Refactor)
+ rust-engine-1  | 2026-03-19T10:38:44.811821Z  INFO trading_engine: System: 4 CPU cores detected
+wrust-engine-1  | 2026-03-19T10:38:44.812136Z  INFO trading_engine: Loaded config from
+/etc/trading/engine_config.toml
+w
+ rust-engine-1  | 2026-03-19T10:38:44.812180Z  INFO trading_engine: THREAD_TOPOLOGY=auto — auto-detecting optimal layout for 4 coresaiting
+ rust-engine-1  | 2026-03-19T10:38:44.812190Z  INFO trading_engine: Thread topology validated: ws_gateio=1, book=1, strategy=2, exec=2, telemetry=3, micro=[3]
+wrust-engine-1  | 2026-03-19T10:38:44.812202Z  INFO trading_engine: Config loaded: 1 exchanges, 3 symbols
+wrust-engine-1  | 2026-03-19T10:38:44.812211Z  INFO trading_engine: Symbol registry: 3
+symbols
+wrust-engine-1  | 2026-03-19T10:38:44.812380Z  INFO trading_engine: Allocated FlatOrderBook for BTC_USDT (ID: 1)
+wrust-engine-1  | 2026-03-19T10:38:44.812556Z  INFO trading_engine: Allocated FlatOrderBook for ETH_USDT (ID: 2)
+wrust-engine-1  | 2026-03-19T10:38:44.812692Z  INFO trading_engine: Allocated FlatOrderBook for XAUT_USDT (ID: 3)
+wrust-engine-1  | [config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY
+wrust-engine-1  | [config] Gate.io credentials loaded: key=172d...43a7 (32chars), secret=***64chars
+wrust-engine-1  | 2026-03-19T10:38:44.819421Z  INFO trading_engine: SPSC ring buffers allocated: ws_to_book=0KB, book_to_strategy=0KB, strategy_to_exec=0KB
+wrust-engine-1  | 2026-03-19T10:38:44.819494Z  INFO trading_engine: 🛡️ Circuit breaker initialized and armed
+wrust-engine-1  | 2026-03-19T10:38:44.819501Z  INFO trading_engine: gateio: live gateway initialised (with circuit breaker)
+w
+wredis-1        | 1:C 19 Mar 2026 10:38:44.829 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+ rust-engine-1  | 2026-03-19T10:38:44.820454Z  INFO trading_engine: 📋 Order Lifecycle
+Tracker initialized (capacity=5000)
+redis-1        | 1:C 19 Mar 2026 10:38:44.829 * Redis version=7.4.8, bits=64, commit=00000000, modified=0, pid=1, just started
+ rust-engine-1  | 2026-03-19T10:38:44.820537Z  INFO trading_engine: ⏱️ Pipeline Latency Tracker initialized (6 histograms)
+ redis-1        | 1:C 19 Mar 2026 10:38:44.829 * Configuration loaded
+wrust-engine-1  | 2026-03-19T10:38:44.820572Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+ redis-1        | 1:M 19 Mar 2026 10:38:44.830 * Increased maximum number of open files
+wrust-engine-1  | 2026-03-19T10:38:44.820577Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+ redis-1        | 1:M 19 Mar 2026 10:38:44.830 * monotonic clock: POSIX clock_gettime
+w
+ rust-engine-1  | 2026-03-19T10:38:44.820581Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=3, lock-free AtomicU32)
+ redis-1        | 1:M 19 Mar 2026 10:38:44.836 * Running mode=standalone, port=6379.
+wredis-1        | 1:M 19 Mar 2026 10:38:44.837 * Server initialized
+ rust-engine-1  | 2026-03-19T10:38:44.820586Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+wrust-engine-1  | 2026-03-19T10:38:44.820685Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://fx-api-testnet.gateio.ws/api/v4/futures/usdt/contracts
+ redis-1        | 1:M 19 Mar 2026 10:38:44.837 * Ready to accept connections tcp
+ postgres-1     |
+wpostgres-1     | PostgreSQL Database directory appears to contain a database; Skipping initialization
+wpostgres-1     |
+ postgres-1     | 2026-03-19 10:38:45.006 UTC [1] LOG:  starting PostgreSQL 16.13 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+wpostgres-1     | 2026-03-19 10:38:45.006 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+wpostgres-1     | 2026-03-19 10:38:45.007 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+wpostgres-1     | 2026-03-19 10:38:45.015 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+wpostgres-1     | 2026-03-19 10:38:45.027 UTC [28] LOG:  database system was shut down
+at 2026-03-19 10:26:25 UTC
+wpostgres-1     | 2026-03-19 10:38:45.042 UTC [1] LOG:  database system is ready to accept connections
+wrust-engine-1  | 2026-03-19T10:38:45.513542Z ERROR trading_engine::position_sizer: [sizer] Contract specs fetch failed: HTTP 502 Bad Gateway
+wrust-engine-1  | 2026-03-19T10:38:45.514015Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+wrust-engine-1  | 2026-03-19T10:38:45.514214Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes, 8192 slots)
+ rust-engine-1  | 2026-03-19T10:38:45.514306Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+wrust-engine-1  | 2026-03-19T10:38:45.514397Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+wrust-engine-1  | 2026-03-19T10:38:45.514508Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+ rust-engine-1  | 2026-03-19T10:38:45.514558Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+wrust-engine-1  | 2026-03-19T10:38:45.514586Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+wrust-engine-1  | 2026-03-19T10:38:45.514605Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus)
+ rust-engine-1  | 2026-03-19T10:38:45.514932Z  INFO trading_engine: [book-builder] Pinned to core 1
+wrust-engine-1  | 2026-03-19T10:38:45.514950Z  INFO trading_engine: [book-builder] Starting orderbook builder on dedicated core
+wrust-engine-1  | 2026-03-19T10:38:45.515970Z  INFO trading_engine: [ws-gateio] Pinned
+to core 1
+wrust-engine-1  | 2026-03-19T10:38:45.516008Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on dedicated core
+wrust-engine-1  | 2026-03-19T10:38:45.516102Z  INFO trading_engine: [ws-gateio] Connecting to wss://fx-ws-testnet.gateio.ws/v4/ws/usdt
+wrust-engine-1  | 2026-03-19T10:38:45.516349Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+wrust-engine-1  | 2026-03-19T10:38:45.516540Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+wrust-engine-1  | 2026-03-19T10:38:45.516609Z  INFO trading_engine: [strategy] Starting strategy evaluator on dedicated core
+wrust-engine-1  | 2026-03-19T10:38:45.516633Z  INFO trading_engine: [strategy] 🧮 DustTracker initialized (max_dust=5.0)
+wrust-engine-1  | 2026-03-19T10:38:45.516644Z  INFO trading_engine: [strategy] 📊 VPIN
+calculator initialized (bucket=100k, depth=50)
+wrust-engine-1  | 2026-03-19T10:38:45.516670Z  INFO trading_engine: [strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)
+wrust-engine-1  | 2026-03-19T10:38:45.516676Z  INFO trading_engine: [strategy] 💰 Funding rate checks every ~1000 book snapshots
+wrust-engine-1  | 2026-03-19T10:38:45.516700Z  INFO trading_engine: [strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)
+wrust-engine-1  | 2026-03-19T10:38:45.516707Z  INFO trading_engine: [strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)
+wrust-engine-1  | 2026-03-19T10:38:45.516714Z  INFO trading_engine: [strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)
+wrust-engine-1  | 2026-03-19T10:38:45.516720Z  INFO trading_engine: [strategy] 📈 VolatilityTrailingStop initialized (ATR-based)
+wrust-engine-1  | 2026-03-19T10:38:45.516733Z  INFO trading_engine: [strategy] 🛡️ AdverseSelectionGuard initialized (spoofing detection)
+wrust-engine-1  | 2026-03-19T10:38:45.516866Z  INFO trading_engine: All 6 threads spawned. Engine running. Press Ctrl+C to stop.
+wrust-engine-1  | 2026-03-19T10:38:45.517178Z  INFO trading_engine: [telemetry] Pinned
+to core 3 — Journal + SharedState (Issue 2)
+wrust-engine-1  | 2026-03-19T10:38:45.517259Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+wrust-engine-1  | 2026-03-19T10:38:45.517418Z  INFO trading_engine: [execution] Pinned
+to core 2 (with Lifecycle + Latency)
+wrust-engine-1  | 2026-03-19T10:38:45.517448Z  INFO trading_engine::telemetry: Journal
+writer initialized at /dev/shm/trading_journal (segment 0)
+wrust-engine-1  | 2026-03-19T10:38:45.517581Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+wrust-engine-1  | 2026-03-19T10:38:45.517791Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+wrust-engine-1  | 2026-03-19T10:38:45.518750Z  INFO trading_engine::signal_queue: [signal_queue] Initialized SHM at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+wrust-engine-1  | 2026-03-19T10:38:45.518768Z  INFO trading_engine: [execution] Alpha Oracle signal queue connected
+wrust-engine-1  | 2026-03-19T10:38:45.518772Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+wrust-engine-1  | 2026-03-19T10:38:45.554291Z  INFO trading_engine::dashboard_server: [dashboard] Loaded 13 templates from /app/templates: ["performance.html", "forex_risk.html", "dashboard.html", "forex_trades.html", "risk.html", "forex_performance.html", "logs.html", "settings.html", "advanced_features.html", "base.html", "forex_settings.html", "trades.html", "forex_dashboard.html"]
+ rust-engine-1  | 2026-03-19T10:38:45.554410Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+wrust-engine-1  | 2026-03-19T10:38:45.554549Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io proxy mode: testnet
+wrust-engine-1  | 2026-03-19T10:38:45.554775Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+wrust-engine-1  | 2026-03-19T10:38:45.556270Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+wrust-engine-1  | 2026-03-19T10:38:46.296391Z  WARN trading_engine: [execution] Failed
+to fetch initial balance: Unknown error INVALID_KEY: Invalid key provided — using defaults
+ rust-engine-1  | 2026-03-19T10:38:47.096251Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+wContainer crypto_trading_bot-rust-engine-1 Healthy
+ python-services-1  | 2026-03-19 10:38:51.202 | INFO     | __main__:start:58 - ============================================================
+ python-services-1  | 2026-03-19 10:38:51.203 | INFO     | __main__:start:59 - Cold Path Orchestrator starting (4vCPU VPS mode)
+wpython-services-1  | 2026-03-19 10:38:51.204 | INFO     | __main__:start:60 - ============================================================
+wpython-services-1  | 2026-03-19 10:38:51.215 | INFO     | core.graceful_degradation:__init__:164 - GracefulDegradationManager initialized: check_interval=5.0s
+wpython-services-1  | 2026-03-19 10:38:51.215 | INFO     | core.graceful_degradation:start:188 - GracefulDegradationManager started
+wpython-services-1  | 2026-03-19 10:38:51.215 | INFO     | __main__:_start_degradation_manager:150 - Graceful Degradation Manager started
+wpython-services-1  | 2026-03-19 10:38:52.305 | INFO     | __main__:_start_fallback_health_server:177 - Fallback health server listening on :8081
+wpython-services-1  | 2026-03-19 10:38:52.311 | INFO     | analytics.pnl_attribution:__init__:197 - PnLAttributionEngine initialized
+wpython-services-1  | 2026-03-19 10:38:52.312 | INFO     | __main__:_start_pnl_engine:186 - PnL Attribution Engine initialized
+wpython-services-1  | 2026-03-19 10:38:52.327 | INFO     | core.alpha_oracle:open:201 - Signal queue initialized at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+wpython-services-1  | 2026-03-19 10:38:52.327 | INFO     | core.alpha_oracle:start:518
+- Alpha Oracle started (confluence=75%, min_rr=2.0)
+wpython-services-1  | 2026-03-19 10:38:52.328 | INFO     | __main__:_start_alpha_oracle:553 - Alpha Oracle initialized — ready to emit signals to SHM queue
+wpython-services-1  | 2026-03-19 10:38:52.328 | INFO     | __main__:start:110 - All cold-path services started (5 tasks)
+wpython-services-1  | 2026-03-19 10:38:52.328 | INFO     | __main__:_regime_detection_loop:255 - Regime detection loop starting (interval=300s)
+wpython-services-1  | 2026-03-19 10:38:52.330 | INFO     | __main__:_sentiment_analysis_loop:288 - Sentiment analysis loop starting (interval=900s)
+wpython-services-1  | 2026-03-19 10:38:52.331 | INFO     | __main__:_alert_dispatcher_loop:364 - Alert dispatcher starting
+wpython-services-1  | 2026-03-19 10:38:52.613 | INFO     | __main__:_journal_sync_loop:419 - Trade journal sync starting (reading binary segment_*.dat files)
+wpython-services-1  | 2026-03-19 10:38:52.614 | INFO     | __main__:_alpha_oracle_loop:568 - Alpha Oracle loop starting (60s evaluation cycle)
+wrust-engine-1      | 2026-03-19T10:39:15.098930Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.098992Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.098999Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.099004Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.099009Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.099014Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:15.099020Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-19T10:39:15.519058Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/3
+ rust-engine-1      | 2026-03-19T10:39:15.696157Z  WARN trading_engine: [execution] Balance sync failed: Unknown error INVALID_KEY: Invalid key provided
+ rust-engine-1      | 2026-03-19T10:39:31.544700Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-19T10:39:31.780260Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+ rust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+ rust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+ rust-engine-1      | <hr><center>openresty</center>
+ rust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:32.876483Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:33.379903Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:34.263133Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:35.271481Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:36.267652Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:37.111985Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:38.071587Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+w
+wrust-engine-1      | <hr><center>openresty</center>
+ rust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wrust-engine-1      | 2026-03-19T10:39:41.565830Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+wrust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+wrust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+wrust-engine-1      | <hr><center>openresty</center>
+wrust-engine-1      | </body>
+wrust-engine-1      | </html>
+wrust-engine-1      |
+wGracefully Stopping... press Ctrl+C again to force
+Container crypto_trading_bot-python-services-1 Stopping
+wpython-services-1  | 2026-03-19 10:39:43.900 | WARNING  | __main__:shutdown:123 - Shutting down Cold Path Orchestrator...
+ python-services-1  | 2026-03-19 10:39:43.900 | INFO     | __main__:shutdown:133 - Cancelled task: regime
+ python-services-1  | 2026-03-19 10:39:43.901 | INFO     | __main__:shutdown:133 - Cancelled task: sentiment
+ python-services-1  | 2026-03-19 10:39:43.901 | INFO     | __main__:shutdown:133 - Cancelled task: alerts
+ python-services-1  | 2026-03-19 10:39:43.901 | INFO     | __main__:shutdown:133 - Cancelled task: journal_sync
+ python-services-1  | 2026-03-19 10:39:43.901 | INFO     | __main__:shutdown:133 - Cancelled task: alpha_oracle
+ python-services-1  | 2026-03-19 10:39:43.901 | INFO     | __main__:shutdown:139 - Cold Path Orchestrator shutdown complete
+ rust-engine-1      | 2026-03-19T10:39:44.499663Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+ rust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+ rust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+ rust-engine-1      | <hr><center>openresty</center>
+ rust-engine-1      | </body>
+ rust-engine-1      | </html>
+ rust-engine-1      |
+Container crypto_trading_bot-python-services-1 Stopped
+python-services-1 exited with code 0                                                   Container crypto_trading_bot-rust-engine-1 Stopping
+Container crypto_trading_bot-redis-1 Stopping
+Container crypto_trading_bot-postgres-1 Stopping
+ redis-1            | 1:signal-handler (1773916784) Received SIGTERM scheduling shutdown...
+ postgres-1         | 2026-03-19 10:39:44.547 UTC [1] LOG:  received fast shutdown request
+ postgres-1         | 2026-03-19 10:39:44.599 UTC [1] LOG:  aborting any active transactions
+ redis-1            | 1:M 19 Mar 2026 10:39:44.620 * User requested shutdown...
+ redis-1            | 1:M 19 Mar 2026 10:39:44.620 # Redis is now ready to exit, bye bye...
+ postgres-1         | 2026-03-19 10:39:44.622 UTC [1] LOG:  background worker "logical
+replication launcher" (PID 31) exited with exit code 1
+ postgres-1         | 2026-03-19 10:39:44.623 UTC [26] LOG:  shutting down
+ postgres-1         | 2026-03-19 10:39:44.628 UTC [26] LOG:  checkpoint starting: shutdown immediate
+ postgres-1         | 2026-03-19 10:39:44.658 UTC [26] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.015 s, sync=0.002 s, total=0.036 s; sync files=2, longest=0.001 s, average=0.001 s; distance=0 kB, estimate=0 kB; lsn=0/1A6AC18, redo lsn=0/1A6AC18
+ postgres-1         | 2026-03-19 10:39:44.704 UTC [1] LOG:  database system is shut down
+Container crypto_trading_bot-redis-1 Stopped
+redis-1 exited with code 0                                                             Container crypto_trading_bot-postgres-1 Stopped
+postgres-1 exited with code 0                                                           rust-engine-1      | 2026-03-19T10:39:45.080105Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+ rust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+ rust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+ rust-engine-1      | <hr><center>openresty</center>
+ rust-engine-1      | </body>
+ rust-engine-1      | </html>
+ rust-engine-1      |
+ rust-engine-1      | 2026-03-19T10:39:45.141921Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.141963Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.141988Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.141997Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.142005Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.142013Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-19T10:39:45.142023Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-19T10:39:45.697075Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/3
+ rust-engine-1      | 2026-03-19T10:39:45.794949Z  WARN trading_engine::dashboard_server: [dashboard] Gate.io klines HTTP 502: <html>
+ rust-engine-1      | <head><title>502 Bad Gateway</title></head>
+ rust-engine-1      | <body>
+ rust-engine-1      | <center><h1>502 Bad Gateway</h1></center>
+ rust-engine-1      | <hr><center>openresty</center>
+ rust-engine-1      | </body>
+ rust-engine-1      | </html>
+ rust-engine-1      |
+ rust-engine-1      | 2026-03-19T10:39:45.896127Z  WARN trading_engine: [execution] Balance sync failed: Unknown error INVALID_KEY: Invalid key provided
+^CContainer crypto_trading_bot-redis-1 Killing
+Container crypto_trading_bot-rust-engine-1 Killing
+Container crypto_trading_bot-postgres-1 Killing
+Container crypto_trading_bot-python-services-1 Killing
+Container crypto_trading_bot-postgres-1 Error Error while Killing
+Container crypto_trading_bot-python-services-1 Error Error while Killing
+Container crypto_trading_bot-rust-engine-1 Error Error while Killing
+Container crypto_trading_bot-redis-1 Error Error while Killing
+Container crypto_trading_bot-rust-engine-1 Stopped

@@ -1,0 +1,105 @@
+[package]
+name = "rust_trading_engine"
+version = "0.4.0"
+edition = "2021"
+
+[[bin]]
+name = "trading_engine"
+path = "src/main.rs"
+
+[lib]
+name = "rust_trading_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+# ===================================================================
+# 1. Asynchronous Runtime & Networking
+# ===================================================================
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+hyper = { version = "1", features = ["client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "tokio"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+futures-util = "0.3"
+url = "2"
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# ===================================================================
+# 2. State Management & Lock-Free Concurrency (Critical)
+# ===================================================================
+# DashMap: Replaces std::collections::HashMap for MBO book.
+# Allows concurrent reads/writes without lock contention.
+dashmap = "6"
+# parking_lot: Faster Mutex/RwLock than std (no poisoning).
+parking_lot = "0.12"
+# crossbeam-channel: Fast MPMC internal message passing.
+crossbeam-channel = "0.5"
+# flume: Ultra-fast, bounded MPMC channels for internal event bus.
+flume = "0.11"
+
+# ===================================================================
+# 3. Inter-Process Communication (The Python Bridge)
+# ===================================================================
+# memmap2: For writing the Zero-Copy IPC bridge (shared memory ring buffers).
+memmap2 = "0.9"
+
+# ===================================================================
+# 4. Data Precision & Serialization
+# ===================================================================
+# rust_decimal: CRITICAL - replaces f64 for price/order risk math.
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+# serde + serde_json: Core serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+simd-json = "0.14"
+ordered-float = "4"
+
+# ===================================================================
+# 5. Telemetry & Latency Tracking
+# ===================================================================
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ===================================================================
+# Cryptographic & Authentication
+# ===================================================================
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+ring = "0.17"
+async-trait = "0.1"
+
+# ===================================================================
+# Python Integration & Utilities
+# ===================================================================
+pyo3 = { version = "0.22", features = ["extension-module"] }
+rand = "0.8"
+anyhow = "1"
+bytes = "1"
+
+# Environment variable loading (.env files)
+dotenvy = "0.15"
+
+# OS-level thread core affinity & shared memory
+core_affinity = "0.8"
+ctrlc = "3.4"
+
+# ===================================================================
+# 6. Dashboard HTTP Server & Template Rendering
+# ===================================================================
+# axum: High-performance HTTP framework built on hyper + tower.
+axum = { version = "0.7", features = ["ws"] }
+# tower-http: Static file serving, CORS, compression middleware.
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+tower = "0.4"
+# tera: Jinja2-compatible template engine (reuses existing Python templates).
+tera = "1"
+# mime_guess: MIME type detection for static file serving.
+mime_guess = "2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

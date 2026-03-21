@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+{% block title %}Forex Performance{% endblock %}
+
+{% block content %}
+<!-- ── Page header ─────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0 forex-brand-logo"><i class="bi bi-bar-chart-line me-2"></i>Forex Performance</h2>
+    <span class="forex-brand-sub">Crypto Bot</span>
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <div class="btn-group" role="group">
+      <button type="button" class="btn btn-sm btn-outline-warning active" onclick="loadPerfData(7, this)">7D</button>
+      <button type="button" class="btn btn-sm btn-outline-warning" onclick="loadPerfData(30, this)">30D</button>
+      <button type="button" class="btn btn-sm btn-outline-warning" onclick="loadPerfData(90, this)">90D</button>
+    </div>
+    <button class="btn btn-sm btn-outline-warning" onclick="loadPerfData(currentDays, this)">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+    <button class="btn btn-sm btn-warning" onclick="exportCSV()">
+      <i class="bi bi-download me-1"></i>Export CSV
+    </button>
+  </div>
+</div>
+
+<!-- ── Summary KPI cards ────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Total Trades</div>
+        <div class="stat-value" id="kpi-total-trades">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value" id="kpi-win-rate">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Total Pips</div>
+        <div class="stat-value" id="kpi-total-pips">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Total P&L</div>
+        <div class="stat-value" id="kpi-total-pnl">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Profit Factor</div>
+        <div class="stat-value" id="kpi-profit-factor">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Expectancy</div>
+        <div class="stat-value" id="kpi-expectancy">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Charts row ───────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-8">
+    <div class="card border-0 h-100">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-graph-up me-2"></i>Cumulative Pip P&L</h6>
+        <canvas id="chart-equity" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 h-100">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-pie-chart me-2"></i>Win / Loss Split</h6>
+        <canvas id="chart-winloss" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Session breakdown ─────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-clock me-2"></i>Performance by Session</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover" id="tbl-session">
+            <thead class="table-dark">
+              <tr><th>Session</th><th>Trades</th><th>Win%</th><th>Pips</th><th>P&L</th></tr>
+            </thead>
+            <tbody id="tbody-session">
+              <tr><td colspan="5" class="text-center text-muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-bar-chart me-2"></i>Daily Pip P&L (Last 14 days)</h6>
+        <canvas id="chart-daily" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Symbol & Strategy breakdown ────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-currency-exchange me-2"></i>Performance by Symbol</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead class="table-dark">
+              <tr><th>Symbol</th><th>Trades</th><th>Win%</th><th>Pips</th><th>P&L</th></tr>
+            </thead>
+            <tbody id="tbody-symbol">
+              <tr><td colspan="5" class="text-center text-muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-lightning me-2"></i>Performance by Strategy</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead class="table-dark">
+              <tr><th>Strategy</th><th>Trades</th><th>Win%</th><th>Pips</th><th>P&L</th></tr>
+            </thead>
+            <tbody id="tbody-strategy">
+              <tr><td colspan="5" class="text-center text-muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Recent trades table ───────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-body">
+    <h6 class="card-title text-muted mb-3"><i class="bi bi-list-ul me-2"></i>Recent Forex Trades</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead class="table-dark">
+          <tr>
+            <th>Symbol</th><th>Side</th><th>Lot</th><th>Entry</th><th>Exit</th>
+            <th>Pips</th><th>P&L</th><th>Session</th><th>Strategy</th><th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-recent">
+          <tr><td colspan="10" class="text-center text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let currentDays = 7;
+let equityChart, winLossChart, dailyChart;
+
+async function loadPerfData(days, clickedBtn) {
+  currentDays = days;
+  document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+  if (clickedBtn) clickedBtn.classList.add('active');
+  try {
+    const r = await fetch('/api/forex/performance');
+    if (!r.ok) { console.error('perf fetch failed', r.status); return; }
+    const data = await r.json();
+    updateSummary(data.summary || {});
+    updateSessionTable(data.by_session || {});
+    updateSymbolTable(data.by_symbol || {});
+    updateStrategyTable(data.by_strategy || {});
+    updateRecentTrades(data.recent_trades || []);
+    updateDailyChart(data.daily || []);
+    updateEquityChart(data.equity_curve || [], data.daily || []);
+    updateWinLossChart(data.summary || {});
+  } catch(e) { console.error('loadPerfData error', e); }
+}
+
+function fmtPips(v) {
+  if (v === null || v === undefined) return '—';
+  const n = parseFloat(v);
+  const cls = n >= 0 ? 'text-success' : 'text-danger';
+  return `<span class="${cls}">${n >= 0 ? '+' : ''}${n.toFixed(1)}</span>`;
+}
+function fmtUsd(v) {
+  if (v === null || v === undefined) return '—';
+  const n = parseFloat(v);
+  const cls = n >= 0 ? 'text-success' : 'text-danger';
+  return `<span class="${cls}">$${n >= 0 ? '+' : ''}${n.toFixed(2)}</span>`;
+}
+function fmtWr(v) {
+  const n = parseFloat(v || 0) * 100;
+  const cls = n >= 50 ? 'text-success' : 'text-warning';
+  return `<span class="${cls}">${n.toFixed(1)}%</span>`;
+}
+
+function updateSummary(s) {
+  document.getElementById('kpi-total-trades').textContent = s.total_trades ?? '—';
+  document.getElementById('kpi-win-rate').innerHTML = fmtWr(s.win_rate);
+  document.getElementById('kpi-total-pips').innerHTML = fmtPips(s.total_pip_pnl);
+  document.getElementById('kpi-total-pnl').innerHTML = fmtUsd(s.total_usd_pnl);
+  document.getElementById('kpi-profit-factor').textContent = s.profit_factor ? parseFloat(s.profit_factor).toFixed(2) : '—';
+  document.getElementById('kpi-expectancy').innerHTML = fmtPips(s.expectancy_pips);
+}
+
+function updateSessionTable(sessions) {
+  const tbody = document.getElementById('tbody-session');
+  const rows = Object.entries(sessions);
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data</td></tr>'; return; }
+  tbody.innerHTML = rows.map(([name, s]) =>
+    `<tr><td class="text-capitalize">${name.replace('_',' ')}</td><td>${s.trades}</td><td>${fmtWr(s.win_rate)}</td><td>${fmtPips(s.pip_pnl)}</td><td>${fmtUsd(s.usd_pnl)}</td></tr>`
+  ).join('');
+}
+
+function updateSymbolTable(symbols) {
+  const tbody = document.getElementById('tbody-symbol');
+  const rows = Object.entries(symbols);
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data</td></tr>'; return; }
+  tbody.innerHTML = rows.map(([sym, s]) =>
+    `<tr><td><strong>${sym}</strong></td><td>${s.trades}</td><td>${fmtWr(s.win_rate)}</td><td>${fmtPips(s.pip_pnl)}</td><td>${fmtUsd(s.usd_pnl)}</td></tr>`
+  ).join('');
+}
+
+function updateStrategyTable(strategies) {
+  const tbody = document.getElementById('tbody-strategy');
+  const rows = Object.entries(strategies);
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data</td></tr>'; return; }
+  tbody.innerHTML = rows.map(([strat, s]) =>
+    `<tr><td>${strat}</td><td>${s.trades}</td><td>${fmtWr(s.win_rate)}</td><td>${fmtPips(s.pip_pnl)}</td><td>${fmtUsd(s.usd_pnl)}</td></tr>`
+  ).join('');
+}
+
+function updateRecentTrades(trades) {
+  const tbody = document.getElementById('tbody-recent');
+  if (!trades.length) { tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No recent trades</td></tr>'; return; }
+  tbody.innerHTML = trades.slice().reverse().map(t => {
+    const sideHtml = t.side === 'long'
+      ? '<span class="badge bg-success">LONG</span>'
+      : '<span class="badge bg-danger">SHORT</span>';
+    return `<tr>
+      <td><strong>${t.symbol||'—'}</strong></td>
+      <td>${sideHtml}</td>
+      <td>${t.lot_size||'—'}</td>
+      <td>${t.entry_price ? parseFloat(t.entry_price).toFixed(4) : '—'}</td>
+      <td>${t.exit_price ? parseFloat(t.exit_price).toFixed(4) : '—'}</td>
+      <td>${fmtPips(t.pip_pnl)}</td>
+      <td>${fmtUsd(t.usd_pnl)}</td>
+      <td>${t.session||'—'}</td>
+      <td>${t.strategy||'—'}</td>
+      <td>${t.exit_reason||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateEquityChart(equityCurve, daily) {
+  const labels = daily.slice(-30).map(d => d.date);
+  const data = daily.slice(-30).map(d => d.cumulative_pip_pnl);
+  if (equityChart) equityChart.destroy();
+  const ctx = document.getElementById('chart-equity').getContext('2d');
+  equityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Cumulative Pips',
+        data,
+        borderColor: '#ffd700',
+        backgroundColor: 'rgba(255,215,0,0.08)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+  });
+}
+
+function updateWinLossChart(s) {
+  if (winLossChart) winLossChart.destroy();
+  const ctx = document.getElementById('chart-winloss').getContext('2d');
+  winLossChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Wins', 'Losses'],
+      datasets: [{ data: [s.wins || 0, s.losses || 0], backgroundColor: ['#28a745', '#dc3545'] }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+function updateDailyChart(daily) {
+  const last14 = daily.slice(-14);
+  if (dailyChart) dailyChart.destroy();
+  const ctx = document.getElementById('chart-daily').getContext('2d');
+  dailyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: last14.map(d => d.date),
+      datasets: [{
+        label: 'Daily Pips',
+        data: last14.map(d => d.pip_pnl),
+        backgroundColor: last14.map(d => d.pip_pnl >= 0 ? 'rgba(40,167,69,0.7)' : 'rgba(220,53,69,0.7)'),
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+  });
+}
+
+async function exportCSV() {
+  const r = await fetch('/api/forex/trades?export=csv');
+  if (!r.ok) { alert('Export failed'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'forex_trades.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const firstBtn = document.querySelector('.btn-group .btn');
+  loadPerfData(7, firstBtn);
+});
+</script>
+{% endblock %}

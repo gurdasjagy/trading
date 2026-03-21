@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Forex Settings{% endblock %}
+
+{% block content %}
+<!-- ── Page header ─────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0 forex-brand-logo"><i class="bi bi-sliders me-2"></i>Forex Settings</h2>
+    <span class="forex-brand-sub">Crypto Bot</span>
+  </div>
+  {% if trading_mode == 'live' %}
+  <span class="badge mode-live fs-6"><i class="bi bi-circle-fill me-1"></i>LIVE</span>
+  {% else %}
+  <span class="badge mode-demo fs-6"><i class="bi bi-circle me-1"></i>{% if trading_mode %}{{ trading_mode | upper }}{% else %}DEMO{% endif %}</span>
+  {% endif %}
+</div>
+
+<!-- ── Forex Exchange Configuration ───────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-header bg-transparent border-secondary">
+    <h5 class="mb-0"><i class="bi bi-bank me-2"></i>Forex Exchange</h5>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12 col-md-6">
+        <label class="form-label small text-muted">Exchange</label>
+        <input type="text" class="form-control bg-dark text-light border-secondary"
+               value="Bybit (TradFi — XAU/USD, XAG/USD)" readonly />
+      </div>
+      <div class="col-12 col-md-6">
+        <label class="form-label small text-muted">Account Type</label>
+        <input type="text" class="form-control bg-dark text-light border-secondary"
+               value="Linear Swap (Perpetual)" readonly />
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Forex Pairs ─────────────────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+    <h5 class="mb-0"><i class="bi bi-currency-exchange me-2"></i>Trading Pairs</h5>
+    <a href="/forex" class="btn btn-sm btn-outline-warning">
+      <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+    </a>
+  </div>
+  <div class="card-body">
+    <!-- Add pair -->
+    <div class="d-flex gap-2 mb-4 flex-wrap">
+      <input id="new-forex-pair" type="text"
+             class="form-control form-control-sm bg-dark text-light border-secondary"
+             style="max-width: 160px;" placeholder="e.g. XAU/USD"
+             onkeydown="if(event.key==='Enter') addForexPair()" />
+      <button class="btn btn-sm btn-outline-warning" onclick="addForexPair()">
+        <i class="bi bi-plus-circle me-1"></i>Add Pair
+      </button>
+    </div>
+
+    <!-- Configured pairs -->
+    <div id="forex-pairs-list">
+      {% if forex_pairs %}
+        {% for pair in forex_pairs %}
+          {% if pair.symbol is defined %}{% set sym = pair.symbol %}{% else %}{% set sym = pair %}{% endif %}
+          {% if pair.symbol is defined %}{% set enabled = pair.enabled | default(value=true) %}{% else %}{% set enabled = true %}{% endif %}
+          <div class="d-flex align-items-center gap-3 mb-3 p-2 rounded"
+               style="background: rgba(255,255,255,0.03);">
+            <span class="pair-badge {% if sym is containing("XAU") %}pair-badge-xauusd{% elif sym is containing("XAG") %}pair-badge-xagusd{% endif %}">
+              <i class="bi bi-gem me-1"></i>{{ sym }}
+            </span>
+            <div class="flex-grow-1">
+              <div class="small text-muted">
+                {% if sym is containing("XAU") %}Gold — 1 oz/lot, $0.01 pip{% elif sym is containing("XAG") %}Silver — 5000 oz/lot, $0.001 pip{% endif %}
+              </div>
+            </div>
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" {% if enabled %}checked{% endif %}
+                     onchange="toggleForexPair('{{ sym }}', this.checked)"
+                     title="Enable/disable trading for this pair" />
+              <label class="form-check-label small text-muted">Active</label>
+            </div>
+            <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                    onclick="removeForexPair('{{ sym }}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-muted small">No pairs configured. Add one above.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ── Risk Defaults ───────────────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-header bg-transparent border-secondary">
+    <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Risk Defaults</h5>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info py-2 small mb-3">
+      <i class="bi bi-info-circle me-1"></i>
+      Risk settings are managed globally in <a href="/settings" class="alert-link">Bot Settings</a>.
+      Forex-specific overrides will be applied in a future update.
+    </div>
+    <div class="row g-3 text-muted small">
+      <div class="col-12 col-md-4">
+        <div><strong class="text-light">Stop-Loss Default</strong></div>
+        <div>Pip-based SL set per strategy signal</div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div><strong class="text-light">Take-Profit Default</strong></div>
+        <div>Pip-based TP set per strategy signal</div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div><strong class="text-light">Position Sizing</strong></div>
+        <div>Lot size derived from USDT margin + leverage</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Navigation ─────────────────────────────────────────────────────── -->
+<div class="d-flex gap-2 flex-wrap">
+  <a href="/forex" class="btn btn-outline-warning">
+    <i class="bi bi-speedometer2 me-1"></i>Forex Dashboard
+  </a>
+  <a href="/forex/trades" class="btn btn-outline-secondary">
+    <i class="bi bi-clock-history me-1"></i>Forex Trades
+  </a>
+  <a href="/settings" class="btn btn-outline-secondary">
+    <i class="bi bi-gear me-1"></i>Bot Settings
+  </a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/forex.js"></script>
+{% endblock %}

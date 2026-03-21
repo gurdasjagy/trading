@@ -1,0 +1,806 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-gear me-2"></i>Settings</h2>
+  <!-- Emergency Stop -->
+  <button class="btn btn-danger btn-lg fw-bold"
+          id="emergency-stop-btn"
+          onclick="emergencyStop()">
+    <i class="bi bi-stop-circle-fill me-2"></i>EMERGENCY STOP
+  </button>
+</div>
+
+<!-- ── Trading Mode Toggle ──────────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-header bg-transparent border-secondary">
+    <h5 class="mb-0"><i class="bi bi-toggles me-2"></i>Trading Mode</h5>
+  </div>
+  <div class="card-body">
+    <div class="d-flex align-items-center gap-4 flex-wrap">
+      <div class="d-flex align-items-center gap-3">
+        <span class="fw-semibold text-muted">PAPER</span>
+        <div class="form-check form-switch mb-0" style="transform: scale(1.5); transform-origin: left center;">
+          <input class="form-check-input" type="checkbox" id="mode-toggle"
+                 {% if settings.trading_mode == "live" or settings.trading_mode == "testnet" or settings.trading_mode == "forex_live" or settings.trading_mode == "forex_demo" %}checked{% endif %}
+                 onchange="handleModeToggle(this)" />
+        </div>
+        <span class="fw-semibold text-muted">LIVE / TESTNET</span>
+      </div>
+      <span id="mode-badge" class="badge fs-6
+        {% if settings.trading_mode == 'live' %}bg-danger
+        {% elif settings.trading_mode == 'testnet' %}bg-warning text-dark
+        {% elif settings.trading_mode == 'forex_live' %}bg-danger
+        {% elif settings.trading_mode == 'forex_demo' %}bg-warning text-dark
+        {% else %}bg-info{% endif %}">
+        <i class="bi bi-circle-fill me-1"></i>
+        {% if settings.trading_mode == 'forex_live' %}FOREX LIVE
+        {% elif settings.trading_mode == 'forex_demo' %}FOREX DEMO
+        {% else %}{% if settings.trading_mode %}{{ settings.trading_mode | upper }}{% else %}PAPER{% endif %}
+        {% endif %}
+      </span>
+      {% if settings.trading_mode == 'paper' %}
+      <button type="button" class="btn btn-outline-warning btn-sm ms-auto" onclick="resetPaperTrading()">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Paper Trading
+      </button>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ── Mode Switch Confirmation Modal ──────────────────────────────────── -->
+<div class="modal fade" id="modeConfirmModal" tabindex="-1" aria-labelledby="modeConfirmLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark border border-warning">
+      <div class="modal-header border-warning">
+        <h5 class="modal-title" id="modeConfirmLabel">
+          <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+          <span id="modal-title-text">Switch Trading Mode</span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="live-mode-warning" class="alert alert-danger d-none">
+          <strong>⚠️ WARNING: You are about to switch to LIVE trading.</strong>
+          <p class="mb-0 mt-2">Real money will be at risk. All open paper positions will be closed.</p>
+        </div>
+        <div id="testnet-mode-info" class="alert alert-warning d-none">
+          <strong>🧪 Switching to TESTNET trading mode.</strong>
+          <p class="mb-0 mt-2">Exchange sandbox endpoints will be used. No real funds at risk.<br>
+          Requires <code>EXCHANGE_TESTNET_API_KEY</code> / <code>EXCHANGE_TESTNET_API_SECRET</code> in your environment.</p>
+        </div>
+        <div id="paper-mode-info" class="alert alert-info d-none">
+          <strong>ℹ Switching to PAPER trading mode.</strong>
+          <p class="mb-0 mt-2">All open live positions will be closed before switching.</p>
+        </div>
+        <div id="forex-live-mode-warning" class="alert alert-danger d-none">
+          <strong>⚠️ WARNING: You are about to switch to FOREX LIVE trading.</strong>
+          <p class="mb-0 mt-2">Real money will be at risk on Bybit TradFi (XAU/USD, XAG/USD).<br>
+          Requires <code>BYBIT_API_KEY</code> / <code>BYBIT_SECRET_KEY</code> in your environment.</p>
+        </div>
+        <div id="forex-demo-mode-info" class="alert alert-warning d-none">
+          <strong>📊 Switching to FOREX DEMO mode.</strong>
+          <p class="mb-0 mt-2">Bybit testnet will be used for forex trading. No real funds at risk.<br>
+          Requires <code>BYBIT_TESTNET_API_KEY</code> / <code>BYBIT_TESTNET_SECRET_KEY</code>.</p>
+        </div>
+        <div id="mode-select-section" class="mb-3 d-none">
+          <label class="form-label text-muted">Select target mode</label>
+          <select id="target-mode-select" class="form-select bg-dark text-light border-secondary"
+                  onchange="onTargetModeChange(this)">
+            <optgroup label="Futures (Crypto)">
+              <option value="futures/live">Futures — Live Trading</option>
+              <option value="futures/testnet">Futures — Testnet (Sandbox)</option>
+            </optgroup>
+            <optgroup label="Forex (Precious Metals)">
+              <option value="forex/live">Forex — Live Trading (Bybit)</option>
+              <option value="forex/demo">Forex — Demo / Testnet (Bybit)</option>
+            </optgroup>
+          </select>
+        </div>
+        <div id="live-confirm-section" class="d-none">
+          <p class="text-muted">Type <strong>CONFIRM</strong> below to proceed:</p>
+          <input type="text" id="confirm-input" class="form-control bg-dark text-light border-secondary"
+                 placeholder="Type CONFIRM" oninput="checkConfirmInput()" />
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="confirm-mode-btn" onclick="confirmModeSwitch()" disabled>
+          <i class="bi bi-arrow-repeat me-1"></i>Switch Mode
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Paper Reset Confirmation Modal ──────────────────────────────────── -->
+<div class="modal fade" id="paperResetModal" tabindex="-1" aria-labelledby="paperResetLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark border border-info">
+      <div class="modal-header border-info">
+        <h5 class="modal-title" id="paperResetLabel">
+          <i class="bi bi-arrow-counterclockwise text-info me-2"></i>Reset Paper Trading
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>This will close all paper positions, cancel all orders, and reset the balance.</p>
+        <div class="mb-3">
+          <label class="form-label text-muted">Starting Balance (USDT)</label>
+          <input type="number" id="paper-reset-balance" class="form-control bg-dark text-light border-secondary"
+                 placeholder="Leave blank for default" min="100" step="100" />
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-info" onclick="confirmPaperReset()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<form id="settings-form" onsubmit="saveSettings(event)">
+  <div class="row g-4">
+
+    <!-- ── Trading Settings ──────────────────────────────────────────── -->
+    <div class="col-12 col-xl-6">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary">
+          <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Trading Settings</h5>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label text-muted">Trading Mode</label>
+            <select class="form-select bg-dark text-light border-secondary" name="trading_mode">
+              <optgroup label="Futures (Crypto)">
+                <option value="paper" {% if settings.trading_mode == 'paper' %}selected{% endif %}>Paper Trading (Simulated)</option>
+                <option value="testnet" {% if settings.trading_mode == 'testnet' %}selected{% endif %}>Futures — Testnet (Sandbox)</option>
+                <option value="live" {% if settings.trading_mode == 'live' %}selected{% endif %}>Futures — Live Trading</option>
+              </optgroup>
+              <optgroup label="Forex (Precious Metals — Bybit)">
+                <option value="forex_demo" {% if settings.trading_mode == 'forex_demo' %}selected{% endif %}>Forex — Demo (Testnet)</option>
+                <option value="forex_live" {% if settings.trading_mode == 'forex_live' %}selected{% endif %}>Forex — Live Trading</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Default Leverage</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="default_leverage" min="1" max="125"
+                   value="{{ settings.exchange.default_leverage | default(value=5) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Max Leverage</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="max_leverage" min="1" max="125"
+                   value="{{ settings.exchange.max_leverage | default(value=20) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Order Type</label>
+            <select class="form-select bg-dark text-light border-secondary" name="order_type">
+              <option value="limit" {% if settings.exchange.order_type == 'limit' %}selected{% endif %}>Limit (Maker)</option>
+              <option value="market" {% if settings.exchange.order_type == 'market' %}selected{% endif %}>Market (Taker)</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Trading Pairs</label>
+            <textarea class="form-control bg-dark text-light border-secondary" name="trading_pairs"
+                      rows="4">{% if settings.exchange.trading_pairs %}{{ settings.exchange.trading_pairs | join(sep="
+") }}{% else %}BTC/USDT
+ETH/USDT
+SOL/USDT{% endif %}</textarea>
+            <small class="text-muted">One pair per line</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Risk Parameters ────────────────────────────────────────── -->
+    <div class="col-12 col-xl-6">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary">
+          <h5 class="mb-0"><i class="bi bi-shield-exclamation me-2"></i>Risk Parameters</h5>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label text-muted">Max Position Size (%)</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="max_position_size_pct" min="0.1" max="100" step="0.1"
+                   value="{{ settings.risk.max_position_size_pct | default(value=10.0) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Max Open Positions</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="max_open_positions" min="1" max="50"
+                   value="{{ settings.risk.max_open_positions | default(value=5) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Max Daily Loss (%)</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="max_daily_loss_pct" min="0.1" max="100" step="0.1"
+                   value="{{ settings.risk.max_daily_loss_pct | default(value=2.0) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Max Drawdown (%)</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="max_drawdown_pct" min="0.1" max="100" step="0.1"
+                   value="{{ settings.risk.max_drawdown_pct | default(value=10.0) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Default Stop Loss (%)</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="default_stop_loss_pct" min="0.1" max="100" step="0.1"
+                   value="{{ settings.risk.default_stop_loss_pct | default(value=2.0) }}" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label text-muted">Min Risk:Reward</label>
+            <input type="number" class="form-control bg-dark text-light border-secondary"
+                   name="risk_reward_min" min="0.5" max="10" step="0.1"
+                   value="{{ settings.risk.risk_reward_min | default(value=1.5) }}" />
+          </div>
+
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" id="use_kelly"
+                   name="use_kelly_criterion"
+                   {% if settings.risk.use_kelly_criterion %}checked{% endif %} />
+            <label class="form-check-label text-muted" for="use_kelly">
+              Use Kelly Criterion
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Trading Pairs Management ────────────────────────────────────── -->
+    <div class="col-12">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="bi bi-currency-exchange me-2"></i>Trading Pairs Management</h5>
+          <button type="button" class="btn btn-sm btn-primary" onclick="showAddPairModal()">
+            <i class="bi bi-plus-circle me-1"></i>Add Pair
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0" id="pairs-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Status</th>
+                  <th>Max Position Size</th>
+                  <th>Leverage</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pairs-tbody">
+                <tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Currency Management ─────────────────────────────────────────── -->
+    <div class="col-12">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="bi bi-coin me-2"></i>Currency Management</h5>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary active" id="currency-tab-futures"
+                    onclick="switchCurrencyTab('futures')">
+              <i class="bi bi-currency-exchange me-1"></i>Futures
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="currency-tab-forex"
+                    onclick="switchCurrencyTab('forex')">
+              <i class="bi bi-bank me-1"></i>Forex
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="currency-loading" class="text-center text-muted py-3">Loading currencies...</div>
+          <div id="currency-grid-futures" class="row g-2" style="display:none!important;"></div>
+          <div id="currency-grid-forex" class="row g-2" style="display:none!important;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Strategy Toggles ───────────────────────────────────────── -->
+    <div class="col-12">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary">
+          <h5 class="mb-0"><i class="bi bi-toggles me-2"></i>Strategy Enable / Disable</h5>
+        </div>
+        <div class="card-body">
+          <div id="strategies-container">
+            <div class="text-center text-muted py-3">Loading strategies...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+
+  <div class="mt-4 d-flex gap-3">
+    <button type="submit" class="btn btn-primary btn-lg">
+      <i class="bi bi-floppy me-2"></i>Save Settings
+    </button>
+    <a href="/settings" class="btn btn-outline-secondary btn-lg">
+      <i class="bi bi-arrow-counterclockwise me-2"></i>Reset
+    </a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveSettings(e) {
+  e.preventDefault();
+  const form = document.getElementById('settings-form');
+  const data = Object.fromEntries(new FormData(form));
+  const res = await fetch('/api/v1/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json();
+  showToast(json.success ? 'Settings saved.' : (json.reason || 'Save failed.'),
+            json.success ? 'success' : 'warning');
+}
+
+let _pendingMode = null;
+
+function handleModeToggle(checkbox) {
+  // When toggling off (unchecked) → paper; when toggling on (checked) → show mode selector
+  const goingLive = checkbox.checked;
+  _pendingMode = goingLive ? 'futures/live' : 'futures/paper';
+
+  // Reset confirm input
+  const confirmInput = document.getElementById('confirm-input');
+  if (confirmInput) confirmInput.value = '';
+  const confirmBtn = document.getElementById('confirm-mode-btn');
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  // Show mode selector when toggling to live/testnet
+  const modeSelectSection = document.getElementById('mode-select-section');
+  if (modeSelectSection) {
+    modeSelectSection.classList.toggle('d-none', !goingLive);
+    if (goingLive) {
+      const sel = document.getElementById('target-mode-select');
+      if (sel) sel.value = 'futures/live';
+      _updateModalForMode('futures/live');
+    }
+  }
+
+  document.getElementById('paper-mode-info').classList.toggle('d-none', goingLive);
+  if (!goingLive) confirmBtn && (confirmBtn.disabled = false);
+
+  const titleEl = document.getElementById('modal-title-text');
+  if (titleEl) titleEl.textContent = goingLive ? 'Switch Trading Mode' : 'Switch to Paper Trading';
+
+  const modal = new bootstrap.Modal(document.getElementById('modeConfirmModal'));
+  modal.show();
+
+  // If user cancels modal, restore toggle state
+  document.getElementById('modeConfirmModal').addEventListener('hidden.bs.modal', function onHide() {
+    if (_pendingMode !== null) {
+      checkbox.checked = !checkbox.checked;
+      _pendingMode = null;
+    }
+    this.removeEventListener('hidden.bs.modal', onHide);
+  });
+}
+
+function _updateModalForMode(mode) {
+  _pendingMode = mode;
+  const isLive = mode === 'live' || mode === 'futures/live';
+  const isTestnet = mode === 'testnet' || mode === 'futures/testnet';
+  const isPaper = mode === 'paper' || mode === 'futures/paper';
+  const isForexLive = mode === 'forex/live';
+  const isForexDemo = mode === 'forex/demo';
+
+  document.getElementById('live-mode-warning').classList.toggle('d-none', !isLive);
+  document.getElementById('testnet-mode-info').classList.toggle('d-none', !isTestnet);
+  document.getElementById('paper-mode-info').classList.toggle('d-none', !isPaper);
+  document.getElementById('forex-live-mode-warning').classList.toggle('d-none', !isForexLive);
+  document.getElementById('forex-demo-mode-info').classList.toggle('d-none', !isForexDemo);
+  document.getElementById('live-confirm-section').classList.toggle('d-none', !(isLive || isForexLive));
+
+  const confirmBtn = document.getElementById('confirm-mode-btn');
+  if (confirmBtn) {
+    // Paper, testnet and demo modes don't require CONFIRM text — enable immediately
+    confirmBtn.disabled = isLive || isForexLive;
+  }
+}
+
+// Called when the user changes the live/testnet selector inside the modal
+function onTargetModeChange(sel) {
+  const confirmInput = document.getElementById('confirm-input');
+  if (confirmInput) confirmInput.value = '';
+  _updateModalForMode(sel.value);
+}
+
+function checkConfirmInput() {
+  const input = document.getElementById('confirm-input');
+  const btn = document.getElementById('confirm-mode-btn');
+  if (btn) btn.disabled = (input.value !== 'CONFIRM');
+}
+
+async function confirmModeSwitch() {
+  const mode = _pendingMode;
+  if (!mode) return;
+  _pendingMode = null;  // prevent restore on close
+
+  const modal = bootstrap.Modal.getInstance(document.getElementById('modeConfirmModal'));
+  if (modal) modal.hide();
+
+  showToast(`Switching to ${mode.toUpperCase()} mode...`, 'info');
+  try {
+    const res = await fetch('/api/mode/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const json = await res.json();
+    if (json.success) {
+      showToast(`Switched to ${mode.toUpperCase()} mode.`, 'success');
+      // Update mode badge
+      const badge = document.getElementById('mode-badge');
+      if (badge) {
+        const displayLabel = {
+          'futures/live': 'LIVE', 'live': 'LIVE',
+          'futures/testnet': 'TESTNET', 'testnet': 'TESTNET',
+          'futures/paper': 'PAPER', 'paper': 'PAPER',
+          'forex/live': 'FOREX LIVE',
+          'forex/demo': 'FOREX DEMO',
+        }[mode] || mode.toUpperCase();
+        badge.innerHTML = '<i class="bi bi-circle-fill me-1"></i>' + displayLabel;
+        const isLive = mode === 'futures/live' || mode === 'live' || mode === 'forex/live';
+        const isTestnet = mode === 'futures/testnet' || mode === 'testnet' || mode === 'forex/demo';
+        const cls = isLive ? 'bg-danger' : isTestnet ? 'bg-warning text-dark' : 'bg-info';
+        badge.className = 'badge fs-6 ' + cls;
+      }
+      // Reload page to reflect new mode
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      showToast('Mode switch failed: ' + (json.message || json.error || 'Unknown error'), 'danger');
+      // Restore checkbox
+      const toggle = document.getElementById('mode-toggle');
+      if (toggle) toggle.checked = (mode !== 'paper' && mode !== 'futures/paper');
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+    const toggle = document.getElementById('mode-toggle');
+    if (toggle) toggle.checked = (mode !== 'paper' && mode !== 'futures/paper');
+  }
+}
+
+function resetPaperTrading() {
+  const modal = new bootstrap.Modal(document.getElementById('paperResetModal'));
+  modal.show();
+}
+
+async function confirmPaperReset() {
+  const balanceInput = document.getElementById('paper-reset-balance');
+  const balance = balanceInput && balanceInput.value ? parseFloat(balanceInput.value) : null;
+
+  const modal = bootstrap.Modal.getInstance(document.getElementById('paperResetModal'));
+  if (modal) modal.hide();
+
+  try {
+    const body = balance != null ? { balance } : {};
+    const res = await fetch('/api/paper/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (json.success) {
+      showToast(`Paper trading reset. New balance: $${(json.balance || 0).toFixed(2)}`, 'success');
+    } else {
+      showToast('Reset failed: ' + (json.error || 'Unknown error'), 'danger');
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+  }
+}
+
+// ── Trading Pairs Management ───────────────────────────────────────────
+
+async function loadTradingPairs() {
+  try {
+    const res = await fetch('/api/settings/pairs');
+    const json = await res.json();
+    const tbody = document.getElementById('pairs-tbody');
+    if (!tbody) return;
+
+    if (!json.pairs || json.pairs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No trading pairs configured</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = json.pairs.map(pair => `
+      <tr>
+        <td class="fw-semibold">${escapeHtml(pair.symbol)}</td>
+        <td>
+          <span class="badge ${pair.enabled ? 'bg-success' : 'bg-secondary'}">
+            ${pair.enabled ? 'ENABLED' : 'DISABLED'}
+          </span>
+        </td>
+        <td>${pair.max_position_size_pct}%</td>
+        <td>${pair.leverage}x</td>
+        <td class="text-end">
+          <button class="btn btn-xs btn-outline-danger" onclick="removePair('${escapeHtml(pair.symbol)}')">
+            <i class="bi bi-trash"></i> Remove
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load trading pairs:', err);
+    showToast('Failed to load trading pairs', 'danger');
+  }
+}
+
+function showAddPairModal() {
+  const modalHtml = `
+    <div class="modal fade" id="addPairModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content bg-dark border border-primary">
+          <div class="modal-header border-primary">
+            <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Add Trading Pair</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Symbol</label>
+              <input type="text" id="new-pair-symbol" class="form-control bg-dark text-light border-secondary"
+                     placeholder="BTC/USDT" />
+              <small class="text-muted">Enter the symbol in format: BASE/QUOTE (e.g., BTC/USDT)</small>
+            </div>
+          </div>
+          <div class="modal-footer border-secondary">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="addPair()">
+              <i class="bi bi-plus-circle me-1"></i>Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Remove existing modal if any
+  const existing = document.getElementById('addPairModal');
+  if (existing) existing.remove();
+
+  // Append and show
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  const modal = new bootstrap.Modal(document.getElementById('addPairModal'));
+  modal.show();
+}
+
+async function addPair() {
+  const symbolInput = document.getElementById('new-pair-symbol');
+  const symbol = symbolInput ? symbolInput.value.trim().toUpperCase() : '';
+
+  if (!symbol) {
+    showToast('Please enter a symbol', 'warning');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/settings/pairs/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol }),
+    });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast(`Added ${symbol}`, 'success');
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addPairModal'));
+      if (modal) modal.hide();
+      await loadTradingPairs();
+    } else {
+      showToast(json.error || 'Failed to add pair', 'danger');
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+  }
+}
+
+async function removePair(symbol) {
+  if (!confirm(`Remove ${symbol} from trading pairs?`)) return;
+
+  try {
+    const res = await fetch(`/api/settings/pairs/${encodeURIComponent(symbol)}`, {
+      method: 'DELETE',
+    });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast(`Removed ${symbol}`, 'success');
+      await loadTradingPairs();
+    } else {
+      showToast(json.error || 'Failed to remove pair', 'danger');
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+  }
+}
+
+// ── Strategies Management ──────────────────────────────────────────────
+
+async function loadStrategies() {
+  try {
+    const res = await fetch('/api/settings/strategies');
+    const json = await res.json();
+    const container = document.getElementById('strategies-container');
+    if (!container) return;
+
+    if (!json.strategies || json.strategies.length === 0) {
+      container.innerHTML = '<div class="text-center text-muted py-3">No strategies available</div>';
+      return;
+    }
+
+    const html = '<div class="row g-3">' + json.strategies.map(strategy => `
+      <div class="col-6 col-md-4 col-lg-3">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox"
+                 id="strategy_${strategy.name}"
+                 ${strategy.enabled ? 'checked' : ''}
+                 onchange="toggleStrategy('${strategy.name}', this.checked)" />
+          <label class="form-check-label text-muted" for="strategy_${strategy.name}">
+            ${escapeHtml(strategy.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()))}
+          </label>
+        </div>
+      </div>
+    `).join('') + '</div>';
+
+    container.innerHTML = html;
+  } catch (err) {
+    console.error('Failed to load strategies:', err);
+    showToast('Failed to load strategies', 'danger');
+  }
+}
+
+async function toggleStrategy(name, enabled) {
+  try {
+    const res = await fetch(`/api/settings/strategies/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast(`${name} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    } else {
+      showToast(json.error || 'Failed to update strategy', 'danger');
+      // Revert checkbox
+      const checkbox = document.getElementById(`strategy_${name}`);
+      if (checkbox) checkbox.checked = !enabled;
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+    // Revert checkbox
+    const checkbox = document.getElementById(`strategy_${name}`);
+    if (checkbox) checkbox.checked = !enabled;
+  }
+}
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+  loadTradingPairs();
+  loadStrategies();
+  loadCurrencies();
+});
+
+// ── Currency Management ────────────────────────────────────────────────
+
+let _currencyData = { futures: [], forex: [] };
+let _activeCurrencyTab = 'futures';
+
+async function loadCurrencies() {
+  try {
+    const res = await fetch('/api/settings/currencies');
+    const json = await res.json();
+    _currencyData = json;
+
+    document.getElementById('currency-loading').style.display = 'none';
+    renderCurrencyGrid('futures');
+    renderCurrencyGrid('forex');
+    showCurrencyTab('futures');
+  } catch (err) {
+    console.error('Failed to load currencies:', err);
+    document.getElementById('currency-loading').textContent = 'Failed to load currencies.';
+  }
+}
+
+function renderCurrencyGrid(market) {
+  const grid = document.getElementById(`currency-grid-${market}`);
+  if (!grid) return;
+
+  const pairs = _currencyData[market] || [];
+  if (pairs.length === 0) {
+    grid.innerHTML = '<div class="col-12 text-muted text-center py-3">No currencies available</div>';
+    return;
+  }
+
+  grid.innerHTML = pairs.map(pair => `
+    <div class="col-6 col-md-4 col-lg-3">
+      <div class="card border-secondary bg-dark h-100">
+        <div class="card-body p-2 d-flex align-items-center justify-content-between">
+          <span class="fw-semibold small">${escapeHtml(pair.symbol)}</span>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox"
+                   id="${getCurrencyId(market, pair.symbol)}"
+                   ${pair.enabled ? 'checked' : ''}
+                   onchange="toggleCurrency('${escapeHtml(pair.symbol)}', '${market}', this.checked)" />
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function getCurrencyId(market, symbol) {
+  return `currency_${market}_${symbol.replace('/', '_')}`;
+}
+
+function switchCurrencyTab(market) {
+  _activeCurrencyTab = market;
+  document.getElementById('currency-tab-futures').classList.toggle('active', market === 'futures');
+  document.getElementById('currency-tab-forex').classList.toggle('active', market === 'forex');
+  showCurrencyTab(market);
+}
+
+function showCurrencyTab(market) {
+  const futuresGrid = document.getElementById('currency-grid-futures');
+  const forexGrid = document.getElementById('currency-grid-forex');
+  if (futuresGrid) futuresGrid.style.display = market === 'futures' ? '' : 'none';
+  if (forexGrid) forexGrid.style.display = market === 'forex' ? '' : 'none';
+}
+
+async function toggleCurrency(symbol, market, enabled) {
+  try {
+    const res = await fetch(`/api/settings/currencies/${encodeURIComponent(symbol)}/toggle`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, market }),
+    });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast(`${symbol} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+      // Update local state
+      const pair = (_currencyData[market] || []).find(p => p.symbol === symbol);
+      if (pair) pair.enabled = enabled;
+    } else {
+      showToast(json.error || 'Failed to update currency', 'danger');
+      // Revert checkbox
+      const cb = document.getElementById(getCurrencyId(market, symbol));
+      if (cb) cb.checked = !enabled;
+    }
+  } catch (err) {
+    showToast('Request failed: ' + err.message, 'danger');
+    const cb = document.getElementById(getCurrencyId(market, symbol));
+    if (cb) cb.checked = !enabled;
+  }
+}
+</script>
+{% endblock %}

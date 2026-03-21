@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Forex Trades{% endblock %}
+
+{% block content %}
+<!-- ── Page header ─────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0 forex-brand-logo"><i class="bi bi-clock-history me-2"></i>Forex Trade History</h2>
+    <span class="forex-brand-sub">Crypto Bot</span>
+  </div>
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    {% if trading_mode == 'live' %}
+    <span class="badge mode-live fs-6"><i class="bi bi-circle-fill me-1"></i>LIVE</span>
+    {% else %}
+    <span class="badge mode-demo fs-6"><i class="bi bi-circle me-1"></i>{% if trading_mode %}{{ trading_mode | upper }}{% else %}DEMO{% endif %}</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Summary stats ───────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3">
+        <div class="stat-label">Total Trades</div>
+        <div class="stat-value">{{ total_trades | default(value=0) }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value">{{ win_rate | default(value="—") }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3">
+        <div class="stat-label">Total P&amp;L</div>
+        <div class="stat-value {% if total_pnl_val | default(value=0)  >= 0 %}pip-pnl-positive{% else %}pip-pnl-negative{% endif %}">
+          {{ total_pnl | default(value="$0.00") }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3">
+        <div class="stat-label">Avg Pips/Trade</div>
+        <div class="stat-value" id="avg-pips">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Filters ─────────────────────────────────────────────────────────── -->
+<div class="forex-filter-bar mb-4">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-3">
+      <label class="form-label small text-muted mb-1">Pair</label>
+      <select id="filter-pair" class="form-select form-select-sm bg-dark text-light border-secondary"
+              onchange="applyForexFilters()">
+        <option value="">All pairs</option>
+        <option value="XAU/USD">XAU/USD (Gold)</option>
+        <option value="XAG/USD">XAG/USD (Silver)</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-3">
+      <label class="form-label small text-muted mb-1">Strategy</label>
+      <select id="filter-strategy" class="form-select form-select-sm bg-dark text-light border-secondary"
+              onchange="applyForexFilters()">
+        <option value="">All strategies</option>
+        {% if strategy_list is defined %}
+          {% for strat in strategy_list %}
+          <option value="{{ strat }}">{{ strat }}</option>
+          {% endfor %}
+        {% endif %}
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small text-muted mb-1">From</label>
+      <input type="date" id="filter-from" class="form-control form-control-sm bg-dark text-light border-secondary"
+             onchange="applyForexFilters()" />
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small text-muted mb-1">To</label>
+      <input type="date" id="filter-to" class="form-control form-control-sm bg-dark text-light border-secondary"
+             onchange="applyForexFilters()" />
+    </div>
+    <div class="col-12 col-md-2">
+      <button class="btn btn-sm btn-outline-secondary w-100" onclick="resetForexFilters()">
+        <i class="bi bi-x-circle me-1"></i>Reset
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Trade history table ─────────────────────────────────────────────── -->
+<div class="card border-0">
+  <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+    <h5 class="mb-0"><i class="bi bi-table me-2"></i>Trades</h5>
+    <span class="text-muted small" id="trade-count-label">{{ total_trades | default(value=0) }} trades</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-dark table-hover table-sm mb-0 forex-positions-table" id="forex-trades-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Pair</th>
+            <th>Side</th>
+            <th>Lots</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Pips</th>
+            <th>P&amp;L (USD)</th>
+            <th>Strategy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="forex-trades-tbody">
+          {% if trades %}
+            {% for trade in trades %}
+            {% set sym = trade.symbol | default(value="") %}
+            {% set side = trade.side | default(value="long") | lower %}
+            {% set pnl = trade.pnl | default(value=0)  %}
+            {% set pip_pnl = trade.pip_pnl | default(value=0)  %}
+            <tr class="forex-trade-row"
+                data-pair="{{ sym }}"
+                data-strategy="{{ trade.strategy | default(value="") }}"
+                data-time="{{ trade.timestamp | default(value="") }}">
+              <td class="text-muted small">
+                {{ trade.timestamp | default(value="—") }}
+              </td>
+              <td>
+                <span class="pair-badge {% if sym is containing("XAU") %}pair-badge-xauusd{% elif sym is containing("XAG") %}pair-badge-xagusd{% endif %}">
+                  <i class="bi bi-gem"></i>{{ sym | default(value="—") }}
+                </span>
+              </td>
+              <td>
+                <span class="{% if side == 'long' or side == 'buy' %}text-success{% else %}text-danger{% endif %}">
+                  <i class="bi {% if side == 'long' or side == 'buy' %}bi-arrow-up-circle-fill{% else %}bi-arrow-down-circle-fill{% endif %} me-1"></i>
+                  {{ side | upper }}
+                </span>
+              </td>
+              <td>{{ trade.lot_size | default(value="—") }}</td>
+              <td>{% if trade.entry_price %}{{ trade.entry_price | round(precision=2) }}{% else %}—{% endif %}</td>
+              <td>{% if trade.exit_price %}{{ trade.exit_price | round(precision=2) }}{% else %}—{% endif %}</td>
+              <td class="{% if pip_pnl >= 0 %}pip-pnl-positive{% else %}pip-pnl-negative{% endif %}">
+                {% if pip_pnl >= 0 %}+{% endif %}{{ pip_pnl | round(precision=1) }}
+              </td>
+              <td class="{% if pnl >= 0 %}pip-pnl-positive{% else %}pip-pnl-negative{% endif %}">
+                {% if pnl >= 0 %}+{% endif %}${{ pnl | round(precision=2) }}
+              </td>
+              <td class="text-muted small">{{ trade.strategy | default(value="—") }}</td>
+              <td>
+                {% set status = trade.status | default(value="closed") | lower %}
+                <span class="badge {% if status == 'open' %}bg-success{% elif status == 'closed' %}bg-secondary{% else %}bg-warning text-dark{% endif %}">
+                  {{ status | upper }}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="10" class="text-center text-muted py-5">
+                <i class="bi bi-inbox fs-3 d-block mb-2"></i>No forex trade history
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function applyForexFilters() {
+    const pair     = document.getElementById('filter-pair').value.toLowerCase();
+    const strategy = document.getElementById('filter-strategy').value.toLowerCase();
+    const from     = document.getElementById('filter-from').value;
+    const to       = document.getElementById('filter-to').value;
+    const rows     = document.querySelectorAll('.forex-trade-row');
+    let visible    = 0;
+    rows.forEach(row => {
+        const rowPair     = (row.dataset.pair || '').toLowerCase();
+        const rowStrategy = (row.dataset.strategy || '').toLowerCase();
+        const rowTime     = row.dataset.time || '';
+        const matchPair     = !pair     || rowPair.includes(pair);
+        const matchStrategy = !strategy || rowStrategy.includes(strategy);
+        const matchFrom     = !from     || rowTime >= from;
+        const matchTo       = !to       || rowTime <= to + 'T23:59:59';
+        const show = matchPair && matchStrategy && matchFrom && matchTo;
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    const label = document.getElementById('trade-count-label');
+    if (label) label.textContent = visible + ' trades';
+}
+
+function resetForexFilters() {
+    ['filter-pair', 'filter-strategy', 'filter-from', 'filter-to'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    applyForexFilters();
+}
+</script>
+{% endblock %}

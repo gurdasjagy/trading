@@ -1,0 +1,261 @@
+# docker-compose.yml — Optimized for 4 vCPU / 8 GB RAM / 160 GB Storage VPS
+# ──────────────────────────────────────────────────────────────────────────
+# Exchange: Gate.io is the SOLE exchange for all modes (futures + forex).
+#
+# Resource budget:
+#   Rust engine:      2 vCPU, 2.5 GB RAM  (hot path — WS, orderbook, strategy, execution)
+#   Python cold path: 1 vCPU, 2.5 GB RAM  (regime, sentiment, dashboard — unified)
+#   Redis:            shared,  512 MB RAM  (cache, pub/sub)
+#   PostgreSQL:       shared,  1   GB RAM  (trade journal, state persistence)
+#   OS / overhead:    ~1 vCPU, 1.5 GB RAM
+#   Total:            4 vCPU,  8   GB RAM
+
+version: "3.9"
+
+services:
+  # ═══════════════════════════════════════════════════════════
+  # HOT PATH: Rust Trading Engine (Gate.io Only)
+  # ═══════════════════════════════════════════════════════════
+  rust-engine:
+    build:
+      context: ..
+      dockerfile: rust_engine/Dockerfile
+      args:
+        RUSTFLAGS: "-C target-cpu=native -C opt-level=3 -C lto=fat"
+    user: "0:0"
+    network_mode: "host"
+    ipc: host
+    privileged: false
+    tmpfs:
+      - /dev/shm:exec,size=256m,mode=1777
+    volumes:
+      - ./config:/etc/trading:ro
+      - engine-logs:/var/log/trading
+      - ./.env:/app/.env:ro
+    environment:
+      - RUST_LOG=info
+      # Path to .env file for dotenvy to load inside the container
+      - DOTENV_PATH=/app/.env
+      # Trading mode: paper | live | testnet | forex_live | forex_demo
+      - TRADING_MODE=${TRADING_MODE:-paper}
+      # Gate.io live/paper credentials
+      - GATEIO_API_KEY=${GATEIO_API_KEY:-}
+      - GATEIO_SECRET_KEY=${GATEIO_SECRET_KEY:-}
+      - GATEIO_API_SECRET=${GATEIO_SECRET_KEY:-}
+      # Gate.io testnet credentials (used when TRADING_MODE=testnet)
+      - GATEIO_TESTNET_API_KEY=${GATEIO_TESTNET_API_KEY:-}
+      - GATEIO_TESTNET_SECRET_KEY=${GATEIO_TESTNET_SECRET_KEY:-}
+      - GATEIO_TESTNET_API_SECRET=${GATEIO_TESTNET_SECRET_KEY:-}
+      # Gate.io TradFi / Forex credentials (MT5)
+      - GATEIO_TRADFI_LOGIN=${GATEIO_TRADFI_LOGIN:-}
+      - GATEIO_TRADFI_PASSWORD=${GATEIO_TRADFI_PASSWORD:-}
+      - GATEIO_TRADFI_SERVER=${GATEIO_TRADFI_SERVER:-}
+      # Gate.io TradFi demo credentials (used when TRADING_MODE=forex_demo)
+      - GATEIO_TRADFI_DEMO_LOGIN=${GATEIO_TRADFI_DEMO_LOGIN:-}
+      - GATEIO_TRADFI_DEMO_PASSWORD=${GATEIO_TRADFI_DEMO_PASSWORD:-}
+      - GATEIO_TRADFI_DEMO_SERVER=${GATEIO_TRADFI_DEMO_SERVER:-}
+      # Infrastructure
+      - JOURNAL_DIR=/dev/shm/trading_journal
+      - STATE_SHM_PATH=/dev/shm/trading_state
+      - REGIME_SHM_PATH=/dev/shm/regime_weights
+      - TRADING_CONFIG=/etc/trading/engine_config.toml
+      - THREAD_TOPOLOGY=auto
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2560M
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    # sysctls: REMOVED - Cannot modify host network sysctls when using network_mode: "host"
+    # These network optimizations should be applied at the host OS level instead:
+    #   sudo sysctl -w net.core.rmem_max=8388608
+    #   sudo sysctl -w net.core.wmem_max=8388608
+    #   sudo sysctl -w net.ipv4.tcp_rmem="4096 65536 8388608"
+    #   sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 8388608"
+    #   sudo sysctl -w net.ipv4.tcp_nodelay=1
+    #   sudo sysctl -w net.ipv4.tcp_fastopen=3
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/engine_heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ═══════════════════════════════════════════════════════════
+  # COLD PATH: Unified Python Services
+  # (Cold Path Orchestrator: Regime + Sentiment + Dashboard +
+  #  PnL Attribution + Graceful Degradation + Alert Dispatcher)
+  # ═══════════════════════════════════════════════════════════
+  python-services:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      rust-engine:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+    network_mode: "host"
+    ipc: host
+    tmpfs:
+      - /dev/shm:exec,size=256m,mode=1777
+    volumes:
+      - ./config:/etc/trading:ro
+      - trade-data:/app/data
+    environment:
+      - REDIS_URL=redis://127.0.0.1:6379
+      - DATABASE_URL=postgresql+asyncpg://trading:${POSTGRES_PASSWORD:-trading123}@127.0.0.1:5432/trading_bot
+      - REGIME_INTERVAL_SECONDS=300
+      - SENTIMENT_INTERVAL_SECONDS=900
+      - REGIME_SHM_PATH=/dev/shm/regime_weights
+      - STATE_SHM_PATH=/dev/shm/trading_state
+      - JOURNAL_DIR=/dev/shm/trading_journal
+      # Trading mode
+      - TRADING_MODE=${TRADING_MODE:-paper}
+      # Gate.io credentials
+      - GATEIO_API_KEY=${GATEIO_API_KEY:-}
+      - GATEIO_SECRET_KEY=${GATEIO_SECRET_KEY:-}
+      - GATEIO_TESTNET_API_KEY=${GATEIO_TESTNET_API_KEY:-}
+      - GATEIO_TESTNET_SECRET_KEY=${GATEIO_TESTNET_SECRET_KEY:-}
+      # Gate.io TradFi (forex)
+      - GATEIO_TRADFI_LOGIN=${GATEIO_TRADFI_LOGIN:-}
+      - GATEIO_TRADFI_PASSWORD=${GATEIO_TRADFI_PASSWORD:-}
+      - GATEIO_TRADFI_SERVER=${GATEIO_TRADFI_SERVER:-}
+      # AI keys
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - USE_AI=${USE_AI:-on}
+      - ENABLE_FOREX_TRADING=${ENABLE_FOREX_TRADING:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Dashboard port — MUST differ from Rust engine (which binds :8080)
+      - DASHBOARD_PORT=8081
+      # Dashboard auth
+      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
+      # Alerting: ALERT_TELEGRAM_BOT_TOKEN is the bot that sends alerts
+      # ALERT_TELEGRAM_CHAT_ID is the chat/user to receive alerts
+      - ALERT_TELEGRAM_BOT_TOKEN=${ALERT_TELEGRAM_BOT_TOKEN:-}
+      - ALERT_TELEGRAM_CHAT_ID=${ALERT_TELEGRAM_CHAT_ID:-}
+      - ALERT_DISCORD_WEBHOOK=${ALERT_DISCORD_WEBHOOK:-}
+    command: python -m core.cold_path_orchestrator
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2560M
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ═══════════════════════════════════════════════════════════
+  # INFRASTRUCTURE: Redis (in-memory cache & pub/sub)
+  # ═══════════════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    network_mode: "host"
+    command: >
+      redis-server
+        --maxmemory 384mb
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+        --tcp-keepalive 60
+        --hz 10
+        --lfu-log-factor 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ═══════════════════════════════════════════════════════════
+  # INFRASTRUCTURE: PostgreSQL (trade journal & persistence)
+  # ═══════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:16-alpine
+    network_mode: "host"
+    environment:
+      POSTGRES_DB: trading_bot
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trading123}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c effective_cache_size=512MB
+        -c work_mem=16MB
+        -c maintenance_work_mem=64MB
+        -c max_connections=50
+        -c wal_buffers=8MB
+        -c checkpoint_completion_target=0.9
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c max_wal_size=256MB
+        -c min_wal_size=64MB
+        -c log_min_duration_statement=1000
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres-data:
+    driver: local
+  trade-data:
+    driver: local
+  engine-logs:
+    driver: local

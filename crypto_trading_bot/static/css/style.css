@@ -1,0 +1,380 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   CryptoBot — Dark Theme Custom Styles
+   Works on top of Bootstrap 5 (data-bs-theme="dark")
+   Institutional-grade professional trading dashboard styling
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── CSS custom properties ─────────────────────────────────────────────── */
+:root {
+  --bg-primary:     #0d1117;
+  --bg-secondary:   #161b22;
+  --bg-card:        #1c2128;
+  --bg-hover:       #21262d;
+  --border-color:   #30363d;
+
+  --text-primary:   #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted:     #6e7681;
+
+  --accent-green:   #3fb950;
+  --accent-red:     #f85149;
+  --accent-yellow:  #d29922;
+  --accent-blue:    #58a6ff;
+  --accent-purple:  #bc8cff;
+
+  --font-mono:      "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* Professional shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.18);
+}
+
+/* ── Base layout ──────────────────────────────────────────────────────── */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  overflow-x: hidden;
+}
+
+.bg-primary-dark { background-color: var(--bg-primary) !important; }
+
+/* Smooth scrolling */
+html { scroll-behavior: smooth; }
+
+/* ── Card styling ─────────────────────────────────────────────────────── */
+.card {
+  background-color: var(--bg-card);
+  border-color: var(--border-color) !important;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-header {
+  background-color: transparent;
+  border-bottom-color: var(--border-color) !important;
+  font-weight: 600;
+}
+
+/* Metric cards — subtle glow on hover with smooth animations */
+.metric-card {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+  border: 1px solid var(--border-color) !important;
+  border-radius: 0.75rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.metric-card:hover {
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 0 1px var(--accent-blue), var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.metric-card:hover::before {
+  opacity: 1;
+}
+
+/* ── Table styling ─────────────────────────────────────────────────────── */
+.table-dark {
+  --bs-table-bg: var(--bg-card);
+  --bs-table-striped-bg: var(--bg-secondary);
+  --bs-table-hover-bg: var(--bg-hover);
+  --bs-table-border-color: var(--border-color);
+  color: var(--text-primary);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-dark th {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-color: var(--border-color);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background-color: var(--bg-card);
+  z-index: 10;
+}
+
+.table-dark td {
+  border-color: var(--border-color);
+  vertical-align: middle;
+}
+
+.table-dark tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+/* ── Status indicator dots ──────────────────────────────────────────── */
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--online {
+  background-color: var(--accent-green);
+  box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.6);
+  animation: pulse-green 2s infinite;
+}
+
+.status-dot--offline {
+  background-color: var(--accent-red);
+  box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.6);
+  animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-green {
+  0%   { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.6); }
+  70%  { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);   }
+}
+
+@keyframes pulse-red {
+  0%   { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.6); }
+  70%  { box-shadow: 0 0 0 6px rgba(248, 81, 73, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0);   }
+}
+
+/* ── P&L colour coding ─────────────────────────────────────────────── */
+.text-pnl-positive, .pnl-positive { color: var(--accent-green) !important; font-weight: 600; }
+.text-pnl-negative, .pnl-negative { color: var(--accent-red)   !important; font-weight: 600; }
+
+/* Applied via JS; keep specificity low */
+.pnl-value.positive { color: var(--accent-green) !important; }
+.pnl-value.negative { color: var(--accent-red)   !important; }
+
+/* ── Direction badges ──────────────────────────────────────────────── */
+.direction-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.25em 0.55em;
+  border-radius: 0.25rem;
+}
+
+.direction-badge--long    { background-color: rgba(63, 185, 80, 0.15);  color: var(--accent-green); }
+.direction-badge--short   { background-color: rgba(248, 81, 73, 0.15);  color: var(--accent-red);   }
+.direction-badge--neutral { background-color: rgba(139, 148, 158, 0.15); color: var(--text-secondary); }
+
+/* ── Navbar ─────────────────────────────────────────────────────────── */
+.navbar {
+  border-bottom: 1px solid var(--border-color) !important;
+  backdrop-filter: blur(10px);
+  background-color: rgba(13, 17, 23, 0.95) !important;
+  box-shadow: var(--shadow-md);
+}
+
+.navbar-brand {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.nav-link {
+  color: var(--text-secondary) !important;
+  font-size: 0.85rem;
+  transition: all 0.15s ease;
+  position: relative;
+  padding: 0.5rem 1rem !important;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: var(--accent-blue);
+  transition: all 0.3s ease;
+  transform: translateX(-50%);
+}
+
+.nav-link:hover::after, .nav-link.active::after {
+  width: 80%;
+}
+
+.nav-link:hover, .nav-link.active {
+  color: var(--text-primary) !important;
+}
+
+/* ── Form controls ─────────────────────────────────────────────────── */
+.form-control, .form-select {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.form-control:focus, .form-select:focus {
+  background-color: var(--bg-secondary);
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+/* ── Log stream ────────────────────────────────────────────────────── */
+.log-stream {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Responsive grid overrides ─────────────────────────────────────── */
+@media (max-width: 575.98px) {
+  .metric-card .card-title { font-size: 1.4rem; }
+}
+
+/* ── List group dark overrides ─────────────────────────────────────── */
+.list-group-item.bg-dark {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary);
+}
+
+.list-group-item.list-group-item-action:hover {
+  background-color: var(--bg-hover) !important;
+}
+
+/* ── Progress bars ─────────────────────────────────────────────────── */
+.progress { background-color: var(--bg-secondary); }
+
+/* ── Emergency stop button pulse ───────────────────────────────────── */
+#emergency-stop-btn {
+  animation: pulse-danger 2.5s infinite;
+}
+
+@keyframes pulse-danger {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(248, 81, 73, 0);  }
+}
+
+/* ── Real-time value flash animations ──────────────────────────────── */
+@keyframes flash-green {
+  0%   { background-color: rgba(63, 185, 80, 0.35); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-red {
+  0%   { background-color: rgba(248, 81, 73, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.flash-green {
+  animation: flash-green 0.6s ease-out;
+  border-radius: 3px;
+}
+
+.flash-red {
+  animation: flash-red 0.6s ease-out;
+  border-radius: 3px;
+}
+
+/* ── Real-time price ticker bar ─────────────────────────────────────── */
+#price-ticker-bar {
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.3rem 1rem;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.ticker-item {
+  display: inline-block;
+}
+
+/* ── K-Line chart container ─────────────────────────────────────────── */
+#kline-chart-container {
+  border-radius: 0 0 0.375rem 0.375rem;
+  overflow: hidden;
+}
+
+#kline-row .card {
+  border: 1px solid var(--border-color) !important;
+}
+
+/* Manual trade override panel warning border */
+#kline-row .border-warning {
+  border-color: rgba(255, 193, 7, 0.3) !important;
+}
+
+#manual-trade-leverage {
+  accent-color: var(--accent-yellow);
+}
+
+
+/* ── Upgrade 1: Equity Curve & Analytics panels ─────────────────────── */
+
+/* Equity curve chart container */
+#equity-curve-container,
+#pnl-waterfall-container {
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* Strategy performance cards */
+#strategy-perf-cards .card {
+  border: 1px solid var(--border-color) !important;
+  transition: border-color 0.2s ease, transform 0.15s ease;
+}
+
+#strategy-perf-cards .card:hover {
+  border-color: var(--accent-blue) !important;
+  transform: translateY(-2px);
+}
+
+/* VaR / CVaR progress bars */
+#var-bar-95    { transition: width 0.5s ease; }
+#cvar-bar-95   { transition: width 0.5s ease; }
+#margin-util-bar { transition: width 0.5s ease; }
+#compound-progress-bar { transition: width 0.5s ease; }
+
+/* Profit compounder multiplier display */
+#compound-multiplier {
+  color: var(--accent-green);
+  font-size: 2.5rem;
+  line-height: 1.1;
+}
+
+/* Liquidation table — tighten for small screens */
+#liquidation-table-wrapper {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* Toast container positioning */
+#toast-container {
+  max-width: 340px;
+}
+
+/* Responsive grid: stack on mobile */
+@media (max-width: 767.98px) {
+  #equity-curve-container { height: 180px !important; }
+  #pnl-waterfall-container { height: 160px !important; }
+  #strategy-perf-cards .col-6 { flex: 0 0 100%; max-width: 100%; }
+}

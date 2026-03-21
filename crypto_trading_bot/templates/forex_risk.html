@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Forex Risk{% endblock %}
+
+{% block content %}
+<!-- ── Page header ─────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0 forex-brand-logo"><i class="bi bi-shield-exclamation me-2"></i>Forex Risk</h2>
+    <span class="forex-brand-sub">Crypto Bot</span>
+  </div>
+  <button class="btn btn-sm btn-outline-warning" onclick="loadRiskData()">
+    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+  </button>
+</div>
+
+<!-- ── Risk KPI cards ────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Recovery Mode</div>
+        <div class="stat-value" id="kpi-recovery">—</div>
+        <div class="text-muted small" id="kpi-recovery-level"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Margin Level</div>
+        <div class="stat-value" id="kpi-margin">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Consec. Losses</div>
+        <div class="stat-value" id="kpi-consec-losses">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card forex-stat-card border-0">
+      <div class="card-body py-3 text-center">
+        <div class="stat-label">Max Drawdown</div>
+        <div class="stat-value" id="kpi-max-dd">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Session risk & open positions ──────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-clock me-2"></i>Session Risk Status</h6>
+        <div id="session-risk-info">
+          <table class="table table-sm">
+            <tbody>
+              <tr><td>Current Session</td><td id="session-name" class="text-end fw-bold">—</td></tr>
+              <tr><td>Session P&L</td><td id="session-pnl" class="text-end">—</td></tr>
+              <tr><td>Session Trades</td><td id="session-trades" class="text-end">—</td></tr>
+              <tr><td>Open Positions</td><td id="open-count" class="text-end">—</td></tr>
+              <tr><td>Risk Multiplier</td><td id="risk-mult" class="text-end">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-0">
+      <div class="card-body">
+        <h6 class="card-title text-muted mb-3"><i class="bi bi-bar-chart me-2"></i>Session P&L Breakdown</h6>
+        <canvas id="chart-session-pnl" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Lot calculator ─────────────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-body">
+    <h6 class="card-title text-muted mb-3"><i class="bi bi-calculator me-2"></i>Lot Size Calculator</h6>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-2">
+        <label class="form-label small">Symbol</label>
+        <select class="form-select form-select-sm" id="calc-symbol">
+          <option>XAU/USD</option><option>XAG/USD</option>
+          <option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Equity ($)</label>
+        <input type="number" class="form-control form-control-sm" id="calc-equity" value="10000" step="100">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">SL (pips)</label>
+        <input type="number" class="form-control form-control-sm" id="calc-sl" value="200" step="10">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Leverage</label>
+        <input type="number" class="form-control form-control-sm" id="calc-leverage" value="20" min="1" max="100">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Risk %</label>
+        <input type="number" class="form-control form-control-sm" id="calc-risk" value="1.0" step="0.1" min="0.1" max="5">
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-warning btn-sm w-100" onclick="calculateLot()">
+          <i class="bi bi-calculator me-1"></i>Calculate
+        </button>
+      </div>
+    </div>
+    <div id="calc-result" class="mt-3"></div>
+  </div>
+</div>
+
+<!-- ── Open positions ─────────────────────────────────────────────────── -->
+<div class="card border-0 mb-4">
+  <div class="card-body">
+    <h6 class="card-title text-muted mb-3"><i class="bi bi-briefcase me-2"></i>Open Forex Positions</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead class="table-dark">
+          <tr>
+            <th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th>
+            <th>SL</th><th>TP</th><th>Trailing</th><th>Session</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-positions">
+          <tr><td colspan="9" class="text-center text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let sessionPnlChart;
+
+async function loadRiskData() {
+  try {
+    const [riskRes, posRes, sessRes] = await Promise.all([
+      fetch('/api/forex/risk'),
+      fetch('/api/forex/positions'),
+      fetch('/api/forex/sessions'),
+    ]);
+    const risk = riskRes.ok ? await riskRes.json() : {};
+    const posData = posRes.ok ? await posRes.json() : {};
+    const sessions = sessRes.ok ? await sessRes.json() : {};
+
+    updateRiskKpis(risk);
+    updateSessionInfo(risk, sessions);
+    updateSessionChart(risk.session_pnl_breakdown || sessions.session_pnl || {});
+    updatePositionsTable(posData.positions || posData.forex_positions || []);
+  } catch(e) { console.error('loadRiskData error', e); }
+}
+
+function updateRiskKpis(r) {
+  const recovEl = document.getElementById('kpi-recovery');
+  const in_recovery = r.in_recovery_mode;
+  const level = r.recovery_mode_level || 0;
+  const LEVELS = ['Normal', 'Light (-20%)', 'Medium (-40%)', 'Heavy (-60%)', 'STOPPED'];
+  recovEl.innerHTML = in_recovery
+    ? `<span class="badge bg-warning text-dark">ACTIVE</span>`
+    : `<span class="badge bg-success">OFF</span>`;
+  document.getElementById('kpi-recovery-level').textContent = LEVELS[level] || '';
+
+  const marginMap = { healthy: 'success', warning: 'warning', alert: 'danger', critical: 'danger', unknown: 'secondary' };
+  const mc = marginMap[r.margin_level] || 'secondary';
+  document.getElementById('kpi-margin').innerHTML = `<span class="badge bg-${mc} text-uppercase">${r.margin_level||'—'}</span>`;
+
+  const cl = r.consecutive_losses || 0;
+  document.getElementById('kpi-consec-losses').innerHTML =
+    `<span class="${cl >= 3 ? 'text-danger fw-bold' : ''}">${cl}</span>`;
+
+  document.getElementById('kpi-max-dd').innerHTML =
+    `<span class="${(r.max_drawdown_pct_seen||0) > 5 ? 'text-warning' : 'text-success'}">${(r.max_drawdown_pct_seen||0).toFixed(2)}%</span>`;
+}
+
+function updateSessionInfo(r, sessions) {
+  const pnl = r.session_pnl || 0;
+  document.getElementById('session-name').textContent = r.session_name || (sessions.current_sessions || []).join(', ') || '—';
+  document.getElementById('session-pnl').innerHTML = pnl >= 0
+    ? `<span class="text-success">+${pnl.toFixed(2)}</span>`
+    : `<span class="text-danger">${pnl.toFixed(2)}</span>`;
+  document.getElementById('session-trades').textContent = r.session_trades ?? '—';
+  document.getElementById('open-count').textContent = r.open_trade_count ?? '—';
+  document.getElementById('risk-mult').textContent = r.session_risk_multiplier ? `×${parseFloat(r.session_risk_multiplier).toFixed(2)}` : '—';
+}
+
+function updateSessionChart(breakdown) {
+  const labels = Object.keys(breakdown).map(k => k.replace('_', ' '));
+  const data = Object.values(breakdown);
+  if (sessionPnlChart) sessionPnlChart.destroy();
+  const ctx = document.getElementById('chart-session-pnl').getContext('2d');
+  sessionPnlChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Session P&L ($)',
+        data,
+        backgroundColor: data.map(v => v >= 0 ? 'rgba(40,167,69,0.7)' : 'rgba(220,53,69,0.7)'),
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } } } }
+  });
+}
+
+function updatePositionsTable(positions) {
+  const tbody = document.getElementById('tbody-positions');
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No open positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(p => {
+    const sideHtml = (p.side||'').toLowerCase() === 'long'
+      ? '<span class="badge bg-success">LONG</span>'
+      : '<span class="badge bg-danger">SHORT</span>';
+    const tpPrices = Array.isArray(p.take_profit_prices) ? p.take_profit_prices.join(', ') : (p.take_profit_price || '—');
+    return `<tr>
+      <td><strong>${p.symbol||'—'}</strong></td>
+      <td>${sideHtml}</td>
+      <td>${p.lot_size||'—'}</td>
+      <td>${p.entry_price ? parseFloat(p.entry_price).toFixed(4) : '—'}</td>
+      <td>${p.stop_loss_price ? parseFloat(p.stop_loss_price).toFixed(4) : '—'}</td>
+      <td>${tpPrices}</td>
+      <td>${p.trailing_stop_active ? '<i class="bi bi-check-circle text-success"></i>' : '—'}</td>
+      <td>${p.session||'—'}</td>
+      <td>
+        <button class="btn btn-xs btn-outline-danger" onclick="closePosition('${p.symbol}')">
+          <i class="bi bi-x-circle"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function calculateLot() {
+  const symbol = document.getElementById('calc-symbol').value;
+  const equity = parseFloat(document.getElementById('calc-equity').value || 10000);
+  const sl = parseFloat(document.getElementById('calc-sl').value || 200);
+  const lev = parseInt(document.getElementById('calc-leverage').value || 20);
+  const risk = parseFloat(document.getElementById('calc-risk').value || 1.0);
+
+  const r = await fetch(`/api/forex/lot-calculator?symbol=${encodeURIComponent(symbol)}&equity=${equity}&sl_pips=${sl}&leverage=${lev}&risk_pct=${risk}`);
+  const result = document.getElementById('calc-result');
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({error: 'Unknown error'}));
+    result.innerHTML = `<div class="alert alert-danger">Error: ${err.error || r.status}</div>`;
+    return;
+  }
+  const data = await r.json();
+  result.innerHTML = `
+    <div class="row g-2">
+      <div class="col-auto"><span class="badge bg-warning text-dark fs-6">Lot Size: ${data.lot_size}</span></div>
+      <div class="col-auto"><span class="badge bg-secondary">Risk USD: $${data.risk_usd}</span></div>
+      <div class="col-auto"><span class="badge bg-secondary">Pip Value/Lot: $${data.pip_value_per_lot}</span></div>
+    </div>
+  `;
+}
+
+async function closePosition(symbol) {
+  if (!confirm(`Close position for ${symbol}?`)) return;
+  const r = await fetch(`/api/forex/positions/${encodeURIComponent(symbol)}/close`, { method: 'POST' });
+  if (r.ok) { alert('Position closed'); loadRiskData(); }
+  else { const e = await r.json().catch(() => ({})); alert('Error: ' + (e.detail || r.status)); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadRiskData();
+  setInterval(loadRiskData, 30000);
+});
+</script>
+{% endblock %}

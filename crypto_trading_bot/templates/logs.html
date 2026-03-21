@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}Logs{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-terminal me-2"></i>Live Logs</h2>
+  <div class="d-flex align-items-center gap-2">
+    <!-- Log level filter -->
+    <select class="form-select form-select-sm bg-dark text-light border-secondary"
+            id="log-level-filter" style="width:120px;" onchange="filterLogs()">
+      <option value="DEBUG">DEBUG</option>
+      <option value="INFO" selected>INFO</option>
+      <option value="WARNING">WARNING</option>
+      <option value="ERROR">ERROR</option>
+    </select>
+    <button class="btn btn-sm btn-outline-secondary" onclick="clearLogs()">
+      <i class="bi bi-trash me-1"></i>Clear
+    </button>
+    <button class="btn btn-sm btn-outline-info" onclick="scrollToBottom()">
+      <i class="bi bi-arrow-down-circle me-1"></i>Bottom
+    </button>
+    <span id="ws-log-status" class="badge bg-secondary">Connecting…</span>
+  </div>
+</div>
+
+<div class="card border-0">
+  <div class="card-body p-0">
+    <div id="log-stream"
+         class="log-stream font-monospace small p-3"
+         style="height:600px; overflow-y:auto; background:#0d1117; border-radius:0.375rem;">
+      <span class="text-muted">Waiting for log entries…</span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LOG_LEVELS = { DEBUG: 0, TRACE: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 3 };
+let currentMinLevel = 1; // INFO
+let logEntries = [];
+let logWs = null;
+let _logPollTimer = null;
+let _autoScroll = true;
+
+function filterLogs() {
+  const sel = document.getElementById('log-level-filter');
+  currentMinLevel = LOG_LEVELS[sel.value] ?? 1;
+  renderLogs();
+}
+
+function renderLogs() {
+  const container = document.getElementById('log-stream');
+  const visible = logEntries.filter(e => (LOG_LEVELS[e.level] ?? 0) >= currentMinLevel);
+  if (!visible.length) {
+    container.innerHTML = '<span class="text-muted">No entries match the selected level.</span>';
+    return;
+  }
+  container.innerHTML = visible.map(e => {
+    const colorClass = {
+      DEBUG: 'text-secondary', TRACE: 'text-secondary',
+      INFO: 'text-info',
+      WARNING: 'text-warning',
+      ERROR: 'text-danger', CRITICAL: 'text-danger',
+    }[e.level] || 'text-light';
+    const ts = e.ts ? e.ts.replace('T', ' ').replace(/\.\d+Z?$/, '') : '';
+    return `<div class="${colorClass}">` +
+           `<span class="text-muted me-2">${escapeHtml(ts)}</span>` +
+           `<span class="fw-bold me-2">[${e.level}]</span>` +
+           `<span>${escapeHtml(e.message || '')}</span></div>`;
+  }).join('');
+  if (_autoScroll) container.scrollTop = container.scrollHeight;
+}
+
+function addLogEntry(entry) {
+  logEntries.push(entry);
+  if (logEntries.length > 3000) logEntries.shift();
+  if ((LOG_LEVELS[entry.level] ?? 0) >= currentMinLevel) {
+    renderLogs();
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function clearLogs() {
+  logEntries = [];
+  renderLogs();
+}
+
+function scrollToBottom() {
+  const container = document.getElementById('log-stream');
+  container.scrollTop = container.scrollHeight;
+  _autoScroll = true;
+}
+
+// Detect manual scroll-up to pause auto-scroll
+document.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('log-stream');
+  if (container) {
+    container.addEventListener('scroll', () => {
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
+      _autoScroll = atBottom;
+    });
+  }
+});
+
+function connectLogWs() {
+  if (logWs && (logWs.readyState === WebSocket.CONNECTING || logWs.readyState === WebSocket.OPEN)) {
+    return;
+  }
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  // Pass auth token if available (set by main.js when auth is enabled)
+  const token = (typeof _ws_auth_token !== 'undefined' && _ws_auth_token)
+    ? '?token=' + encodeURIComponent(_ws_auth_token)
+    : '';
+  logWs = new WebSocket(`${proto}://${location.host}/ws/live${token}`);
+  const statusEl = document.getElementById('ws-log-status');
+
+  logWs.onopen = () => {
+    statusEl.textContent = 'Connected';
+    statusEl.className = 'badge bg-success';
+    // Stop polling fallback when WS is connected
+    if (_logPollTimer) {
+      clearInterval(_logPollTimer);
+      _logPollTimer = null;
+    }
+  };
+
+  logWs.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'log') {
+        addLogEntry(data);
+      }
+      // Handle batched logs for better performance
+      if (data.type === 'logs_batch' && data.logs) {
+        for (const logEntry of data.logs) {
+          addLogEntry(logEntry);
+        }
+      }
+      // Also handle live status updates to keep status badge accurate
+      if (data.type === 'update') {
+        // status update — connection is healthy, nothing extra needed
+      }
+    } catch {}
+  };
+
+  logWs.onclose = () => {
+    statusEl.textContent = 'Disconnected';
+    statusEl.className = 'badge bg-danger';
+    // Fall back to polling when WebSocket is unavailable
+    startLogPolling();
+    setTimeout(connectLogWs, 5000);
+  };
+
+  logWs.onerror = () => {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'badge bg-warning text-dark';
+  };
+}
+
+/** Polling fallback: fetch /api/logs when WebSocket is unavailable. */
+function startLogPolling() {
+  if (_logPollTimer) return;
+
+  async function _fetchAndAddLogLines() {
+    if (logWs && logWs.readyState === WebSocket.OPEN) return;
+    try {
+      const res = await fetch('/api/logs');
+      if (!res.ok) return;
+      const json = await res.json();
+      const lines = json.lines || [];
+      const now = new Date().toISOString();
+      lines.forEach(line => {
+        const stripped = line.trim();
+        if (!stripped) return;
+        let level = 'INFO';
+        if (stripped.includes('|| ERROR') || stripped.includes('|| CRITICAL')) level = 'ERROR';
+        else if (stripped.includes('|| WARNING')) level = 'WARNING';
+        else if (stripped.includes('|| DEBUG')) level = 'DEBUG';
+        addLogEntry({ type: 'log', level, message: stripped, ts: now });
+      });
+    } catch {}
+  }
+
+  _logPollTimer = setInterval(() => {
+    if (logWs && logWs.readyState === WebSocket.OPEN) {
+      clearInterval(_logPollTimer);
+      _logPollTimer = null;
+      return;
+    }
+    _fetchAndAddLogLines();
+  }, 5000);
+
+  // Run immediately
+  _fetchAndAddLogLines();
+}
+
+connectLogWs();
+</script>
+{% endblock %}

@@ -1,0 +1,131 @@
+/* ── Forex Dashboard Styles ───────────────────────────────────────────── */
+
+/* ── Branding ──────────────────────────────────────────────────────────── */
+.forex-brand-logo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffd700;
+  line-height: 1.1;
+}
+
+.forex-brand-sub {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* ── Mode badge ────────────────────────────────────────────────────────── */
+.mode-demo {
+  background-color: #0dcaf0 !important;
+  color: #000 !important;
+}
+.mode-live {
+  background-color: #dc3545 !important;
+}
+
+/* ── Portfolio cards ───────────────────────────────────────────────────── */
+.forex-stat-card {
+  border-left: 3px solid #ffd700;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  background: rgba(255, 215, 0, 0.05);
+}
+
+.forex-stat-card .stat-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.forex-stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f8f9fa;
+}
+
+/* ── Chart containers ──────────────────────────────────────────────────── */
+.forex-chart-container {
+  width: 100%;
+  height: 300px;
+  background: #0d1117;
+  border-radius: 4px;
+  position: relative;
+}
+
+/* ── Positions table ───────────────────────────────────────────────────── */
+.forex-positions-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.forex-positions-table td {
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.pip-pnl-positive {
+  color: #20c997;
+  font-weight: 600;
+}
+
+.pip-pnl-negative {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+/* ── Currency pair toggles ─────────────────────────────────────────────── */
+.pair-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: default;
+}
+
+.pair-badge-xauusd {
+  background: rgba(255, 215, 0, 0.15);
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
+.pair-badge-xagusd {
+  background: rgba(192, 192, 192, 0.15);
+  color: #c0c0c0;
+  border: 1px solid rgba(192, 192, 192, 0.3);
+}
+
+/* ── Spread indicator ──────────────────────────────────────────────────── */
+.spread-indicator {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Forex nav highlight ───────────────────────────────────────────────── */
+.forex-nav-group .nav-link {
+  color: rgba(255, 215, 0, 0.75);
+}
+
+.forex-nav-group .nav-link:hover,
+.forex-nav-group .nav-link.active {
+  color: #ffd700;
+}
+
+/* ── Filter bar ────────────────────────────────────────────────────────── */
+.forex-filter-bar {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
