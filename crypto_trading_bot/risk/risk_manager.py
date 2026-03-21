@@ -20,12 +20,20 @@ from .drawdown_protector import DrawdownProtector
 from .dynamic_take_profit import DynamicTakeProfitEngine
 from .intelligent_trailing import IntelligentTrailingStop
 from .leverage_optimizer import LeverageOptimizer
+from .microstructure_sizer import MicrostructureSizer
 from .portfolio_optimizer import PortfolioOptimizer
 from .position_sizer import PositionSizer
 from .profit_compounder import ProfitCompounder
 from .stop_loss_engine import StopLossEngine
 from .take_profit_engine import TakeProfitEngine
 from .var_cvar_calculator import VaRCVaRCalculator
+
+# Import MTF momentum filter (Phase 3: System 2)
+try:
+    from strategy.signals.mtf_momentum_filter import MTFMomentumFilter
+    _MTF_MOMENTUM_AVAILABLE = True
+except ImportError:
+    _MTF_MOMENTUM_AVAILABLE = False
 
 
 class RiskApproval(BaseModel):
@@ -95,6 +103,12 @@ class RiskManager:
             base_size_pct=self._risk.max_position_size_pct / 100.0,
             max_compound_multiplier=2.0,
         )
+        self._microstructure_sizer = MicrostructureSizer()
+        # Phase 3: System 2 - Multi-timeframe momentum filter
+        if _MTF_MOMENTUM_AVAILABLE:
+            self._mtf_momentum_filter = MTFMomentumFilter()
+        else:
+            self._mtf_momentum_filter = None
         # Support/resistance levels cache — updated via update_market_state()
         self._sr_levels: List[float] = []
 
@@ -189,6 +203,24 @@ class RiskManager:
                     rejection_reason=f"Trade quality score {trade_quality_score:.3f} below threshold {min_quality:.3f}",
                 )
             logger.debug("Trade quality check passed: {:.3f} >= {:.3f}", trade_quality_score, min_quality)
+
+        # Phase 3: System 2 - Multi-timeframe momentum filter
+        mtf_size_multiplier = 1.0
+        if self._mtf_momentum_filter is not None:
+            market_data = trade_signal.get("market_data", {})
+            if market_data:
+                should_proceed, size_mult, reasoning = self._mtf_momentum_filter.check_momentum_alignment(
+                    market_data
+                )
+                if not should_proceed:
+                    return RiskApproval(
+                        approved=False,
+                        symbol=symbol,
+                        direction=direction,
+                        rejection_reason=f"MTF momentum filter: {reasoning}",
+                    )
+                mtf_size_multiplier = size_mult
+                logger.debug("MTF momentum filter passed: mult={:.2f} - {}", size_mult, reasoning)
 
         logger.info("Validating trade signal: {} {} @ {}", symbol, direction, entry_price)
 
@@ -285,6 +317,8 @@ class RiskManager:
         # Calculate components
         position_size = await self.calculate_position_size(symbol, direction, capital)
         position_size *= size_multiplier
+        # Apply MTF momentum multiplier (Phase 3: System 2)
+        position_size *= mtf_size_multiplier
 
         # Pre-trade notional validation: reject if the USDT position size would exceed
         # max_position_size_pct of total capital.  All sizing methods return values in USDT,
@@ -464,6 +498,72 @@ class RiskManager:
                     )
             except Exception as exc:
                 logger.debug("ProfitCompounder skipped ({})", exc)
+
+            # Apply microstructure adjustments (Phase 3: System 1)
+            try:
+                from core.shared_state_reader import SharedStateReader
+
+                shm_reader = SharedStateReader()
+                snapshot = shm_reader.read_consistent()
+
+                if snapshot.is_consistent and snapshot.symbols:
+                    # Use first symbol's microstructure data (or match by symbol_id)
+                    sym = snapshot.symbols[0]
+
+                    # VPIN adjustment
+                    vpin = sym.vpin
+                    vpin_mult = self._microstructure_sizer.get_vpin_multiplier(vpin)
+                    if vpin_mult != 1.0:
+                        size *= vpin_mult
+                        logger.debug(
+                            "VPIN multiplier applied for {}: vpin={:.3f} mult={:.2f}x → size={:.2f} USDT",
+                            symbol,
+                            vpin,
+                            vpin_mult,
+                            size,
+                        )
+
+                    # Depth adjustment
+                    # Use minimum of bid/ask depth for conservative sizing
+                    bid_depth = sym.best_bid_qty * sym.best_bid
+                    ask_depth = sym.best_ask_qty * sym.best_ask
+                    depth_usdt = min(bid_depth, ask_depth)
+                    position_notional = size  # size is already in USDT
+
+                    depth_mult = self._microstructure_sizer.get_depth_multiplier(
+                        depth_usdt, position_notional
+                    )
+                    if depth_mult != 1.0:
+                        size *= depth_mult
+                        logger.debug(
+                            "Depth multiplier applied for {}: depth={:.2f} USDT mult={:.2f}x → size={:.2f} USDT",
+                            symbol,
+                            depth_usdt,
+                            depth_mult,
+                            size,
+                        )
+
+                    # Spread percentile adjustment
+                    # Maintain rolling 100-sample history (simplified: use current spread only for now)
+                    spread_bps = sym.spread_bps
+                    # TODO: Implement proper rolling history in production
+                    spread_history = [spread_bps] * 50  # Placeholder for demo
+                    spread_mult = self._microstructure_sizer.get_spread_multiplier(
+                        spread_bps, spread_history
+                    )
+                    if spread_mult != 1.0:
+                        size *= spread_mult
+                        logger.debug(
+                            "Spread multiplier applied for {}: spread={:.2f}bps mult={:.2f}x → size={:.2f} USDT",
+                            symbol,
+                            spread_bps,
+                            spread_mult,
+                            size,
+                        )
+
+                shm_reader.close()
+            except Exception as exc:
+                logger.debug("Microstructure sizing skipped for {}: {}", symbol, exc)
             # Hard cap: never exceed max_position_size_pct of capital (settings)
             # AND never exceed the absolute 5% hard cap regardless of Kelly output.
             hard_cap = capital * self._MAX_POSITION_FRACTION
@@ -607,6 +707,13 @@ class RiskManager:
             market_regime=self._market_regime,
             support_resistance_levels=self._sr_levels or None,
             adx=adx,
+        )
+
+        # Phase 3: System 4 - Apply regime-aware TP adjustments
+        dynamic_levels = self._dynamic_tp_engine.adjust_tp_for_regime(
+            tp_levels=dynamic_levels,
+            market_regime=self._market_regime,
+            volatility_regime=self._volatility_regime,
         )
 
         # Extract price list for fixed TP levels only (exclude trailing placeholder)

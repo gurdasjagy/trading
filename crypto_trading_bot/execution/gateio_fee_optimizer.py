@@ -176,3 +176,84 @@ class GateioFeeOptimizer:
         if break_even_pct <= 0:
             return True
         return expected_profit_pct >= break_even_pct * min_profit_to_cost_ratio
+
+    # ------------------------------------------------------------------
+    # Phase 3: System 3 - Smart execution routing
+    # ------------------------------------------------------------------
+
+    def calculate_optimal_execution_route(
+        self,
+        signal_confidence: float,
+        spread_bps: float,
+        book_state: Dict,
+        position_notional: float,
+        maker_fee_bps: float,
+        taker_fee_bps: float,
+    ) -> Dict[str, Any]:
+        """Calculate the optimal execution route based on market conditions.
+
+        Decision logic:
+        1. High confidence + tight spread → market order (fast execution)
+        2. Wide spread (> 2× fee cost) → post_only limit (capture rebate)
+        3. Large order (> 5% visible depth) → TWAP with iceberg (reduce impact)
+
+        Args:
+            signal_confidence: Strategy confidence in [0, 1]
+            spread_bps: Current bid-ask spread in basis points
+            book_state: Dict with bid_depth_usdt, ask_depth_usdt, mid_price
+            position_notional: Position size in USDT
+            maker_fee_bps: Maker fee in basis points (negative for rebate)
+            taker_fee_bps: Taker fee in basis points
+
+        Returns:
+            Dict with keys:
+                - order_type: "market", "limit_passive", or "twap"
+                - use_iceberg: bool
+                - chunk_count: int (for TWAP)
+                - reasoning: str
+        """
+        from typing import Any
+
+        bid_depth = book_state.get("bid_depth_usdt", 0.0)
+        ask_depth = book_state.get("ask_depth_usdt", 0.0)
+        visible_depth = min(bid_depth, ask_depth) if bid_depth > 0 and ask_depth > 0 else 0.0
+
+        # Calculate fee cost in bps (absolute value)
+        fee_cost_bps = abs(maker_fee_bps) + abs(taker_fee_bps)
+
+        # Rule 1: High confidence + tight spread → market order
+        if signal_confidence > 0.85 and spread_bps < 3.0:
+            return {
+                "order_type": "market",
+                "use_iceberg": False,
+                "chunk_count": 1,
+                "reasoning": f"High confidence ({signal_confidence:.2f}) + tight spread ({spread_bps:.1f}bps) → market order",
+            }
+
+        # Rule 2: Wide spread → post_only limit to capture rebate
+        if spread_bps > 2 * fee_cost_bps:
+            return {
+                "order_type": "limit_passive",
+                "use_iceberg": False,
+                "chunk_count": 1,
+                "reasoning": f"Wide spread ({spread_bps:.1f}bps > 2×{fee_cost_bps:.1f}bps fee) → post_only limit",
+            }
+
+        # Rule 3: Large order → TWAP with iceberg
+        if visible_depth > 0 and position_notional > visible_depth * 0.05:
+            # Calculate chunk count: aim for 2% of visible depth per chunk
+            chunk_count = min(10, max(2, int(position_notional / (visible_depth * 0.02))))
+            return {
+                "order_type": "twap",
+                "use_iceberg": True,
+                "chunk_count": chunk_count,
+                "reasoning": f"Large order ({position_notional:.0f} USDT > 5% of {visible_depth:.0f} depth) → TWAP with {chunk_count} chunks",
+            }
+
+        # Default: passive limit order
+        return {
+            "order_type": "limit_passive",
+            "use_iceberg": False,
+            "chunk_count": 1,
+            "reasoning": f"Default routing: conf={signal_confidence:.2f} spread={spread_bps:.1f}bps → limit_passive",
+        }
