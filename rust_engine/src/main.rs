@@ -526,6 +526,7 @@ mod signal_queue;
 mod funding_rate;    // Upgrade 1: Funding Rate Arbitrage
 #[allow(dead_code)]  // TWAP engine fully implemented, wiring pending
 mod twap_executor;   // Upgrade 3: TWAP/Iceberg Order Execution
+mod gamma_shm;       // Phase 2 Feature 4: Options-Derived Gamma Exposure
 
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
@@ -912,6 +913,9 @@ fn strategy_evaluator_loop(
     // Phase 2 Feature 3: Liquidation cascade detector initialization
     let mut liq_detector = LiquidationCascadeDetector::new();
     info!("[strategy] 🌊 Liquidation cascade detector initialized");
+    // Phase 2 Feature 4: Gamma exposure reader initialization
+    let gamma_reader = gamma_shm::GammaExposureReader::new("/dev/shm/gamma_exposure");
+    info!("[strategy] 📊 Gamma exposure reader initialized");
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
@@ -1064,6 +1068,8 @@ fn strategy_evaluator_loop(
                 cvd_5m: cvd_tracker.get_cvd_5m(),
                 cvd_15m: cvd_tracker.get_cvd_15m(),
                 cvd_1h: cvd_tracker.get_cvd_1h(),
+                gamma_flip_btc: gamma_reader.get_gamma_flip_level("BTC"),
+                gamma_flip_eth: gamma_reader.get_gamma_flip_level("ETH"),
             };
 
             // Evaluate strategy
@@ -1337,6 +1343,40 @@ fn strategy_evaluator_loop(
                     if intent.confidence < 0.2 {
                         warn!("[strategy] 🌊 Liquidation cascade — skipping signal due to low confidence");
                         continue;
+                    }
+                }
+
+                // ── Phase 2 Feature 4: Gamma Flip Level Support/Resistance ──
+                // Check if current price is within 1% of gamma flip level
+                let current_price = FixedPrice(snapshot.mid_price).to_f64();
+                let gamma_flip = if symbol_name.contains("BTC") {
+                    metrics.gamma_flip_btc
+                } else if symbol_name.contains("ETH") {
+                    metrics.gamma_flip_eth
+                } else {
+                    None
+                };
+
+                if let Some(gamma_flip_level) = gamma_flip {
+                    let distance_pct = ((current_price - gamma_flip_level) / gamma_flip_level).abs();
+                    
+                    if distance_pct < 0.01 {
+                        // Price is within 1% of gamma flip level
+                        if current_price < gamma_flip_level * 0.99 && is_buy {
+                            // Approaching from below on a long signal → resistance
+                            intent.confidence *= 0.8;
+                            info!(
+                                "[strategy] 🎯 Gamma flip resistance: price {:.2} approaching {:.2} from below — reducing long confidence to {:.2}",
+                                current_price, gamma_flip_level, intent.confidence
+                            );
+                        } else if current_price > gamma_flip_level * 1.01 && !is_buy {
+                            // Approaching from above on a short signal → support
+                            intent.confidence *= 0.8;
+                            info!(
+                                "[strategy] 🎯 Gamma flip support: price {:.2} approaching {:.2} from above — reducing short confidence to {:.2}",
+                                current_price, gamma_flip_level, intent.confidence
+                            );
+                        }
                     }
                 }
 
