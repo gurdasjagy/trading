@@ -119,6 +119,10 @@ pub struct MicrostructureMetrics {
     pub cvd_15m: f64,
     /// Cumulative Volume Delta for 1-hour window.
     pub cvd_1h: f64,
+    /// Gamma flip level for BTC (from options-derived gamma exposure).
+    pub gamma_flip_btc: Option<f64>,
+    /// Gamma flip level for ETH (from options-derived gamma exposure).
+    pub gamma_flip_eth: Option<f64>,
 }
 
 // OrderIntent is imported from crate::execution_gateway — single source of truth.
