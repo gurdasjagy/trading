@@ -879,7 +879,7 @@ fn strategy_evaluator_loop(
     book_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
     trades_ring: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY>,
-    regime_reader: &regime_shm::SharedMemRegimeReader,
+    regime_reader: &'regime_shm::SharedMemRegimeReader,
     strategy: Arc<StrategyEngine>,
     registry: Arc<SymbolRegistry>,
     latency_tracker: &'static PipelineLatencyTracker,
@@ -891,6 +891,7 @@ fn strategy_evaluator_loop(
     correlation_limiter: &'static CorrelationLimiter,
     position_sizer: &'static PositionSizer,
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
+    exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
 ) {
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
@@ -1318,7 +1319,7 @@ fn strategy_evaluator_loop(
                 }
             }
 
-            // Task 28: Periodic logging of Phase 2 Feature 7-10 metrics (every 100 snapshots)
+            // Task 19: Periodic logging of Phase 2 Feature 7-10 metrics (every 100 snapshots)
             static mut SNAPSHOT_COUNTER: u64 = 0;
             unsafe {
                 SNAPSHOT_COUNTER += 1;
@@ -1837,6 +1838,7 @@ fn execution_router_loop(
     position_slots: &'static PositionSlotManager,
     dashboard_state: Arc<DashboardState>,
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
+    exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2104,6 +2106,37 @@ fn execution_router_loop(
 
                             // Record entry for PnL tracking
                             position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
+
+                            // Task 1: Record fill in ExecutionAnalytics
+                            // Use fill price as proxy for mid prices (signal_price from cmd, mid_at_signal = fill_price)
+                            let fill_price = res.avg_fill_price;
+                            let signal_price = FixedPrice(cmd.price).to_f64();
+                            let mid_at_signal = fill_price; // Approximate mid at signal time
+                            let size_usdt = fill_price * res.filled_size as f64;
+                            
+                            // Spawn async task to fetch mid_after_1s
+                            let gw_clone = gw.clone();
+                            let symbol_name_clone = symbol_name.to_string();
+                            let exec_analytics_clone = exec_analytics;
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                let mid_after_1s = if let Some(ref gw) = gw_clone {
+                                    match gw.get_ticker(&symbol_name_clone).await {
+                                        Ok(ticker) => ticker.last,
+                                        Err(_) => fill_price, // Fallback to fill price
+                                    }
+                                } else {
+                                    fill_price
+                                };
+                                
+                                exec_analytics_clone.lock().record_fill(
+                                    fill_price,
+                                    signal_price,
+                                    mid_at_signal,
+                                    mid_after_1s,
+                                    size_usdt,
+                                );
+                            });
 
                             // Map exchange ID and record fill in lifecycle tracker
                             lifecycle_tracker.map_exchange_id(&res.order_id, &client_oid);
@@ -2640,7 +2673,8 @@ fn main() {
     let regime_shm_path = config.shared_mem.regime_shm_path.clone();
 
     // 6. Build strategy engine
-    let strategy = Arc::new(StrategyEngine::new(config.strategy.clone()));
+    // Task 12: Pass &config instead of config.strategy to load pair profiles
+    let strategy = Arc::new(StrategyEngine::new(&config));
 
     // 7a. Initialize global circuit breaker FIRST (required by gateway)
     // Must be created before the gateway so the WS connection loop can trip
@@ -2868,6 +2902,7 @@ fn main() {
     info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
 
     // 7m. Initialize Execution Analytics (Phase 2 Feature 7)
+    let exec_analytics_arc = Arc::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000)));
     let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
         Box::leak(Box::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000))));
     info!("📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)");
@@ -2928,6 +2963,7 @@ fn main() {
         let impact = impact_model;
         let cb_ref = circuit_breaker; // &'static CircuitBreaker
         let funding_rates_strat = funding_rates.clone();
+        let exec_analytics_strat = exec_analytics;
         let handle = thread::Builder::new()
             .name("strategy".into())
             .spawn(move || {
@@ -2950,6 +2986,7 @@ fn main() {
                     correlation_limiter,
                     position_sizer,
                     funding_rates_strat,
+                    exec_analytics_strat,
                 );
             })
             .expect("Failed to spawn strategy thread");
@@ -2990,12 +3027,13 @@ fn main() {
         let lc = lifecycle_tracker;
         let lat = latency_tracker;
         let dash_exec = dashboard_state.clone();
+        let exec_analytics_exec = exec_analytics;
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[execution] Pinned to core {} (with Lifecycle + Latency)", core_id);
-                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec);
+                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec);
             })
             .expect("Failed to spawn execution thread");
         thread_handles.push(handle);
@@ -3004,13 +3042,14 @@ fn main() {
     // ── Dashboard HTTP Server (runs on its own thread) ──
     {
         let dash_state = dashboard_state.clone();
+        let exec_analytics_dash = exec_analytics_arc.clone();
         let bind_addr = std::env::var("DASHBOARD_BIND")
             .unwrap_or_else(|_| "0.0.0.0:8080".to_string());
         let handle = thread::Builder::new()
             .name("dashboard-http".into())
             .spawn(move || {
                 info!("[dashboard] Starting HTTP server on {}", bind_addr);
-                dashboard_server::run_dashboard_server(&bind_addr, dash_state);
+                dashboard_server::run_dashboard_server(&bind_addr, dash_state, exec_analytics_dash);
             })
             .expect("Failed to spawn dashboard HTTP thread");
         thread_handles.push(handle);
