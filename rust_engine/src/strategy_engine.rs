@@ -266,6 +266,96 @@ impl VPINCalculator {
 }
 
 // ---------------------------------------------------------------------------
+// Adaptive Imbalance Threshold (Phase 2 Feature 6)
+// ---------------------------------------------------------------------------
+
+/// Adaptive threshold calculator using online mean/variance estimation.
+///
+/// Computes a dynamic imbalance threshold based on recent market conditions:
+/// `threshold = max(min_threshold, mean + std_multiplier * std_dev)`
+///
+/// Uses Welford's online algorithm for numerically stable variance calculation.
+pub struct AdaptiveThreshold {
+    /// Window size for rolling statistics.
+    window_size: usize,
+    /// Ring buffer of recent imbalance values.
+    imbalance_history: VecDeque<f64>,
+    /// Running sum for mean calculation.
+    running_sum: f64,
+    /// Running sum of squares for variance calculation.
+    running_sum_sq: f64,
+    /// Minimum threshold floor (prevents threshold from going too low).
+    min_threshold: f64,
+    /// Standard deviation multiplier (controls sensitivity).
+    std_multiplier: f64,
+}
+
+impl AdaptiveThreshold {
+    /// Create a new adaptive threshold calculator.
+    ///
+    /// # Arguments
+    /// * `window_size` — Number of samples to track (e.g., 3600 for 1 hour at 1 sample/sec)
+    /// * `min_threshold` — Minimum threshold floor (e.g., 0.02 = 2%)
+    /// * `std_multiplier` — Standard deviation multiplier (e.g., 1.5 = mean + 1.5σ)
+    pub fn new(window_size: usize, min_threshold: f64, std_multiplier: f64) -> Self {
+        Self {
+            window_size,
+            imbalance_history: VecDeque::with_capacity(window_size),
+            running_sum: 0.0,
+            running_sum_sq: 0.0,
+            min_threshold,
+            std_multiplier,
+        }
+    }
+
+    /// Update with a new imbalance value.
+    ///
+    /// Uses Welford's online algorithm for numerically stable variance:
+    /// 1. Add new value to ring buffer
+    /// 2. If buffer is full, evict oldest value
+    /// 3. Update running sum and sum of squares
+    #[inline]
+    pub fn update(&mut self, imbalance: f64) {
+        // Evict oldest if full
+        if self.imbalance_history.len() >= self.window_size {
+            if let Some(old) = self.imbalance_history.pop_front() {
+                self.running_sum -= old;
+                self.running_sum_sq -= old * old;
+            }
+        }
+
+        // Add new value
+        self.imbalance_history.push_back(imbalance);
+        self.running_sum += imbalance;
+        self.running_sum_sq += imbalance * imbalance;
+    }
+
+    /// Get the current adaptive threshold.
+    ///
+    /// Computes: `max(min_threshold, mean + std_multiplier * std_dev)`
+    #[inline]
+    pub fn get_threshold(&self) -> f64 {
+        if self.imbalance_history.is_empty() {
+            return self.min_threshold;
+        }
+
+        let n = self.imbalance_history.len() as f64;
+        let mean = self.running_sum / n;
+        let variance = (self.running_sum_sq / n) - (mean * mean);
+        let std_dev = variance.max(0.0).sqrt();
+
+        let threshold = mean + self.std_multiplier * std_dev;
+        threshold.max(self.min_threshold)
+    }
+
+    /// Check if the calculator is warmed up.
+    #[inline]
+    pub fn is_ready(&self) -> bool {
+        self.imbalance_history.len() >= self.window_size / 2
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Strategy Engine
 // ---------------------------------------------------------------------------
 
@@ -292,6 +382,8 @@ pub struct StrategyEngine {
     strategy_config: StrategyConfig,
     /// Multi-timeframe candle aggregator for confluence filtering.
     candle_aggregator: parking_lot::Mutex<CandleAggregator>,
+    /// Adaptive imbalance threshold calculator (Phase 2 Feature 6).
+    adaptive_threshold: parking_lot::Mutex<AdaptiveThreshold>,
 }
 
 impl StrategyEngine {
@@ -311,6 +403,7 @@ impl StrategyEngine {
             active_positions: 0,
             strategy_config: config,
             candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
+            adaptive_threshold: parking_lot::Mutex::new(AdaptiveThreshold::new(3600, 0.02, 1.5)),
         }
     }
 
@@ -328,6 +421,7 @@ impl StrategyEngine {
             active_positions: 0,
             strategy_config: StrategyConfig::default(),
             candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
+            adaptive_threshold: parking_lot::Mutex::new(AdaptiveThreshold::new(3600, 0.02, 1.5)),
         }
     }
 
@@ -431,12 +525,13 @@ impl StrategyEngine {
         let imbalance = metrics.imbalance;
         let abs_imbalance = imbalance.abs();
 
-        // Use configurable threshold from strategy_config, fallback to constant
-        let threshold = if self.strategy_config.imbalance_threshold > 0.0 {
-            self.strategy_config.imbalance_threshold
-        } else {
-            IMBALANCE_ENTRY_THRESHOLD
-        };
+        // ── Phase 2 Feature 6: Adaptive Imbalance Threshold ──
+        // Update the adaptive threshold with current imbalance
+        self.adaptive_threshold.lock().update(abs_imbalance);
+        
+        // Get the dynamic threshold (mean + 1.5σ, floored at 2%)
+        let threshold = self.adaptive_threshold.lock().get_threshold();
+        
         if abs_imbalance < threshold {
             return None; // Not enough signal
         }

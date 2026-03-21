@@ -96,6 +96,8 @@ use crate::risk_calculator;
 use crate::cumulative_delta::CumulativeDeltaTracker;
 use crate::volume_profile::VolumeProfile;
 use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
+use crate::trend_strength::TrendStrengthIndex;
+use crate::execution_analytics::ExecutionAnalytics;
 // use crate::event_sequencer::{EventSequencer, SequencedEventKind};
 
 // ---------------------------------------------------------------------------
@@ -508,6 +510,8 @@ mod telegram_alert;
 mod cumulative_delta;
 mod volume_profile;
 mod liquidation_detector;
+mod trend_strength;
+mod execution_analytics;
 
 // Directive 1: Rust-native position lifecycle (replaces Python TradeTracker)
 mod position_lifecycle;
@@ -916,6 +920,9 @@ fn strategy_evaluator_loop(
     // Phase 2 Feature 4: Gamma exposure reader initialization
     let gamma_reader = gamma_shm::GammaExposureReader::new("/dev/shm/gamma_exposure");
     info!("[strategy] 📊 Gamma exposure reader initialized");
+    // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
+    let mut tsi_calculator = TrendStrengthIndex::new();
+    info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
@@ -1322,6 +1329,9 @@ fn strategy_evaluator_loop(
                     }
                 }
 
+                // ── Phase 2 Feature 5: TSI Calculation ──
+                let tsi_score = tsi_calculator.calculate_tsi(&strategy.candle_aggregator.lock());
+                
                 // ── Phase 2 Feature 3: Liquidation Cascade Response ──
                 let liq_state = liq_detector.get_state();
                 let (imb_mult, trail_mult) = liq_detector.get_adjusted_thresholds();
@@ -1482,7 +1492,7 @@ fn strategy_evaluator_loop(
                 // ── FEATURE 3: Kelly Criterion Position Sizing ──
                 // Calculate position size using Kelly criterion with ATR-based stop distance
                 let base_qty = intent.size as f64;
-                let kelly_qty = if let Some(ref cb) = circuit_breaker {
+                let mut kelly_qty = if let Some(ref cb) = circuit_breaker {
                     let cb_state = cb.get_state();
                     let current_equity = cb_state.current_equity as f64 / 1e8;
                     let win_rate = intent.confidence.clamp(0.4, 0.7); // Use signal confidence as win rate proxy
@@ -1515,6 +1525,23 @@ fn strategy_evaluator_loop(
                 } else {
                     base_qty * drawdown_scalar
                 };
+
+                // ── Phase 2 Feature 5: TSI-Based Position Sizing Adjustment ──
+                let tsi_scale = if tsi_score > 0.7 {
+                    1.5 // Strong trend: increase size by 50%
+                } else if tsi_score < 0.3 {
+                    0.5 // Weak trend: reduce size by 50%
+                } else {
+                    1.0 // Moderate trend: normal size
+                };
+                kelly_qty *= tsi_scale;
+                
+                if tsi_scale != 1.0 {
+                    info!(
+                        "[strategy] 📈 TSI={:.2} → size scaled by {:.1}x (final_qty={:.1})",
+                        tsi_score, tsi_scale, kelly_qty
+                    );
+                }
 
                 // ── FEATURE 8: Adaptive Leverage Calculation ──
                 // Calculate leverage based on ATR/price ratio
@@ -2741,6 +2768,11 @@ fn main() {
         Box::leak(Box::new(parking_lot::Mutex::new(health_monitor)));
 
     info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
+
+    // 7m. Initialize Execution Analytics (Phase 2 Feature 7)
+    let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
+        Box::leak(Box::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000))));
+    info!("📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)");
 
     // 8. Spawn OS threads with core affinity pinning
     let mut thread_handles = Vec::new();
