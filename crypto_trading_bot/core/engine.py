@@ -484,10 +484,9 @@ class TradingEngine:
         """Save current position state to data/shutdown_state.json."""
         import json
         import os
-        from datetime import datetime as dt
 
         checkpoint: dict = {
-            "timestamp": dt.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "cycle_count": self._cycle_count,
             "positions": [],
         }
@@ -2958,39 +2957,31 @@ class TradingEngine:
         try:
             # Normalise: strip swap suffix for consistent comparison.
             norm_symbol = symbol.split(":")[0]
-            # Use thread-safe async access via run_coroutine_threadsafe
-            # to avoid race conditions with the position manager's lock
-            loop = asyncio.get_event_loop()
-            future = asyncio.run_coroutine_threadsafe(
-                self.position_manager.get_position(norm_symbol),
-                loop
-            )
-            tracker = future.result(timeout=2.0)
-            if tracker is None:
-                # Also try with the swap suffix in case positions are keyed that way.
-                base, _, quote = norm_symbol.partition("/")
-                if quote:
-                    swap_symbol = f"{norm_symbol}:{quote}"
-                    future = asyncio.run_coroutine_threadsafe(
-                        self.position_manager.get_position(swap_symbol),
-                        loop
+            
+            # Use synchronous cache read to avoid deadlock
+            # The position_manager._positions dict is thread-safe for reads
+            positions_cache = getattr(self.position_manager, '_positions', {})
+            
+            # Check all position keys for a match
+            for key in list(positions_cache.keys()):
+                key_norm = key.split(":")[0]
+                if key_norm == norm_symbol:
+                    # Found a matching position
+                    from exchange.base_exchange import PositionSide
+                    tracker = positions_cache[key]
+                    existing_side = getattr(
+                        getattr(tracker, "position", None), "side", None
                     )
-                    tracker = future.result(timeout=2.0)
-            if tracker is None:
-                return False
-            # Any open position for this symbol blocks a new trade.
-            from exchange.base_exchange import PositionSide
-            existing_side = getattr(
-                getattr(tracker, "position", None), "side", None
-            )
-            existing_label = (
-                "LONG" if existing_side == PositionSide.LONG else "SHORT"
-            ) if existing_side else "UNKNOWN"
-            logger.info(
-                "Skipping {} signal for {} — {} position already open (no stacking)",
-                direction, symbol, existing_label,
-            )
-            return True
+                    existing_label = (
+                        "LONG" if existing_side == PositionSide.LONG else "SHORT"
+                    ) if existing_side else "UNKNOWN"
+                    logger.info(
+                        "Skipping {} signal for {} — {} position already open (no stacking)",
+                        direction, symbol, existing_label,
+                    )
+                    return True
+            
+            return False
         except Exception as exc:
             logger.debug("_has_conflicting_position error for {}: {}", symbol, exc)
-        return False
+            return False
