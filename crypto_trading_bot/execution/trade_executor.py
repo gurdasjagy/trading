@@ -552,19 +552,46 @@ class TradeExecutor:
                     except Exception:
                         pass
 
-            # Gate.io book analysis + fee optimization
+            # Gate.io book analysis + fee optimization (Phase 3: System 3 enhanced)
             _book_state: Dict[str, Any] = {}
             _fee_optimizer_order_type: str = "market"
+            _execution_route: Dict[str, Any] = {}
             try:
                 from exchange.gateio_book_analyzer import GateioBookAnalyzer
                 _book_analyzer = GateioBookAnalyzer(self._exchange)
                 _book_state = await _book_analyzer.analyze_book(original_symbol, depth=20)
                 _signal_confidence: float = float(signal.get("confidence", 0.5))
-                _fee_optimizer_order_type = self._fee_optimizer.get_optimal_order_type(
+
+                # Phase 3: System 3 - Calculate optimal execution route
+                _execution_route = self._fee_optimizer.calculate_optimal_execution_route(
                     signal_confidence=_signal_confidence,
-                    book_imbalance=_book_state.get("imbalance", 0.0),
                     spread_bps=_book_state.get("spread_bps", 5.0),
+                    book_state=_book_state,
+                    position_notional=size,
+                    maker_fee_bps=self._fee_optimizer.maker_fee * 10000,  # Convert to bps
+                    taker_fee_bps=self._fee_optimizer.taker_fee * 10000,
                 )
+
+                _fee_optimizer_order_type = _execution_route.get("order_type", "market")
+                logger.info(
+                    "Execution route for {}: {} - {}",
+                    original_symbol,
+                    _fee_optimizer_order_type,
+                    _execution_route.get("reasoning", ""),
+                )
+
+                # Override TWAP settings if execution route recommends it
+                if _execution_route.get("order_type") == "twap" and _execution_route.get("use_iceberg"):
+                    recommended_chunks = _execution_route.get("chunk_count", 2)
+                    chunk_size = amount_to_order / recommended_chunks
+                    twap_chunks = [chunk_size] * recommended_chunks
+                    twap_delays = [15.0] * recommended_chunks
+                    logger.info(
+                        "Using smart routing TWAP for {}: {} chunks of {:.4f} each",
+                        original_symbol,
+                        recommended_chunks,
+                        chunk_size,
+                    )
 
                 # Fee viability check — reject trade when break-even exceeds expected profit
                 _expected_profit_pct: float = float(signal.get("expected_profit_pct", 1.0))

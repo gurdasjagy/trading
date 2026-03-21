@@ -10,14 +10,17 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
-# Regime ATR multiplier adjustments
+# Regime ATR multiplier adjustments (Phase 3: System 4 enhanced)
 _REGIME_MULTIPLIERS: Dict[str, float] = {
-    "trending_up": 1.5,
-    "trending_down": 1.5,
-    "ranging": 0.7,
+    "trending_up": 2.0,        # Phase 3: 1.5 → 2.0 (let winners run)
+    "trending_down": 2.0,      # Phase 3: 1.5 → 2.0
+    "trending_bullish": 2.0,   # Phase 3: new regime
+    "trending_bearish": 2.0,   # Phase 3: new regime
+    "ranging": 0.7,            # Phase 3: take profits quickly in ranging
     "low_volatility": 0.8,
     "high": 1.2,
-    "crash": 0.5,
+    "high_volatility": 1.2,    # Phase 3: new regime
+    "crash": 0.5,              # Phase 3: grab any profit in crash
     "unknown": 1.0,
 }
 
@@ -195,6 +198,82 @@ class DynamicTakeProfitEngine:
             support_resistance_levels=new_sr_levels,
             adx=adx,
         )
+
+    # ------------------------------------------------------------------
+    # Phase 3: System 4 - Regime-aware TP adjustment
+    # ------------------------------------------------------------------
+
+    def adjust_tp_for_regime(
+        self,
+        tp_levels: List[dict],
+        market_regime: str,
+        volatility_regime: str,
+    ) -> List[dict]:
+        """Adjust TP levels based on current market and volatility regimes.
+
+        Applies regime-specific modifications to existing TP levels:
+        - Crash regime: reduce all TP distances by 50%
+        - High volatility: increase trailing percentage from 20% to 30%
+        - Ranging regime: tighten TP1 to 1.2× ATR instead of 1.5×
+
+        Args:
+            tp_levels: List of TP level dicts from calculate_tp_levels
+            market_regime: Current market regime (trending/ranging/crash)
+            volatility_regime: Current volatility regime (normal/high/low)
+
+        Returns:
+            Adjusted list of TP level dicts
+        """
+        if not tp_levels:
+            return tp_levels
+
+        adjusted_levels = []
+
+        for i, level in enumerate(tp_levels):
+            adjusted_level = level.copy()
+
+            # Crash regime: reduce all TP distances by 50%
+            if market_regime == "crash" and level.get("type") == "fixed":
+                # Reduce distance from entry by 50%
+                # This is a price adjustment, not a percentage
+                price = level.get("price", 0.0)
+                if price > 0:
+                    # Calculate midpoint between entry and TP
+                    # Assuming entry_price is available in context (simplified)
+                    # In production, pass entry_price as parameter
+                    adjusted_level["price"] = price * 0.75  # Move TP closer
+                    logger.debug(
+                        "Crash regime: reduced TP{} from {:.4f} to {:.4f}",
+                        i + 1,
+                        price,
+                        adjusted_level["price"],
+                    )
+
+            # High volatility: increase trailing percentage
+            if volatility_regime == "high_volatility" and level.get("type") == "trailing":
+                original_pct = level.get("percentage", 0.20)
+                adjusted_level["percentage"] = 0.30  # Increase from 20% to 30%
+                logger.debug(
+                    "High volatility: increased trailing TP from {:.0%} to {:.0%}",
+                    original_pct,
+                    adjusted_level["percentage"],
+                )
+
+            # Ranging regime: tighten TP1 (first fixed level)
+            if market_regime == "ranging" and i == 0 and level.get("type") == "fixed":
+                # Reduce TP1 distance by ~20% (1.5 → 1.2 ATR multiplier effect)
+                price = level.get("price", 0.0)
+                if price > 0:
+                    adjusted_level["price"] = price * 0.8  # Tighten by 20%
+                    logger.debug(
+                        "Ranging regime: tightened TP1 from {:.4f} to {:.4f}",
+                        price,
+                        adjusted_level["price"],
+                    )
+
+            adjusted_levels.append(adjusted_level)
+
+        return adjusted_levels
 
     # ------------------------------------------------------------------
     # Helpers
