@@ -920,6 +920,10 @@ fn strategy_evaluator_loop(
     // Phase 2 Feature 4: Gamma exposure reader initialization
     let gamma_reader = gamma_shm::GammaExposureReader::new("/dev/shm/gamma_exposure");
     info!("[strategy] 📊 Gamma exposure reader initialized");
+    
+    // Phase 2 Feature 7: Execution Analytics initialization
+    let exec_analytics = exec_analytics.lock();
+    info!("[strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)");
     // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
     let mut tsi_calculator = TrendStrengthIndex::new();
     info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
@@ -1489,6 +1493,15 @@ fn strategy_evaluator_loop(
                     }
                 };
 
+                // Phase 2 Feature 7: Reduce size if market impact is high
+                let should_reduce_size = exec_analytics.lock().should_reduce_size();
+                let impact_scalar = if should_reduce_size {
+                    info!("[strategy] 📊 Execution analytics: reducing size by 50% (avg impact > 10bps)");
+                    0.5
+                } else {
+                    1.0
+                };
+                
                 // ── FEATURE 3: Kelly Criterion Position Sizing ──
                 // Calculate position size using Kelly criterion with ATR-based stop distance
                 let base_qty = intent.size as f64;
@@ -1517,13 +1530,13 @@ fn strategy_evaluator_loop(
                             // FEATURE 13: Apply drawdown scalar to Kelly-sized position
                             (kelly_contracts * drawdown_scalar).min(base_qty)
                         } else {
-                            base_qty * drawdown_scalar
+                            base_qty * drawdown_scalar * impact_scalar
                         }
                     } else {
-                        base_qty * drawdown_scalar
+                        base_qty * drawdown_scalar * impact_scalar
                     }
                 } else {
-                    base_qty * drawdown_scalar
+                    base_qty * drawdown_scalar * impact_scalar
                 };
 
                 // ── Phase 2 Feature 5: TSI-Based Position Sizing Adjustment ──
