@@ -368,6 +368,29 @@ pub struct BookSnapshot {
     pub timestamp_ns: u64,
 }
 
+/// Trade event from WS ingestion to strategy evaluator.
+///
+/// Represents a single trade execution for VPIN calculation and candle aggregation.
+/// Size: 40 bytes (fits in a single cache line).
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct TradeEvent {
+    /// Symbol ID (from SymbolRegistry).
+    pub symbol_id: u16,
+    /// 0 = buy, 1 = sell (taker side).
+    pub side: u8,
+    /// Padding for alignment.
+    pub _pad: [u8; 5],
+    /// Trade price in FixedPrice representation (i64, 1e8).
+    pub price: i64,
+    /// Trade quantity in FixedQty representation (i64, 1e4).
+    pub qty: i64,
+    /// Receive timestamp in nanoseconds (TSC-based).
+    pub recv_ns: u64,
+    /// Exchange-assigned sequence number.
+    pub sequence: u64,
+}
+
 impl Default for BookSnapshot {
     fn default() -> Self {
         Self {
@@ -384,6 +407,20 @@ impl Default for BookSnapshot {
             ask_depth_usdt: 0,
             sequence: 0,
             timestamp_ns: 0,
+        }
+    }
+}
+
+impl Default for TradeEvent {
+    fn default() -> Self {
+        Self {
+            symbol_id: 0,
+            side: 0,
+            _pad: [0; 5],
+            price: 0,
+            qty: 0,
+            recv_ns: 0,
+            sequence: 0,
         }
     }
 }

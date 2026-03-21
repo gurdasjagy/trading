@@ -105,6 +105,8 @@ const WS_TO_BOOK_CAPACITY: usize = 65536;
 const BOOK_TO_STRATEGY_CAPACITY: usize = 4096;
 /// Ring buffer capacity for Strategy → Execution channel.
 const STRATEGY_TO_EXEC_CAPACITY: usize = 1024;
+/// Ring buffer capacity for WS → Strategy trades channel.
+const WS_TO_STRATEGY_TRADES_CAPACITY: usize = 16384;
 
 // ---------------------------------------------------------------------------
 // Shared Memory Regime Reader (Issue 2 — seqlock-based)
@@ -556,6 +558,7 @@ fn json_to_f64(v: &serde_json::Value) -> Option<f64> {
 /// Implements automatic reconnection with exponential backoff + jitter.
 fn ws_ingestion_loop_gateio(
     ring: &'static SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>,
+    trades_ring: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY>,
     config: ExchangeConfig,
     registry: Arc<SymbolRegistry>,
 ) {
@@ -573,7 +576,7 @@ fn ws_ingestion_loop_gateio(
         loop {
             info!("[ws-gateio] Connecting to {}", config.ws_url);
 
-            match ws_connect_and_ingest_gateio(ring, &config, &registry, &mut drop_count, &mut msg_count).await {
+            match ws_connect_and_ingest_gateio(ring, trades_ring, &config, &registry, &mut drop_count, &mut msg_count).await {
                 Ok(()) => {
                     info!("[ws-gateio] Connection closed normally, reconnecting in 1s");
                     backoff_secs = 1;
@@ -600,6 +603,7 @@ fn ws_ingestion_loop_gateio(
 /// read loop and ping timer can access it concurrently.
 async fn ws_connect_and_ingest_gateio(
     ring: &'static SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>,
+    trades_ring: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY>,
     config: &ExchangeConfig,
     registry: &SymbolRegistry,
     drop_count: &mut u64,
@@ -751,21 +755,18 @@ async fn ws_connect_and_ingest_gateio(
                                                 let sym_id = registry.get_id(contract);
                                                 if sym_id == 0 || price == 0.0 { continue; }
 
-                                                // Encode trade as a special RawBookUpdate (update_type=3 for trades)
-                                                let side = if size > 0 { spsc::side::BID } else { spsc::side::ASK };
-                                                let update = RawBookUpdate {
+                                                // Route trade events to dedicated trades ring for VPIN
+                                                let side = if size > 0 { 0u8 } else { 1u8 }; // 0=buy, 1=sell
+                                                let trade_event = spsc::TradeEvent {
                                                     symbol_id: sym_id,
                                                     side,
-                                                    update_type: 3, // trade event
-                                                    _pad: [0; 4],
+                                                    _pad: [0; 5],
                                                     price: FixedPrice::from_f64(price).raw(),
                                                     qty: fixed_point::FixedQty::from_f64(size.abs() as f64).raw(),
-                                                    sequence: *msg_count,
                                                     recv_ns,
-                                                    snapshot_count: 0,
-                                                    _pad2: [0; 4],
+                                                    sequence: *msg_count,
                                                 };
-                                                if !ring.try_push(update) {
+                                                if !trades_ring.try_push(trade_event) {
                                                     *drop_count += 1;
                                                 }
                                             }
@@ -864,6 +865,7 @@ fn orderbook_builder_loop(
 fn strategy_evaluator_loop(
     book_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
+    trades_ring: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY>,
     regime_reader: &regime_shm::SharedMemRegimeReader,
     strategy: Arc<StrategyEngine>,
     registry: Arc<SymbolRegistry>,
@@ -875,6 +877,7 @@ fn strategy_evaluator_loop(
     position_slots: &'static PositionSlotManager,
     correlation_limiter: &'static CorrelationLimiter,
     position_sizer: &'static PositionSizer,
+    funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
 ) {
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
@@ -930,14 +933,25 @@ fn strategy_evaluator_loop(
                 last_regime_check = std::time::Instant::now();
             }
 
+            // Drain trade ring and update VPIN + candles
+            while let Some(trade) = trades_ring.try_pop() {
+                let price = FixedPrice(trade.price).to_f64();
+                let volume = fixed_point::FixedQty(trade.qty).to_f64();
+                let side = if trade.side == 0 { Some("buy") } else { Some("sell") };
+                let mid = FixedPrice(snapshot.mid_price).to_f64();
+                vpin_calculator.on_trade(price, volume, side, mid);
+                strategy.update_candles(trade.recv_ns, price, volume);
+            }
+
             // FIX 12: Check funding rate arbitrage opportunities every 1000 snapshots
             funding_check_counter += 1;
             if funding_check_counter % 1000 == 0 {
                 let symbol_name = registry.get_name(snapshot.symbol_id);
                 let mid_price = FixedPrice(snapshot.mid_price).to_f64();
                 
-                // Update funding rate monitor with current market data
-                funding_monitor.update_funding_rate(symbol_name, 0.0001); // Placeholder: fetch real funding rate from exchange
+                // Update funding rate monitor with real funding rate from shared storage
+                let rate = funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001);
+                funding_monitor.update_funding_rate(symbol_name, rate);
                 
                 // Check for arbitrage opportunities (funding rate > 0.01%)
                 if let Some(opportunities) = funding_monitor.check_all_opportunities() {
@@ -1054,6 +1068,7 @@ fn strategy_evaluator_loop(
                             Some(p) if p.is_long => spsc::side::SELL,
                             _ => spsc::side::BUY,
                         };
+                        let pos_size = lifecycle_mgr.get_position(sym_id).map(|p| p.size.abs()).unwrap_or(1);
                         let exit_cmd = OrderCommand {
                             symbol_id: sym_id,
                             side: exit_side,
@@ -1061,7 +1076,7 @@ fn strategy_evaluator_loop(
                             leverage: 1,
                             _pad: [0; 3],
                             price: FixedPrice::from_f64(mid).raw(),
-                            qty: fixed_point::FixedQty::from_f64(1.0).raw(),
+                            qty: fixed_point::FixedQty::from_f64(pos_size as f64).raw(),
                             order_id: snapshot.sequence.wrapping_add(100),
                             signal_ns: snapshot.timestamp_ns,
                             max_slippage_bps: 100,
@@ -1107,6 +1122,7 @@ fn strategy_evaluator_loop(
                         } else {
                             spsc::side::SELL
                         };
+                        let pos_size = exit_evaluator.get_position_size(exit_signal.symbol_id).unwrap_or(1);
                         let exit_cmd = OrderCommand {
                             symbol_id: exit_signal.symbol_id,
                             side: exit_side,
@@ -1114,7 +1130,7 @@ fn strategy_evaluator_loop(
                             leverage: 1, // irrelevant for close
                             _pad: [0; 3],
                             price: FixedPrice::from_f64(exit_mid).raw(),
-                            qty: fixed_point::FixedQty::from_f64(1.0).raw(), // full position close
+                            qty: fixed_point::FixedQty::from_f64(pos_size as f64).raw(),
                             order_id: snapshot.sequence.wrapping_add(1),
                             signal_ns: snapshot.timestamp_ns,
                             max_slippage_bps: 100, // wider for urgency
@@ -1418,8 +1434,9 @@ fn strategy_evaluator_loop(
                             }
 
                             // Step 1b: Correlation-based exposure check (FEATURE 6)
-                            let position_notional = FixedPrice(cmd.price).to_f64()
+                            let mut position_notional = FixedPrice(cmd.price).to_f64()
                                 * fixed_point::FixedQty(cmd.qty).to_f64();
+                            let mut cmd = cmd; // Make cmd mutable for potential resizing
                             if let Err(reason) = correlation_limiter.check_position_limit(symbol_name, position_notional) {
                                 warn!("[strategy] 🔗 Correlation limit rejection: {}", reason);
                                 // Try to reduce position size to fit within limit
@@ -1428,16 +1445,20 @@ fn strategy_evaluator_loop(
                                     let scale_factor = max_allowed / position_notional;
                                     let reduced_qty = (fixed_point::FixedQty(cmd.qty).to_f64() * scale_factor).floor() as i64;
                                     if reduced_qty >= 1 {
+                                        let mut cmd_resized = cmd;
+                                        cmd_resized.qty = fixed_point::FixedQty::from_f64(reduced_qty as f64).raw();
                                         warn!(
-                                            "[strategy] 🔗 Reducing position size by {:.1}% to fit correlation limit",
-                                            (1.0 - scale_factor) * 100.0
+                                            "[strategy] 🔗 Correlation limit: resized from {} to {} contracts",
+                                            fixed_point::FixedQty(cmd.qty).to_f64(), reduced_qty
                                         );
-                                        // Update cmd.qty with reduced size
-                                        // Note: cmd is immutable here, so we skip this trade
-                                        // In production, we'd reconstruct the cmd with reduced qty
+                                        cmd = cmd_resized;
+                                        position_notional = max_allowed; // Update for subsequent checks
+                                    } else {
+                                        continue;
                                     }
+                                } else {
+                                    continue;
                                 }
-                                continue;
                             }
 
                             // Step 2: Position slot acquisition (hard limit: 3 concurrent)
@@ -1536,6 +1557,7 @@ fn execution_router_loop(
     latency_tracker: &'static PipelineLatencyTracker,
     position_slots: &'static PositionSlotManager,
     dashboard_state: Arc<DashboardState>,
+    funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -1565,6 +1587,9 @@ fn execution_router_loop(
 
     // Initialize event-sourced order state machine
     let mut order_state_machine = order_state_machine::OrderStateMachine::new();
+
+    // Initialize PnL tracking for position entries
+    let mut position_entries: HashMap<u16, (f64, i64, bool)> = HashMap::new();
 
     // Upgrade 3: Initialize TWAP executor for large order splitting
     let mut twap_exec = twap_executor::TwapExecutor::new();
@@ -1798,6 +1823,9 @@ fn execution_router_loop(
                                 res.order_id, res.filled_size, res.avg_fill_price, res.latency_us
                             );
 
+                            // Record entry for PnL tracking
+                            position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
+
                             // Map exchange ID and record fill in lifecycle tracker
                             lifecycle_tracker.map_exchange_id(&res.order_id, &client_oid);
                             lifecycle_tracker.record_fill(
@@ -1813,15 +1841,19 @@ fn execution_router_loop(
                                 },
                             );
 
-                            // Calculate approximate PnL for circuit breaker tracking
-                            let fill_price = res.avg_fill_price;
-                            let entry_price = FixedPrice(cmd.price).to_f64();
-                            let pnl_per_unit = if cmd.side == spsc::side::BUY {
-                                fill_price - entry_price
+                            // Calculate real PnL if this is a position close
+                            let pnl_fp = if let Some((entry_price, size, is_long)) = position_entries.remove(&cmd.symbol_id) {
+                                let close_price = res.avg_fill_price;
+                                let pnl = if is_long {
+                                    (close_price - entry_price) * size as f64
+                                } else {
+                                    (entry_price - close_price) * size as f64
+                                };
+                                (pnl * 1e8) as i64
                             } else {
-                                entry_price - fill_price
+                                // New position entry - no PnL yet
+                                0i64
                             };
-                            let pnl_fp = (pnl_per_unit * res.filled_size as f64 * 1e8) as i64;
                             total_pnl_fp += pnl_fp;
                             circuit_breaker.on_trade_result(pnl_fp);
 
@@ -2140,6 +2172,21 @@ fn execution_router_loop(
                     twap_exec.cleanup_completed();
                 }
 
+                // Periodic funding rate fetch (every 30s)
+                if last_health_check.elapsed() > Duration::from_secs(30) {
+                    if let Some(ref gw) = gateway {
+                        let rates_clone = funding_rates.clone();
+                        let symbols_clone = config.symbols.clone();
+                        tokio::spawn(async move {
+                            for symbol in symbols_clone {
+                                if let Some(rate) = funding_rate::fetch_funding_rate(&reqwest::Client::new(), "https://api.gateio.ws", &symbol).await {
+                                    rates_clone.write().insert(symbol, rate);
+                                }
+                            }
+                        });
+                    }
+                }
+
                 // Periodic health check + position slot reconciliation (every 30s)
                 if last_health_check.elapsed() > Duration::from_secs(30) {
                     let cb_state = circuit_breaker.get_state();
@@ -2302,6 +2349,8 @@ fn main() {
         Box::leak(Box::new(SpscRingBuffer::new()));
     let strategy_to_exec: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY> =
         Box::leak(Box::new(SpscRingBuffer::new()));
+    let ws_to_strategy_trades: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY> =
+        Box::leak(Box::new(SpscRingBuffer::new()));
 
     info!("SPSC ring buffers allocated: ws_to_book={}KB, book_to_strategy={}KB, strategy_to_exec={}KB",
           std::mem::size_of::<SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>>() / 1024,
@@ -2451,6 +2500,9 @@ fn main() {
     // 7i. Initialize Dashboard State (shared between hot-path and HTTP server)
     let dashboard_state = Arc::new(DashboardState::new());
 
+    // 7i2. Initialize funding rates storage (shared between strategy and execution)
+    let funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>> = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+
     // 7j. Initialize Position Sizer (Directive 2) — fetch contract specs at startup
     let position_sizer: &'static PositionSizer = {
         let mut sizer = PositionSizer::new();
@@ -2542,6 +2594,7 @@ fn main() {
     // ── Core 2: WS Ingestion (Gate.io) ──
     if let Some(gateio_cfg) = config.exchanges.iter().find(|e| e.name == "gateio").cloned() {
         let ws_ring = ws_gateio_to_book;
+        let trades_ring = ws_to_strategy_trades;
         let reg = registry.clone();
         let core_id = topology.ws_gateio_core;
         let handle = thread::Builder::new()
@@ -2549,7 +2602,7 @@ fn main() {
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[ws-gateio] Pinned to core {}", core_id);
-                ws_ingestion_loop_gateio(ws_ring, gateio_cfg, reg);
+                ws_ingestion_loop_gateio(ws_ring, trades_ring, gateio_cfg, reg);
             })
             .expect("Failed to spawn WS Gate.io thread");
         thread_handles.push(handle);
@@ -2583,12 +2636,14 @@ fn main() {
     {
         let book_ring = book_to_strategy;
         let exec_ring = strategy_to_exec;
+        let trades_ring = ws_to_strategy_trades;
         let strat = strategy.clone();
         let reg = registry.clone();
         let core_id = topology.strategy_core;
         let lat = latency_tracker;
         let impact = impact_model;
         let cb_ref = circuit_breaker; // &'static CircuitBreaker
+        let funding_rates_strat = funding_rates.clone();
         let handle = thread::Builder::new()
             .name("strategy".into())
             .spawn(move || {
@@ -2598,6 +2653,7 @@ fn main() {
                 strategy_evaluator_loop(
                     book_ring,
                     exec_ring,
+                    trades_ring,
                     &regime_reader,
                     strat,
                     reg,
@@ -2609,6 +2665,7 @@ fn main() {
                     position_slot_manager,
                     correlation_limiter,
                     position_sizer,
+                    funding_rates_strat,
                 );
             })
             .expect("Failed to spawn strategy thread");
@@ -2617,6 +2674,7 @@ fn main() {
 
     // ── Core 6: Execution Router (with Circuit Breaker & SL/TP) ──
     // Mandate 3: Build forex gateway if credentials are available
+    let funding_rates_exec = funding_rates.clone();
     let forex_gw: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
         let login = config.forex_login.as_deref().unwrap_or("").trim();
         let password = config.forex_password.as_deref().unwrap_or("").trim();
@@ -2653,7 +2711,7 @@ fn main() {
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[execution] Pinned to core {} (with Lifecycle + Latency)", core_id);
-                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec);
+                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec);
             })
             .expect("Failed to spawn execution thread");
         thread_handles.push(handle);

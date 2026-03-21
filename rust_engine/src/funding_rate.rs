@@ -277,6 +277,33 @@ impl FundingRateMonitor {
         
         (total_rates, stale_rates)
     }
+
+    /// Update a single funding rate (for use by strategy loop).
+    pub fn update_funding_rate(&mut self, symbol: &str, rate: f64) {
+        let next_funding = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64) + 28800; // 8 hours from now
+        self.rates.insert(symbol.to_string(), FundingRateInfo::new(rate, next_funding));
+    }
+}
+
+/// Fetch a single funding rate from Gate.io REST API (public endpoint).
+///
+/// This is a standalone async function that can be called from the execution
+/// router loop without requiring a FundingRateMonitor instance.
+pub async fn fetch_funding_rate(client: &reqwest::Client, base_url: &str, contract: &str) -> Option<f64> {
+    let url = format!("{}/api/v4/futures/usdt/funding_rate?contract={}&limit=1", base_url, contract);
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            let rates: Vec<GateIoFundingRateResponse> = resp.json().await.ok()?;
+            if rates.is_empty() {
+                return None;
+            }
+            rates[0].r.parse::<f64>().ok()
+        }
+        _ => None
+    }
 }
 
 #[cfg(test)]

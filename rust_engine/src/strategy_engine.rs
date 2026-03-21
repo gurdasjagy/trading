@@ -281,7 +281,7 @@ pub struct StrategyEngine {
     /// Contains leverage, thresholds, and other strategy parameters.
     strategy_config: StrategyConfig,
     /// Multi-timeframe candle aggregator for confluence filtering.
-    candle_aggregator: CandleAggregator,
+    candle_aggregator: parking_lot::Mutex<CandleAggregator>,
 }
 
 impl StrategyEngine {
@@ -300,7 +300,7 @@ impl StrategyEngine {
             max_positions: 5,
             active_positions: 0,
             strategy_config: config,
-            candle_aggregator: CandleAggregator::default(),
+            candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
         }
     }
 
@@ -317,7 +317,7 @@ impl StrategyEngine {
             max_positions: 5,
             active_positions: 0,
             strategy_config: StrategyConfig::default(),
-            candle_aggregator: CandleAggregator::default(),
+            candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
         }
     }
 
@@ -371,8 +371,9 @@ impl StrategyEngine {
         // ── Multi-timeframe confluence filtering (FEATURE 2) ──
         // Check 15m EMA(20) > EMA(50) AND RSI > 40 for long signals
         // Check 15m EMA(20) < EMA(50) AND RSI < 60 for short signals
-        if self.candle_aggregator.is_ready(Timeframe::M15) {
-            if let Some(candle_15m) = self.candle_aggregator.get_candle(Timeframe::M15) {
+        let candle_agg = self.candle_aggregator.lock();
+        if candle_agg.is_ready(Timeframe::M15) {
+            if let Some(candle_15m) = candle_agg.get_candle(Timeframe::M15) {
                 let ema20 = candle_15m.ema20;
                 let ema50 = candle_15m.ema50;
                 let rsi = candle_15m.rsi14;
@@ -406,6 +407,7 @@ impl StrategyEngine {
                 );
             }
         }
+        drop(candle_agg); // Release lock before continuing
 
         // ── Imbalance scoring ──
         //
@@ -582,13 +584,8 @@ impl StrategyEngine {
     /// Called from the strategy evaluator loop when processing trade events
     /// (update_type=3 from the SPSC ring).
     #[inline]
-    pub fn update_candles(&mut self, timestamp_ns: u64, price: f64, volume: f64) {
-        self.candle_aggregator.on_trade(timestamp_ns, price, volume);
-    }
-
-    /// Get a reference to the candle aggregator (for testing/diagnostics).
-    pub fn candle_aggregator(&self) -> &CandleAggregator {
-        &self.candle_aggregator
+    pub fn update_candles(&self, timestamp_ns: u64, price: f64, volume: f64) {
+        self.candle_aggregator.lock().on_trade(timestamp_ns, price, volume);
     }
 }
 
