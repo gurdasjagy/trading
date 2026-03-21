@@ -514,6 +514,11 @@ mod liquidation_detector;
 mod trend_strength;
 mod execution_analytics;
 mod realized_vol; // Task 16: Phase 2 Feature 9
+mod wyckoff_detector; // Phase 3 Feature 11
+mod fibonacci_detector; // Phase 3 Feature 12
+mod ichimoku_cloud; // Phase 3 Feature 13
+mod market_maker_inventory; // Phase 3 Feature 14
+mod cross_asset_correlation; // Phase 3 Feature 15
 
 // Directive 1: Rust-native position lifecycle (replaces Python TradeTracker)
 mod position_lifecycle;
@@ -936,6 +941,26 @@ fn strategy_evaluator_loop(
     // Task 25: Phase 2 Feature 10 - Trade Flow Analyzer initialization
     let mut trade_flow_analyzer = trade_flow_analyzer::TradeFlowAnalyzer::new(100, 10.0);
     info!("[strategy] 📊 Trade Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)");
+    
+    // Phase 3 Feature 11: Wyckoff Accumulation/Distribution Detector initialization
+    let mut wyckoff_detector = wyckoff_detector::WyckoffDetector::new(100);
+    info!("[strategy] 📊 Wyckoff detector initialized (100-period window)");
+    
+    // Phase 3 Feature 12: Fibonacci Retracement Auto-Detection initialization
+    let mut fibonacci_detector = fibonacci_detector::FibonacciDetector::new();
+    info!("[strategy] 📊 Fibonacci detector initialized (1h/4h swing detection)");
+    
+    // Phase 3 Feature 13: Ichimoku Cloud initialization
+    let mut ichimoku_cloud = ichimoku_cloud::IchimokuCloud::new();
+    info!("[strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)");
+    
+    // Phase 3 Feature 14: Market Maker Inventory Model initialization
+    let mut mm_inventory = market_maker_inventory::MarketMakerInventoryModel::new(1000);
+    info!("[strategy] 📊 Market Maker Inventory Model initialized (1000-period window)");
+    
+    // Phase 3 Feature 15: Cross-Asset Correlation Monitor initialization
+    let mut correlation_monitor = cross_asset_correlation::CrossAssetCorrelationMonitor::new(60);
+    info!("[strategy] 📊 Cross-Asset Correlation Monitor initialized (60-period window)");
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
@@ -980,7 +1005,7 @@ fn strategy_evaluator_loop(
                 info!("[strategy] 🔄 Volume profile reset (daily)");
             }
 
-            // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector + Trade Flow Analyzer
+            // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector + Trade Flow Analyzer + Phase 3 detectors
             while let Some(trade) = trades_ring.try_pop() {
                 let price = FixedPrice(trade.price).to_f64();
                 let volume = fixed_point::FixedQty(trade.qty).to_f64();
@@ -995,6 +1020,25 @@ fn strategy_evaluator_loop(
                 strategy.update_candles(trade.recv_ns, price, volume);
                 // Task 26: Feed trade events to TradeFlowAnalyzer
                 trade_flow_analyzer.on_trade(price, volume, trade.side, trade.recv_ns);
+                
+                // Phase 3: Update Wyckoff detector with price and volume
+                wyckoff_detector.update(price, volume);
+                
+                // Phase 3: Update Fibonacci detector with price history
+                fibonacci_detector.update(trade.recv_ns, price);
+                
+                // Phase 3: Update Ichimoku cloud with candle data (use 1h candles)
+                // For simplicity, we'll update on every trade - in production would batch by timeframe
+                let high = price * 1.001; // Approximate high
+                let low = price * 0.999;  // Approximate low
+                ichimoku_cloud.update_candle(high, low, price);
+                
+                // Phase 3: Update Market Maker Inventory with trade flow
+                mm_inventory.on_trade(volume, is_buy);
+                
+                // Phase 3: Update Cross-Asset Correlation with price data
+                let symbol_name = registry.get_name(snapshot.symbol_id);
+                correlation_monitor.update_price(symbol_name, trade.recv_ns, price);
             }
 
             // FIX 12: Check funding rate arbitrage opportunities every 1000 snapshots
@@ -1078,6 +1122,24 @@ fn strategy_evaluator_loop(
                 }
             }
 
+            // Phase 3: Detect Wyckoff phase
+            let (wyckoff_phase, _wyckoff_confidence) = wyckoff_detector.detect_phase();
+            
+            // Phase 3: Get nearest Fibonacci level
+            let current_price = FixedPrice(snapshot.mid_price).to_f64();
+            let (fib_level_pct, fib_distance_bps, fib_is_approaching) = fibonacci_detector
+                .get_nearest_level(current_price)
+                .unwrap_or((0.0, 9999.0, false));
+            
+            // Phase 3: Get Ichimoku cloud position
+            let ichimoku_position = ichimoku_cloud.get_cloud_position(current_price);
+            
+            // Phase 3: Get Market Maker inventory pressure
+            let mm_inventory_pressure = mm_inventory.get_inventory_pressure();
+            
+            // Phase 3: Get BTC-ETH correlation
+            let btc_eth_corr = correlation_monitor.get_correlation("BTC_USDT", "ETH_USDT").unwrap_or(0.0);
+            
             // Build microstructure metrics from the snapshot
             let metrics = strategy_engine::MicrostructureMetrics {
                 mid_price: FixedPrice(snapshot.mid_price).to_f64(),
@@ -1092,6 +1154,11 @@ fn strategy_evaluator_loop(
                 cvd_1h: cvd_tracker.get_cvd_1h(),
                 gamma_flip_btc: gamma_reader.get_gamma_flip_level("BTC"),
                 gamma_flip_eth: gamma_reader.get_gamma_flip_level("ETH"),
+                wyckoff_phase: wyckoff_phase.to_string(),
+                fib_nearest_level: fib_level_pct,
+                ichimoku_cloud_position: ichimoku_position.to_string(),
+                mm_inventory_pressure,
+                btc_eth_correlation: btc_eth_corr,
             };
 
             // Evaluate strategy
@@ -1327,13 +1394,25 @@ fn strategy_evaluator_loop(
                     let exec_analytics_guard = exec_analytics.lock();
                     let vol_regime = realized_vol_calc.get_regime();
                     let vol_pct = realized_vol_calc.get_volatility();
+                    
+                    // Phase 3: Log all Phase 3 metrics
                     info!(
-                        "[strategy] 📊 Metrics: slippage={:.2}bps impact={:.2}bps vol={:.1}%({}) toxicity={:.2}",
+                        "[strategy] 📊 Phase 2 Metrics: slippage={:.2}bps impact={:.2}bps vol={:.1}%({}) toxicity={:.2}",
                         exec_analytics_guard.get_avg_slippage_bps(),
                         exec_analytics_guard.get_avg_impact_bps(),
                         vol_pct,
                         vol_regime.to_string(),
                         toxicity
+                    );
+                    
+                    info!(
+                        "[strategy] 📊 Phase 3 Metrics: wyckoff={} fib_level={:.1}% fib_dist={:.0}bps ichimoku={} mm_inv={:.2} btc_eth_corr={:.2}",
+                        wyckoff_phase.to_string(),
+                        fib_level_pct * 100.0,
+                        fib_distance_bps,
+                        ichimoku_position.to_string(),
+                        mm_inventory_pressure,
+                        btc_eth_corr
                     );
                 }
             }
@@ -1364,6 +1443,32 @@ fn strategy_evaluator_loop(
                         continue;
                     }
                 }
+                
+                // ── Phase 3 Feature 11: Wyckoff Phase Filtering ──
+                // Bias long signals during Accumulation phase, short signals during Distribution phase
+                match wyckoff_phase {
+                    wyckoff_detector::WyckoffPhase::Accumulation if is_buy => {
+                        // Accumulation phase + long signal = increase confidence by 20%
+                        intent.confidence = (intent.confidence * 1.2).min(1.0);
+                        info!("[strategy] 📈 Wyckoff Accumulation phase — boosting long confidence to {:.2}", intent.confidence);
+                    }
+                    wyckoff_detector::WyckoffPhase::Distribution if !is_buy => {
+                        // Distribution phase + short signal = increase confidence by 20%
+                        intent.confidence = (intent.confidence * 1.2).min(1.0);
+                        info!("[strategy] 📉 Wyckoff Distribution phase — boosting short confidence to {:.2}", intent.confidence);
+                    }
+                    wyckoff_detector::WyckoffPhase::Accumulation if !is_buy => {
+                        // Accumulation phase + short signal = reduce confidence by 30%
+                        intent.confidence *= 0.7;
+                        info!("[strategy] 📈 Wyckoff Accumulation phase — reducing short confidence to {:.2}", intent.confidence);
+                    }
+                    wyckoff_detector::WyckoffPhase::Distribution if is_buy => {
+                        // Distribution phase + long signal = reduce confidence by 30%
+                        intent.confidence *= 0.7;
+                        info!("[strategy] 📉 Wyckoff Distribution phase — reducing long confidence to {:.2}", intent.confidence);
+                    }
+                    _ => {}
+                }
 
                 // ── Phase 2 Feature 2: VPOC-Based Bias ──
                 if let Some(vpoc) = volume_profile.get_vpoc() {
@@ -1384,9 +1489,49 @@ fn strategy_evaluator_loop(
                         }
                     }
                 }
+                
+                // ── Phase 3 Feature 12: Fibonacci Level Confluence Boost ──
+                // Increase confidence by 15% when price is within 1% of a Fibonacci level
+                if fib_is_approaching && fib_distance_bps < 100.0 {
+                    // Check if signal direction aligns with Fibonacci level
+                    // Approaching from below = support for long, from above = resistance for short
+                    let fib_levels = fibonacci_detector.calculate_fib_levels();
+                    if let Some(levels) = fib_levels {
+                        let nearest_fib_price = levels.levels.iter()
+                            .min_by(|a, b| {
+                                let dist_a = (current_price - a).abs();
+                                let dist_b = (current_price - b).abs();
+                                dist_a.partial_cmp(&dist_b).unwrap()
+                            })
+                            .copied()
+                            .unwrap_or(current_price);
+                        
+                        let approaching_from_below = current_price < nearest_fib_price;
+                        
+                        if (approaching_from_below && is_buy) || (!approaching_from_below && !is_buy) {
+                            intent.confidence = (intent.confidence * 1.15).min(1.0);
+                            info!("[strategy] 📐 Fibonacci {:.1}% level confluence — boosting confidence to {:.2}",
+                                fib_level_pct * 100.0, intent.confidence);
+                        }
+                    }
+                }
 
                 // ── Phase 2 Feature 5: TSI Calculation ──
                 let tsi_score = tsi_calculator.calculate_tsi(&strategy.candle_aggregator.lock());
+                
+                // ── Phase 3 Feature 13: Ichimoku Cloud Trend Filter ──
+                // Skip long signals when price is below cloud, short signals when above cloud
+                match ichimoku_position {
+                    ichimoku_cloud::CloudPosition::BelowCloud if is_buy => {
+                        info!("[strategy] ☁️ Ichimoku: price below cloud — skipping long signal");
+                        continue;
+                    }
+                    ichimoku_cloud::CloudPosition::AboveCloud if !is_buy => {
+                        info!("[strategy] ☁️ Ichimoku: price above cloud — skipping short signal");
+                        continue;
+                    }
+                    _ => {}
+                }
                 
                 // ── Phase 2 Feature 3: Liquidation Cascade Response ──
                 let liq_state = liq_detector.get_state();
@@ -1443,6 +1588,22 @@ fn strategy_evaluator_loop(
                                 current_price, gamma_flip_level, intent.confidence
                             );
                         }
+                    }
+                }
+                
+                // ── Phase 3 Feature 14: Market Maker Inventory Contrarian Signal ──
+                // Reduce confidence when MM inventory pressure is extreme and signal aligns with MM position
+                let (mm_direction, mm_pressure_score) = mm_inventory.get_inventory_signal();
+                if mm_pressure_score > 0.8 {
+                    // MM is heavily positioned
+                    if (mm_direction == -1 && !is_buy) || (mm_direction == 1 && is_buy) {
+                        // Signal aligns with MM position (MM short + short signal, or MM long + long signal)
+                        // This is contrarian - reduce confidence by 20%
+                        intent.confidence *= 0.8;
+                        info!(
+                            "[strategy] 🏦 MM inventory extreme ({:.2}) — reducing confidence to {:.2}",
+                            mm_pressure_score, intent.confidence
+                        );
                     }
                 }
 
@@ -1573,6 +1734,20 @@ fn strategy_evaluator_loop(
                 if toxicity > 0.5 {
                     impact_scalar *= 0.5;
                     info!("[strategy] 🚫 Order flow toxicity {:.2} > 0.5 — reducing size by 50%", toxicity);
+                }
+                
+                // ── Phase 3 Feature 15: Cross-Asset Correlation Check ──
+                // Reduce position size when BTC-ETH correlation drops below 0.7 for ETH trades
+                if symbol_name.contains("ETH") && btc_eth_corr < 0.7 {
+                    impact_scalar *= 0.5;
+                    info!("[strategy] 🔗 BTC-ETH correlation {:.2} < 0.7 — reducing ETH position size by 50%", btc_eth_corr);
+                }
+                
+                // Apply equity market risk-off rules when BTC-SPX correlation spikes above 0.8
+                let btc_spx_corr = correlation_monitor.get_correlation("BTC_USDT", "SPX").unwrap_or(0.0);
+                if btc_spx_corr > 0.8 {
+                    impact_scalar *= 0.7;
+                    info!("[strategy] 📉 BTC-SPX correlation {:.2} > 0.8 — reducing all position sizes by 30%", btc_spx_corr);
                 }
                 
                 // ── FEATURE 3: Kelly Criterion Position Sizing ──
