@@ -62,7 +62,7 @@ mod bridge_ipc;
 mod risk_calculator;
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -869,9 +869,14 @@ fn orderbook_builder_loop(
             }
         }
 
-        // Yield if ring is empty to avoid burning CPU
+        // BUG 8 FIX: Hybrid spin-then-yield pattern to avoid CPU burn
         if ws_ring_gateio.is_empty() {
-            std::hint::spin_loop();
+            for _ in 0..100 {
+                std::hint::spin_loop();
+            }
+            if ws_ring_gateio.is_empty() {
+                std::thread::sleep(std::time::Duration::from_micros(10));
+            }
         }
     }
 }
@@ -901,6 +906,9 @@ fn strategy_evaluator_loop(
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
     let mut current_regime = regime::RegimeState::default();
+    // BUG 5 FIX: Move recent_highs/recent_lows outside the loop
+    let mut recent_highs: Vec<(u64, f64)> = Vec::new();
+    let mut recent_lows: Vec<(u64, f64)> = Vec::new();
     // BUG 14 FIX: No raw pointer cast needed — regime_reader.get_current() now takes &self
     // via UnsafeCell interior mutability in SharedMemRegimeReader.
 
@@ -1177,13 +1185,19 @@ fn strategy_evaluator_loop(
             // ── Phase 2 Feature 1: CVD Divergence Detection ──
             // Track recent price highs/lows for divergence detection
             // For simplicity, we use a rolling window approach
-            let mut recent_highs: Vec<(u64, f64)> = Vec::new();
-            let mut recent_lows: Vec<(u64, f64)> = Vec::new();
             
             // Add current price point (simplified - in production would track actual swing highs/lows)
             let current_price = FixedPrice(snapshot.mid_price).to_f64();
             recent_highs.push((snapshot.timestamp_ns, current_price));
             recent_lows.push((snapshot.timestamp_ns, current_price));
+            
+            // Implement rolling window with max 100 entries
+            if recent_highs.len() > 100 {
+                recent_highs.remove(0);
+            }
+            if recent_lows.len() > 100 {
+                recent_lows.remove(0);
+            }
             
             // Check for bearish divergence (price makes new high, CVD makes lower high)
             let bearish_divergence = cvd_tracker.detect_bearish_divergence(&recent_highs);
@@ -1387,10 +1401,10 @@ fn strategy_evaluator_loop(
             }
 
             // Task 19: Periodic logging of Phase 2 Feature 7-10 metrics (every 100 snapshots)
-            static mut SNAPSHOT_COUNTER: u64 = 0;
-            unsafe {
-                SNAPSHOT_COUNTER += 1;
-                if SNAPSHOT_COUNTER % 100 == 0 {
+            static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+            {
+                let count = SNAPSHOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+                if count % 100 == 0 {
                     let exec_analytics_guard = exec_analytics.lock();
                     let vol_regime = realized_vol_calc.get_regime();
                     let vol_pct = realized_vol_calc.get_volatility();
@@ -2279,8 +2293,10 @@ fn execution_router_loop(
                                 res.order_id, res.filled_size, res.avg_fill_price, res.latency_us
                             );
 
-                            // Record entry for PnL tracking
-                            position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
+                            // BUG 9 FIX: Only insert position entries on non-reduce_only fills
+                            if !cmd.reduce_only {
+                                position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
+                            }
 
                             // Task 1: Record fill in ExecutionAnalytics
                             // Use fill price as proxy for mid prices (signal_price from cmd, mid_at_signal = fill_price)
@@ -2328,17 +2344,20 @@ fn execution_router_loop(
                                 },
                             );
 
-                            // Calculate real PnL if this is a position close
-                            let pnl_fp = if let Some((entry_price, size, is_long)) = position_entries.remove(&cmd.symbol_id) {
-                                let close_price = res.avg_fill_price;
-                                let pnl = if is_long {
-                                    (close_price - entry_price) * size as f64
+                            // BUG 9 FIX: Only remove and calculate PnL on reduce_only fills
+                            let pnl_fp = if cmd.reduce_only {
+                                if let Some((entry_price, size, is_long)) = position_entries.remove(&cmd.symbol_id) {
+                                    let close_price = res.avg_fill_price;
+                                    let pnl = if is_long {
+                                        (close_price - entry_price) * size as f64
+                                    } else {
+                                        (entry_price - close_price) * size as f64
+                                    };
+                                    (pnl * 1e8) as i64
                                 } else {
-                                    (entry_price - close_price) * size as f64
-                                };
-                                (pnl * 1e8) as i64
+                                    0i64
+                                }
                             } else {
-                                // New position entry - no PnL yet
                                 0i64
                             };
                             total_pnl_fp += pnl_fp;
@@ -3077,9 +3096,9 @@ fn main() {
     info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
 
     // 7m. Initialize Execution Analytics (Phase 2 Feature 7)
-    let exec_analytics_arc = Arc::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000)));
     let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
         Box::leak(Box::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000))));
+    let exec_analytics_arc = Arc::new(parking_lot::Mutex::new(ExecutionAnalytics::new(1000)));
     info!("📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)");
 
     // 8. Spawn OS threads with core affinity pinning
@@ -3171,6 +3190,7 @@ fn main() {
     // ── Core 6: Execution Router (with Circuit Breaker & SL/TP) ──
     // Mandate 3: Build forex gateway if credentials are available
     let funding_rates_exec = funding_rates.clone();
+    let exec_analytics_exec = exec_analytics;
     let forex_gw: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
         let login = config.forex_login.as_deref().unwrap_or("").trim();
         let password = config.forex_password.as_deref().unwrap_or("").trim();
@@ -3202,7 +3222,6 @@ fn main() {
         let lc = lifecycle_tracker;
         let lat = latency_tracker;
         let dash_exec = dashboard_state.clone();
-        let exec_analytics_exec = exec_analytics;
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {

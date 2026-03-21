@@ -124,11 +124,13 @@ pub struct MicrostructureMetrics {
     /// Gamma flip level for ETH (from options-derived gamma exposure).
     pub gamma_flip_eth: Option<f64>,
     /// Phase 3 Feature 11: Wyckoff phase (Accumulation, Markup, Distribution, Markdown, Unknown).
-    pub wyckoff_phase: &'static str,
+    /// BUG 11 FIX: Changed from &'static str to String
+    pub wyckoff_phase: String,
     /// Phase 3 Feature 12: Nearest Fibonacci level percentage (e.g., 0.618 for 61.8% retracement).
     pub fib_nearest_level: f64,
     /// Phase 3 Feature 13: Ichimoku cloud position (AboveCloud, InCloud, BelowCloud).
-    pub ichimoku_cloud_position: &'static str,
+    /// BUG 11 FIX: Changed from &'static str to String
+    pub ichimoku_cloud_position: String,
     /// Phase 3 Feature 14: Market maker inventory pressure (-1.0 to 1.0).
     pub mm_inventory_pressure: f64,
     /// Phase 3 Feature 15: BTC-ETH correlation (-1.0 to 1.0).
@@ -391,7 +393,8 @@ pub struct StrategyEngine {
     /// Contains leverage, thresholds, and other strategy parameters.
     strategy_config: StrategyConfig,
     /// Multi-timeframe candle aggregator for confluence filtering.
-    candle_aggregator: parking_lot::Mutex<CandleAggregator>,
+    /// BUG 10 FIX: Changed visibility to pub(crate)
+    pub(crate) candle_aggregator: parking_lot::Mutex<CandleAggregator>,
     /// Adaptive imbalance threshold calculator (Phase 2 Feature 6).
     adaptive_threshold: parking_lot::Mutex<AdaptiveThreshold>,
     /// Task 7: Per-symbol pair profiles (Phase 2 Feature 8).

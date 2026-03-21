@@ -428,6 +428,24 @@ pub trait ExecutionGateway: Send + Sync {
     ) -> Result<(), ExchangeError> {
         Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "Conditional TP not supported by this gateway".into() })
     }
+
+    /// BUG 4 FIX: Add default implementations for set_margin_mode and get_ticker
+    async fn set_margin_mode(&self, _symbol: &str, _mode: &str) -> Result<(), ExchangeError> {
+        Ok(())
+    }
+
+    async fn get_ticker(&self, _symbol: &str) -> Result<RustTicker, ExchangeError> {
+        Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "get_ticker not supported".into() })
+    }
+}
+
+/// BUG 4 FIX: Define RustTicker struct for get_ticker return type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustTicker {
+    pub last: f64,
+    pub bid: f64,
+    pub ask: f64,
+    pub volume_24h: f64,
 }
 
 // ---------------------------------------------------------------------------
