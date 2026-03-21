@@ -59,8 +59,8 @@ const VPIN_BUCKET_COUNT: usize = 50;
 
 /// Volume per bucket in USD equivalent (normalized).
 /// A bucket is "full" when this much volume has been accumulated.
-/// Reduced from 100k to 1k for faster VPIN updates on liquid pairs like BTC/USDT.
-const VPIN_BUCKET_SIZE_USD: f64 = 1_000.0;
+/// Reduced from 1k to 100 for faster VPIN warm-up on liquid pairs like BTC/USDT.
+const VPIN_BUCKET_SIZE_USD: f64 = 100.0;
 
 /// VPIN threshold above which we consider flow as toxic.
 /// Above this → reduce position size, widen quotes.
@@ -70,10 +70,10 @@ const VPIN_TOXIC_THRESHOLD: f64 = 0.65;
 const VPIN_SAFE_THRESHOLD: f64 = 0.35;
 
 /// Minimum imbalance magnitude to generate a signal (in basis points / 10000).
-/// Reduced from 0.15 (15%) to 0.05 (5%) for liquid pairs like BTC/USDT.
-/// A 5% depth skew is significant enough to indicate directional pressure
+/// Reduced from 0.15 (15%) to 0.03 (3%) for liquid pairs like BTC/USDT.
+/// A 3% depth skew is significant enough to indicate directional pressure
 /// without being so high that signals are rare.
-const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.05;
+const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.03;
 
 /// Minimum spread in bps to avoid trading in tight spreads.
 const MIN_SPREAD_BPS: f64 = 1.0;
@@ -375,8 +375,12 @@ impl StrategyEngine {
         let imbalance = metrics.imbalance;
         let abs_imbalance = imbalance.abs();
 
-        // Use configurable threshold instead of hardcoded constant
-        let threshold = self.strategy_config.imbalance_threshold;
+        // Use configurable threshold from strategy_config, fallback to constant
+        let threshold = if self.strategy_config.imbalance_threshold > 0.0 {
+            self.strategy_config.imbalance_threshold
+        } else {
+            IMBALANCE_ENTRY_THRESHOLD
+        };
         if abs_imbalance < threshold {
             return None; // Not enough signal
         }
