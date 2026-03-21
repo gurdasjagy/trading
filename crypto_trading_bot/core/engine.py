@@ -434,7 +434,9 @@ class TradingEngine:
                         if current_price <= 0:
                             ticker = await self.exchange.get_ticker(pos.symbol)
                             current_price = ticker.last
-                        sl_price = current_price * (0.97 if is_long else 1.03)
+                        # Scale SL distance with leverage: higher leverage = tighter SL
+                        sl_pct = max(0.03, 0.5 / max(pos.leverage, 1))
+                        sl_price = current_price * (1 - sl_pct if is_long else 1 + sl_pct)
                         close_side = OrderSide.SELL if is_long else OrderSide.BUY
                         await self.exchange.create_stop_loss_order(
                             pos.symbol, close_side, pos.amount, sl_price
@@ -1215,17 +1217,24 @@ class TradingEngine:
             if key not in current_position_keys:
                 # Position was closed between cycles — record the result.
                 symbol_closed = prev.get("symbol", "")
-                pnl = float(prev.get("unrealized_pnl", 0.0))
                 entry = float(prev.get("entry_price", 0.0))
                 amount = float(prev.get("amount", 0.0))
+                side = prev.get("side", "")
                 position_value = entry * amount
+                
+                # Fetch actual realized PnL from trade history instead of stale unrealized_pnl
+                pnl = await self._get_realized_pnl_for_closed_position(symbol_closed, entry, side)
                 pnl_pct = (pnl / position_value) if position_value > 0 else 0.0
-                trade_id = f"{symbol_closed}_{prev.get('side', '')}_{cycle_num}"
+                trade_id = f"{symbol_closed}_{side}_{cycle_num}"
                 strategy_name = prev.get("strategy", "unknown")
                 regime = self.current_market_regime
                 try:
                     if self.risk_manager is not None:
                         await self.risk_manager.record_trade_result(pnl, trade_id, pnl_pct)
+                    
+                    # Record timestamp when position was closed for cooldown tracking
+                    self._symbol_last_closed[symbol_closed] = time.time()
+                    
                     if self.strategy_manager is not None:
                         if pnl >= 0:
                             self.strategy_manager.record_win(strategy_name, pnl, regime)
@@ -2666,8 +2675,9 @@ class TradingEngine:
                         rate = float(raw_funding) if raw_funding is not None else 0.0
                     rate_pct: float = rate * 100.0
 
-                    # Record a snapshot on the tracker
-                    await self.position_manager.record_funding_cost(symbol, 0.0)  # event-based
+                    # Calculate actual funding cost: rate × position_value
+                    funding_cost = rate * tracker.position.amount * tracker.position.current_price
+                    await self.position_manager.record_funding_cost(symbol, funding_cost)
 
                     if rate_pct < tolerance:
                         pnl = tracker.position.unrealized_pnl
@@ -2727,6 +2737,55 @@ class TradingEngine:
             self._alert_cooldowns[key] = time.time()
             return True
         return False
+
+    async def _get_realized_pnl_for_closed_position(
+        self, symbol: str, entry_price: float, side: str
+    ) -> float:
+        """Query exchange trade history to fetch actual realized PnL for a closed position.
+        
+        Args:
+            symbol: Trading symbol
+            entry_price: Entry price of the position
+            side: Position side ("long" or "short")
+            
+        Returns:
+            Realized PnL in quote currency (USDT)
+        """
+        try:
+            # Fetch recent trade history from exchange
+            if self.exchange is None:
+                return 0.0
+            
+            trade_history = await self.exchange.get_trade_history(symbol, limit=50)
+            if not trade_history:
+                return 0.0
+            
+            # Calculate realized PnL from fills
+            total_pnl = 0.0
+            for trade in trade_history:
+                trade_price = float(getattr(trade, "price", 0.0))
+                trade_amount = float(getattr(trade, "amount", 0.0))
+                trade_side = str(getattr(trade, "side", "")).lower()
+                
+                # Calculate PnL based on position side
+                if side.lower() == "long" and trade_side == "sell":
+                    # Closing long position
+                    total_pnl += (trade_price - entry_price) * trade_amount
+                elif side.lower() == "short" and trade_side == "buy":
+                    # Closing short position
+                    total_pnl += (entry_price - trade_price) * trade_amount
+            
+            logger.debug(
+                "Realized PnL for closed {} {}: {:.4f} USDT (from {} trades)",
+                symbol, side, total_pnl, len(trade_history)
+            )
+            return total_pnl
+        except Exception as exc:
+            logger.warning(
+                "Could not fetch realized PnL for {} {}: {} — using 0.0",
+                symbol, side, exc
+            )
+            return 0.0
 
     async def _check_liquidation_proximity(self) -> None:
         """Check all open positions for liquidation proximity and alert/close as needed.
@@ -2871,13 +2930,24 @@ class TradingEngine:
         try:
             # Normalise: strip swap suffix for consistent comparison.
             norm_symbol = symbol.split(":")[0]
-            tracker = self.position_manager.get_position_sync(norm_symbol)
+            # Use thread-safe async access via run_coroutine_threadsafe
+            # to avoid race conditions with the position manager's lock
+            loop = asyncio.get_event_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                self.position_manager.get_position(norm_symbol),
+                loop
+            )
+            tracker = future.result(timeout=2.0)
             if tracker is None:
                 # Also try with the swap suffix in case positions are keyed that way.
                 base, _, quote = norm_symbol.partition("/")
                 if quote:
                     swap_symbol = f"{norm_symbol}:{quote}"
-                    tracker = self.position_manager.get_position_sync(swap_symbol)
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.position_manager.get_position(swap_symbol),
+                        loop
+                    )
+                    tracker = future.result(timeout=2.0)
             if tracker is None:
                 return False
             # Any open position for this symbol blocks a new trade.

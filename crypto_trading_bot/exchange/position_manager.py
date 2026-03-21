@@ -1059,7 +1059,9 @@ class PositionManager:
 
                         is_long = pos.side == PositionSide.LONG
                         price = pos.current_price or pos.mark_price or pos.entry_price
-                        emergency_sl = price * (0.97 if is_long else 1.03)
+                        # Scale SL distance with leverage: higher leverage = tighter SL
+                        sl_pct = max(0.03, 0.5 / max(pos.leverage, 1))
+                        emergency_sl = price * (1 - sl_pct if is_long else 1 + sl_pct)
                         close_side = OrderSide.SELL if is_long else OrderSide.BUY
                         try:
                             sl_order = await self._exchange.create_stop_loss_order(
