@@ -247,6 +247,52 @@ impl GateIoGateway {
             circuit_breaker,
         ));
 
+        // ── Task 1: Spawn liquidation price monitoring background thread (30s interval) ──
+        // Monitors all open positions and triggers auto-reduce (50%) when within 5%
+        // of liquidation price, or emergency close (100%) when within 2%.
+        {
+            let liq_client = rest_client.clone();
+            let liq_key = api_key.clone();
+            let liq_secret = secret_bytes.clone();
+            let liq_testnet = testnet;
+            let liq_ready = is_ready.clone();
+            tokio::spawn(async move {
+                // Wait for initial WS connection before starting monitoring
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                info!("[gateio-liq] Liquidation monitoring thread started (30s interval)");
+                loop {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+
+                    if !liq_ready.load(Ordering::Acquire) {
+                        debug!("[gateio-liq] Skipping cycle — WS not ready");
+                        continue;
+                    }
+
+                    // Create a temporary gateway instance for the monitoring call
+                    let temp_gw = GateIoGateway {
+                        api_key: liq_key.clone(),
+                        api_secret: liq_secret.clone(),
+                        testnet: liq_testnet,
+                        ws_tx: mpsc::unbounded_channel().0, // Dummy channel (not used for REST)
+                        next_client_id: AtomicU64::new(0),
+                        pending: Arc::new(RwLock::new(HashMap::new())),
+                        order_state: Arc::new(RwLock::new(HashMap::new())),
+                        is_ready: Arc::new(AtomicBool::new(true)),
+                        rest_client: liq_client.clone(),
+                        reconciliation_cycles: AtomicU64::new(0),
+                        reconciliation_discrepancies: AtomicU64::new(0),
+                        rate_limit_tokens_used: Arc::new(AtomicU64::new(0)),
+                        rate_limit_second_ns: Arc::new(AtomicU64::new(0)),
+                        circuit_breaker: None,
+                    };
+
+                    if let Err(e) = temp_gw.monitor_liquidation_prices().await {
+                        warn!("[gateio-liq] Monitoring cycle failed: {}", e);
+                    }
+                }
+            });
+        }
+
         // ── Trap 1 Fix: Spawn 60-second REST reconciliation background thread ──
         // This thread periodically queries the Gate.io REST API to true-up the
         // internal order_state DashMap against actual exchange positions. This
@@ -1901,6 +1947,165 @@ impl ExecutionGateway for GateIoGateway {
             }
         }
         Ok(positions)
+    }
+
+    /// Monitor liquidation prices for all open positions.
+    ///
+    /// Queries `/futures/usdt/positions` REST endpoint, extracts `liq_price`,
+    /// `margin`, and `maintenance_margin` fields, and triggers auto-reduce
+    /// (50% position close) when price is within 5% of liquidation or
+    /// emergency close when within 2%.
+    ///
+    /// This method should be called from a background task spawned at
+    /// gateway initialization (every 30 seconds).
+    pub async fn monitor_liquidation_prices(&self) -> Result<(), ExchangeError> {
+        let response = self.rest_get("/futures/usdt/positions", "").await?;
+
+        if let Some(positions) = response.as_array() {
+            for pos in positions {
+                let contract = pos.get("contract")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let size = pos.get("size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+
+                if size == 0 {
+                    continue; // No position
+                }
+
+                let liq_price = pos.get("liq_price")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| pos.get("liq_price").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0);
+
+                let mark_price = pos.get("mark_price")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| pos.get("mark_price").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0);
+
+                let margin = pos.get("margin")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| pos.get("margin").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0);
+
+                let maintenance_margin = pos.get("maintenance_margin")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| pos.get("maintenance_margin").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0);
+
+                if liq_price <= 0.0 || mark_price <= 0.0 {
+                    continue;
+                }
+
+                // Calculate distance to liquidation
+                let distance_pct = if size > 0 {
+                    // Long position: liquidation when price drops
+                    (mark_price - liq_price) / mark_price
+                } else {
+                    // Short position: liquidation when price rises
+                    (liq_price - mark_price) / mark_price
+                };
+
+                debug!(
+                    "[gateio-liq] {} size={} mark={:.4} liq={:.4} dist={:.2}% margin={:.2} maint={:.2}",
+                    contract, size, mark_price, liq_price, distance_pct * 100.0, margin, maintenance_margin
+                );
+
+                // Emergency close: within 2% of liquidation
+                if distance_pct < 0.02 {
+                    error!(
+                        "[gateio-liq] 🚨 EMERGENCY: {} within 2% of liquidation (dist={:.2}%) — closing entire position",
+                        contract, distance_pct * 100.0
+                    );
+
+                    // Submit emergency market close order
+                    let close_side = if size > 0 {
+                        OrderSide::Sell
+                    } else {
+                        OrderSide::Buy
+                    };
+
+                    let close_intent = OrderIntent {
+                        symbol: contract.to_string(),
+                        side: close_side,
+                        size: size.abs(),
+                        order_type: OrderType::Market,
+                        price: None,
+                        reduce_only: true,
+                        leverage: None,
+                        time_in_force: "ioc".to_string(),
+                        slippage_cap_pct: Some(0.02), // Allow 2% slippage for emergency
+                        placement: PlacementType::AtBest,
+                        stop_loss: None,
+                        take_profit: None,
+                        confidence: 0.0,
+                        signal_tag: "emergency_liquidation_close".to_string(),
+                    };
+
+                    match self.submit_order(close_intent).await {
+                        Ok(res) => {
+                            info!(
+                                "[gateio-liq] ✅ Emergency close executed: {} filled {} @ {:.4}",
+                                contract, res.filled_size, res.avg_fill_price
+                            );
+                        }
+                        Err(e) => {
+                            error!("[gateio-liq] ❌ Emergency close failed for {}: {}", contract, e);
+                        }
+                    }
+                }
+                // Auto-reduce: within 5% of liquidation
+                else if distance_pct < 0.05 {
+                    warn!(
+                        "[gateio-liq] ⚠️ {} within 5% of liquidation (dist={:.2}%) — reducing position by 50%",
+                        contract, distance_pct * 100.0
+                    );
+
+                    let reduce_size = (size.abs() as f64 * 0.5).ceil() as i64;
+                    let reduce_side = if size > 0 {
+                        OrderSide::Sell
+                    } else {
+                        OrderSide::Buy
+                    };
+
+                    let reduce_intent = OrderIntent {
+                        symbol: contract.to_string(),
+                        side: reduce_side,
+                        size: reduce_size,
+                        order_type: OrderType::Market,
+                        price: None,
+                        reduce_only: true,
+                        leverage: None,
+                        time_in_force: "ioc".to_string(),
+                        slippage_cap_pct: Some(0.01),
+                        placement: PlacementType::AtBest,
+                        stop_loss: None,
+                        take_profit: None,
+                        confidence: 0.0,
+                        signal_tag: "auto_reduce_liquidation".to_string(),
+                    };
+
+                    match self.submit_order(reduce_intent).await {
+                        Ok(res) => {
+                            info!(
+                                "[gateio-liq] ✅ Auto-reduce executed: {} reduced by {} @ {:.4}",
+                                contract, res.filled_size, res.avg_fill_price
+                            );
+                        }
+                        Err(e) => {
+                            warn!("[gateio-liq] Auto-reduce failed for {}: {}", contract, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn get_order_status(&self, order_id: &str, symbol: &str)
