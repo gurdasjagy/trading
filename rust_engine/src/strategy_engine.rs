@@ -113,6 +113,12 @@ pub struct MicrostructureMetrics {
     pub vpin: f64,
     /// Direction of last trade (Some(true) = buy, Some(false) = sell).
     pub last_trade_is_buy: Option<bool>,
+    /// Cumulative Volume Delta for 5-minute window.
+    pub cvd_5m: f64,
+    /// Cumulative Volume Delta for 15-minute window.
+    pub cvd_15m: f64,
+    /// Cumulative Volume Delta for 1-hour window.
+    pub cvd_1h: f64,
 }
 
 // OrderIntent is imported from crate::execution_gateway — single source of truth.

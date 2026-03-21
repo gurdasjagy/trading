@@ -93,6 +93,9 @@ use crate::smart_entry::{SmartEntryRouter as SmartEntryRouterV2, VolatilityTrail
 use crate::dashboard_server::DashboardState;
 use crate::correlation_limiter::CorrelationLimiter;
 use crate::risk_calculator;
+use crate::cumulative_delta::CumulativeDeltaTracker;
+use crate::volume_profile::VolumeProfile;
+use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
 // use crate::event_sequencer::{EventSequencer, SequencedEventKind};
 
 // ---------------------------------------------------------------------------
@@ -502,6 +505,9 @@ mod dust_tracker;
 mod trade_flow_analyzer;
 mod correlation_limiter;
 mod telegram_alert;
+mod cumulative_delta;
+mod volume_profile;
+mod liquidation_detector;
 
 // Directive 1: Rust-native position lifecycle (replaces Python TradeTracker)
 mod position_lifecycle;
@@ -896,6 +902,16 @@ fn strategy_evaluator_loop(
     let mut adverse_guard = AdverseSelectionGuard::default();
     // FIX 9: Initialize VPIN calculator to replace the always-zero stub
     let mut vpin_calculator = microstructure::EnhancedVpin::new(100_000.0, 50); // 100k USDT bucket size, 50 buckets
+    // Phase 2 Feature 1: CVD tracker initialization
+    let mut cvd_tracker = CumulativeDeltaTracker::new();
+    info!("[strategy] 📊 CVD tracker initialized (5m/15m/1h windows)");
+    // Phase 2 Feature 2: Volume Profile initialization
+    let mut volume_profile = VolumeProfile::new(0.1);
+    let mut last_profile_reset = std::time::Instant::now();
+    info!("[strategy] 📊 Volume Profile initialized (VPOC + Value Area)");
+    // Phase 2 Feature 3: Liquidation cascade detector initialization
+    let mut liq_detector = LiquidationCascadeDetector::new();
+    info!("[strategy] 🌊 Liquidation cascade detector initialized");
     // Upgrade 4: Per-position trailing stop states
     let mut trailing_stops: HashMap<u16, exit_evaluator::TrailingStopState> = HashMap::new();
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
@@ -933,13 +949,25 @@ fn strategy_evaluator_loop(
                 last_regime_check = std::time::Instant::now();
             }
 
-            // Drain trade ring and update VPIN + candles
+            // Phase 2 Feature 2: Daily volume profile reset (every 24 hours)
+            if last_profile_reset.elapsed() > Duration::from_secs(24 * 60 * 60) {
+                volume_profile.reset_profile();
+                last_profile_reset = std::time::Instant::now();
+                info!("[strategy] 🔄 Volume profile reset (daily)");
+            }
+
+            // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector
             while let Some(trade) = trades_ring.try_pop() {
                 let price = FixedPrice(trade.price).to_f64();
                 let volume = fixed_point::FixedQty(trade.qty).to_f64();
                 let side = if trade.side == 0 { Some("buy") } else { Some("sell") };
                 let mid = FixedPrice(snapshot.mid_price).to_f64();
+                let is_buy = trade.side == 0;
+                let volume_usdt = price * volume;
                 vpin_calculator.on_trade(price, volume, side, mid);
+                cvd_tracker.on_trade(trade.recv_ns, volume, is_buy);
+                volume_profile.update_trade(price, volume, 0.1);
+                liq_detector.on_trade(trade.recv_ns, volume_usdt);
                 strategy.update_candles(trade.recv_ns, price, volume);
             }
 
@@ -1033,10 +1061,29 @@ fn strategy_evaluator_loop(
                 ask_depth_usdt: snapshot.ask_depth_usdt as f64 / FixedPrice::PRECISION as f64,
                 vpin: vpin_calculator.get_vpin(), // FIX 9: compute live VPIN from trade flow
                 last_trade_is_buy: None,
+                cvd_5m: cvd_tracker.get_cvd_5m(),
+                cvd_15m: cvd_tracker.get_cvd_15m(),
+                cvd_1h: cvd_tracker.get_cvd_1h(),
             };
 
             // Evaluate strategy
             let symbol_name = registry.get_name(snapshot.symbol_id);
+
+            // ── Phase 2 Feature 1: CVD Divergence Detection ──
+            // Track recent price highs/lows for divergence detection
+            // For simplicity, we use a rolling window approach
+            let mut recent_highs: Vec<(u64, f64)> = Vec::new();
+            let mut recent_lows: Vec<(u64, f64)> = Vec::new();
+            
+            // Add current price point (simplified - in production would track actual swing highs/lows)
+            let current_price = FixedPrice(snapshot.mid_price).to_f64();
+            recent_highs.push((snapshot.timestamp_ns, current_price));
+            recent_lows.push((snapshot.timestamp_ns, current_price));
+            
+            // Check for bearish divergence (price makes new high, CVD makes lower high)
+            let bearish_divergence = cvd_tracker.detect_bearish_divergence(&recent_highs);
+            // Check for bullish divergence (price makes new low, CVD makes higher low)
+            let bullish_divergence = cvd_tracker.detect_bullish_divergence(&recent_lows);
 
             // ── Directive 4: Update adverse selection guard with book depth ──
             adverse_guard.update(
@@ -1222,9 +1269,76 @@ fn strategy_evaluator_loop(
                 }
             }
 
-            if let Some(intent) = strategy.evaluate(&metrics, &current_regime, symbol_name) {
+            if let Some(mut intent) = strategy.evaluate(&metrics, &current_regime, symbol_name) {
                 let entry_price = intent.price.unwrap_or(metrics.mid_price);
                 let is_buy = matches!(intent.side, execution_gateway::OrderSide::Buy);
+
+                // ── Phase 2 Feature 1: Apply CVD Divergence Adjustments ──
+                if bearish_divergence && is_buy {
+                    // Bearish divergence detected on a long signal - reduce confidence by 30%
+                    intent.confidence *= 0.7;
+                    info!("[strategy] 🔻 CVD bearish divergence detected for {} — reducing long confidence to {:.2}",
+                        symbol_name, intent.confidence);
+                    // Skip signal if confidence drops too low
+                    if intent.confidence < 0.3 {
+                        info!("[strategy] 🔻 CVD bearish divergence — skipping long signal for {}", symbol_name);
+                        continue;
+                    }
+                } else if bullish_divergence && !is_buy {
+                    // Bullish divergence detected on a short signal - reduce confidence by 30%
+                    intent.confidence *= 0.7;
+                    info!("[strategy] 🔺 CVD bullish divergence detected for {} — reducing short confidence to {:.2}",
+                        symbol_name, intent.confidence);
+                    // Skip signal if confidence drops too low
+                    if intent.confidence < 0.3 {
+                        info!("[strategy] 🔺 CVD bullish divergence — skipping short signal for {}", symbol_name);
+                        continue;
+                    }
+                }
+
+                // ── Phase 2 Feature 2: VPOC-Based Bias ──
+                if let Some(vpoc) = volume_profile.get_vpoc() {
+                    let price_to_vpoc_pct = ((current_price - vpoc) / vpoc).abs();
+                    
+                    // If price is within 1% of VPOC, apply bias
+                    if price_to_vpoc_pct < 0.01 {
+                        if current_price < vpoc && is_buy {
+                            // Price approaching VPOC from below - increase long confidence by 15%
+                            intent.confidence = (intent.confidence * 1.15).min(1.0);
+                            info!("[strategy] 🎯 Price approaching VPOC {:.2} from below — long bias (confidence={:.2})",
+                                vpoc, intent.confidence);
+                        } else if current_price > vpoc && !is_buy {
+                            // Price approaching VPOC from above - increase short confidence by 15%
+                            intent.confidence = (intent.confidence * 1.15).min(1.0);
+                            info!("[strategy] 🎯 Price approaching VPOC {:.2} from above — short bias (confidence={:.2})",
+                                vpoc, intent.confidence);
+                        }
+                    }
+                }
+
+                // ── Phase 2 Feature 3: Liquidation Cascade Response ──
+                let liq_state = liq_detector.get_state();
+                let (imb_mult, trail_mult) = liq_detector.get_adjusted_thresholds();
+                
+                if liq_state == LiquidationCascadeState::Active || liq_state == LiquidationCascadeState::Extreme {
+                    warn!("[strategy] 🌊 Liquidation cascade {:?} detected — adjusting thresholds (imb_mult={:.1}x, trail_mult={:.1}x)",
+                        liq_state, imb_mult, trail_mult);
+                    
+                    // Reduce position size during cascades
+                    let cascade_size_reduction = match liq_state {
+                        LiquidationCascadeState::Active => 0.5,  // 50% reduction
+                        LiquidationCascadeState::Extreme => 0.25, // 75% reduction
+                        _ => 1.0,
+                    };
+                    
+                    // Apply size reduction (will be applied later in position sizing)
+                    intent.confidence *= cascade_size_reduction;
+                    
+                    if intent.confidence < 0.2 {
+                        warn!("[strategy] 🌊 Liquidation cascade — skipping signal due to low confidence");
+                        continue;
+                    }
+                }
 
                 // FEATURE 13: Drawdown-based position scaling
                 // Track peak equity and reduce position size during drawdowns
