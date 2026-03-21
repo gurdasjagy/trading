@@ -445,7 +445,15 @@ fn load_config() -> EngineConfig {
         match std::fs::read_to_string(&config_path) {
             Ok(raw_content) => {
                 let content = expand_env_vars(&raw_content);
-                match serde_json::from_str::<EngineConfig>(&content) {
+                let is_toml = config_path.ends_with(".toml");
+                let result = if is_toml {
+                    toml::from_str::<EngineConfig>(&content)
+                        .map_err(|e| format!("TOML parse error: {}", e))
+                } else {
+                    serde_json::from_str::<EngineConfig>(&content)
+                        .map_err(|e| format!("JSON parse error: {}", e))
+                };
+                match result {
                     Ok(mut cfg) => {
                         info!("Loaded config from TRADING_CONFIG={}", config_path);
                         apply_env_overrides(&mut cfg);

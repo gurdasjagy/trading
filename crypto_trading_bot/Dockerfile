@@ -20,3 +20,5 @@ ENV PYTHONPATH=/app
 # command referenced a path (/app/../rust_engine) that doesn't exist inside
 # this image's build context and was silently failing via || true.
 
+CMD ["python", "main.py", "run"]
+
