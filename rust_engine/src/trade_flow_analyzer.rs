@@ -211,6 +211,52 @@ impl TradeFlowAnalyzer {
         self.arrival_rate_ema = 0.0;
         self.last_trade_ns = 0;
     }
+    
+    /// Task 22: Calculate order flow toxicity score.
+    ///
+    /// Composite score combining:
+    /// - VPIN (40% weight)
+    /// - CVD divergence score (30% weight)
+    /// - Large trade ratio (30% weight)
+    ///
+    /// Returns a score in [0.0, 1.0] where higher = more toxic flow.
+    ///
+    /// # Arguments
+    /// * `vpin` — Current VPIN value [0.0, 1.0]
+    /// * `cvd_divergence_score` — CVD divergence score [-1.0, 1.0]
+    pub fn calculate_toxicity_score(&self, vpin: f64, cvd_divergence_score: f64) -> f64 {
+        let metrics = self.get_metrics();
+        
+        // Calculate large trade ratio: volume from trades > 2x median / total volume
+        let large_trade_ratio = if self.total_volume > 0.0 {
+            // Calculate median trade size
+            let mut sizes: Vec<f64> = self.trades.iter().map(|t| t.size).collect();
+            sizes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median = if sizes.is_empty() {
+                0.0
+            } else {
+                sizes[sizes.len() / 2]
+            };
+            
+            // Sum volume from large trades (> 2x median)
+            let large_threshold = median * 2.0;
+            let large_volume: f64 = self.trades.iter()
+                .filter(|t| t.size > large_threshold)
+                .map(|t| t.size)
+                .sum();
+            
+            large_volume / self.total_volume
+        } else {
+            0.0
+        };
+        
+        // Composite toxicity score
+        let toxicity = 0.4 * vpin 
+            + 0.3 * cvd_divergence_score.abs() 
+            + 0.3 * large_trade_ratio;
+        
+        toxicity.clamp(0.0, 1.0)
+    }
 }
 
 impl Default for TradeFlowAnalyzer {
