@@ -1258,6 +1258,143 @@ class StrategyManager:
         except Exception as exc:
             logger.error(f"Failed to update RL optimizer: {exc}")
 
+    async def validate_strategy_for_live(self, strategy_name: str) -> Tuple[bool, List[str]]:
+        """Validate a strategy for live trading using walk-forward validation.
+        
+        Loads the last 6 months of OHLCV data for the strategy's symbols,
+        runs WalkForwardValidator.validate() with the strategy's ML model (if available),
+        checks that at least 4 of 6 monthly windows have positive out-of-sample returns,
+        and returns (passed, failure_reasons).
+        
+        Args:
+            strategy_name: Name of the strategy to validate.
+            
+        Returns:
+            Tuple of (passed: bool, failure_reasons: List[str]).
+        """
+        failure_reasons: List[str] = []
+        
+        # Check if strategy exists
+        if strategy_name not in self._strategies:
+            failure_reasons.append(f"Strategy {strategy_name!r} not found")
+            return False, failure_reasons
+        
+        strategy = self._strategies[strategy_name]
+        
+        # Check if strategy has ML model
+        if not hasattr(strategy, "model") or strategy.model is None:
+            # Non-ML strategies pass validation automatically
+            logger.info(
+                "Strategy {} has no ML model — skipping walk-forward validation",
+                strategy_name,
+            )
+            return True, []
+        
+        # Import WalkForwardValidator
+        try:
+            from ai.prediction.walk_forward_validator import WalkForwardValidator
+        except ImportError as exc:
+            failure_reasons.append(f"WalkForwardValidator not available: {exc}")
+            return False, failure_reasons
+        
+        # Get strategy symbols (use all trading pairs if strategy has no specific symbols)
+        symbols = strategy.symbols if strategy.symbols else []
+        if not symbols:
+            # Fall back to first trading pair from settings
+            try:
+                from config.settings import Settings
+                settings = Settings.get_settings()
+                symbols = getattr(getattr(settings, "exchange", None), "trading_pairs", [])[:1]
+            except Exception:
+                symbols = ["BTC/USDT"]  # Ultimate fallback
+        
+        if not symbols:
+            failure_reasons.append("No symbols configured for validation")
+            return False, failure_reasons
+        
+        # Load 6 months of OHLCV data for the first symbol
+        symbol = symbols[0]
+        try:
+            # Get exchange from engine (if available)
+            from core.engine import TradingEngine
+            engine = getattr(TradingEngine, "_instance", None)
+            if engine is None or engine.exchange is None:
+                failure_reasons.append("Exchange not available for data loading")
+                return False, failure_reasons
+            
+            # Load 6 months of 1h data (approx 4320 candles)
+            df = await engine.exchange.get_ohlcv(symbol, timeframe="1h", limit=4320)
+            if df is None or df.empty or len(df) < 100:
+                failure_reasons.append(f"Insufficient data for {symbol} (got {len(df) if df is not None else 0} candles)")
+                return False, failure_reasons
+            
+            # Extract features and targets from OHLCV data
+            # Simplified: use close prices as features, returns as targets
+            import numpy as np
+            closes = df["close"].values
+            features = np.column_stack([
+                closes[:-1],  # Previous close
+                df["volume"].values[:-1],  # Previous volume
+            ])
+            targets = np.diff(closes) / closes[:-1]  # Returns
+            timestamps = df.index.values[1:]  # Align with targets
+            
+            # Run walk-forward validation
+            validator = WalkForwardValidator(
+                training_window_days=180,  # 6 months
+                validation_window_days=30,  # 1 month
+                step_forward_days=30,  # 1 month step
+                min_sharpe=0.3,  # Lower threshold for crypto
+                min_hit_rate=0.50,  # 50% hit rate minimum
+                min_profit_factor=1.1,  # Modest profit factor
+            )
+            
+            result = await validator.validate(
+                model=strategy.model,
+                features=features,
+                targets=targets,
+                timestamps=timestamps,
+            )
+            
+            if not result.passed:
+                failure_reasons.extend(result.failure_reasons)
+                logger.warning(
+                    "Strategy {} failed walk-forward validation: {}",
+                    strategy_name,
+                    ", ".join(result.failure_reasons),
+                )
+                return False, failure_reasons
+            
+            # Check that at least 4 of 6 monthly windows have positive returns
+            positive_windows = sum(
+                1 for w in result.window_results
+                if w.val_sharpe > 0
+            )
+            if positive_windows < 4:
+                failure_reasons.append(
+                    f"Only {positive_windows}/6 windows have positive Sharpe "
+                    f"(minimum 4 required)"
+                )
+                return False, failure_reasons
+            
+            logger.info(
+                "Strategy {} passed walk-forward validation: "
+                "Sharpe={:.3f}±{:.3f} HitRate={:.3f} PF={:.3f} ({}/{} windows positive)",
+                strategy_name,
+                result.avg_val_sharpe,
+                result.std_val_sharpe,
+                result.avg_val_hit_rate,
+                result.avg_val_profit_factor,
+                positive_windows,
+                result.num_windows,
+            )
+            return True, []
+            
+        except Exception as exc:
+            failure_reasons.append(f"Validation error: {exc}")
+            logger.error("Walk-forward validation error for {}: {}", strategy_name, exc)
+            return False, failure_reasons
+
     def __len__(self) -> int:
         return len(self._strategies)
 

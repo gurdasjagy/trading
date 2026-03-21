@@ -201,6 +201,34 @@ class TradingEngine:
         logger.info("Starting Trading Engine…")
         self._start_time = datetime.now(tz=timezone.utc)
         await self._initialize_subsystems()
+        
+        # Run live readiness checks before starting trading loop in live mode
+        if self.settings.trading_mode == "live":
+            try:
+                from core.live_readiness_check import LiveReadinessChecker
+                
+                live_checker = LiveReadinessChecker()
+                passed, errors = await live_checker.run_all_checks(
+                    settings=self.settings,
+                    exchange=self.exchange,
+                )
+                
+                if not passed:
+                    error_msg = (
+                        "Live trading readiness checks FAILED:\n"
+                        + "\n".join(f"  • {err}" for err in errors)
+                        + "\n\nFix the above issues before starting live trading."
+                    )
+                    logger.critical(error_msg)
+                    raise RuntimeError(error_msg)
+                
+                logger.info("✅ All live readiness checks passed — starting live trading")
+            except ImportError as exc:
+                logger.warning(
+                    "LiveReadinessChecker not available: {} — skipping pre-flight checks",
+                    exc,
+                )
+        
         self._register_signal_handlers()
         await self._start_background_tasks()
         logger.info("Trading Engine started successfully.")
