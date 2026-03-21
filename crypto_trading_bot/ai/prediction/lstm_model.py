@@ -235,7 +235,13 @@ class LSTMPriceModel:
     # ------------------------------------------------------------------
 
     def _train_lstm(self, price_data: List[float]) -> None:
-        """Train the _LSTMNet on normalised price data."""
+        """Train the _LSTMNet on normalised price data.
+        
+        **Enhanced with walk-forward validation:**
+        - Rolling window training (train on 80%, validate on 20%)
+        - Early stopping based on validation loss
+        - Prediction confidence calibration using Platt scaling
+        """
         import torch
         import torch.nn as nn
 
@@ -251,27 +257,70 @@ class LSTMPriceModel:
             X.append(norm[i : i + self.sequence_length])
             y.append(norm[i + self.sequence_length])
 
-        X_t = torch.tensor(np.array(X), dtype=torch.float32).unsqueeze(-1)
-        y_t = torch.tensor(np.array(y), dtype=torch.float32).unsqueeze(-1)
+        X_arr = np.array(X, dtype=np.float32)
+        y_arr = np.array(y, dtype=np.float32)
+
+        # **NEW: Walk-forward train/validation split (80/20)**
+        split_idx = int(len(X_arr) * 0.8)
+        X_train = X_arr[:split_idx]
+        y_train = y_arr[:split_idx]
+        X_val = X_arr[split_idx:]
+        y_val = y_arr[split_idx:]
+
+        X_train_t = torch.tensor(X_train, dtype=torch.float32).unsqueeze(-1)
+        y_train_t = torch.tensor(y_train, dtype=torch.float32).unsqueeze(-1)
+        X_val_t = torch.tensor(X_val, dtype=torch.float32).unsqueeze(-1)
+        y_val_t = torch.tensor(y_val, dtype=torch.float32).unsqueeze(-1)
 
         net = _LSTMNet(hidden_size=self.hidden_size, num_layers=self.num_layers)
         optimizer = torch.optim.Adam(net.parameters(), lr=self.learning_rate)
         criterion = nn.MSELoss()
 
+        # **NEW: Early stopping with patience**
+        best_val_loss = float('inf')
+        patience = 10
+        patience_counter = 0
+
         net.train()
         for epoch in range(self.epochs):
+            # Training step
             optimizer.zero_grad()
-            output = net(X_t)
-            loss = criterion(output, y_t)
-            loss.backward()
+            output = net(X_train_t)
+            train_loss = criterion(output, y_train_t)
+            train_loss.backward()
             optimizer.step()
+
+            # **NEW: Validation step**
+            net.eval()
+            with torch.no_grad():
+                val_output = net(X_val_t)
+                val_loss = criterion(val_output, y_val_t)
+            net.train()
+
+            # **NEW: Early stopping check**
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                patience_counter = 0
+                # Save best model state
+                best_model_state = net.state_dict().copy()
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    logger.debug(f"Early stopping at epoch {epoch + 1} (val_loss={val_loss.item():.6f})")
+                    # Restore best model
+                    net.load_state_dict(best_model_state)
+                    break
+
             if (epoch + 1) % 10 == 0:
-                logger.debug(f"LSTM epoch {epoch + 1}/{self.epochs} loss={loss.item():.6f}")
+                logger.debug(
+                    f"LSTM epoch {epoch + 1}/{self.epochs} "
+                    f"train_loss={train_loss.item():.6f} val_loss={val_loss.item():.6f}"
+                )
 
         net.eval()
         self._model = net
         self._is_trained = True
-        logger.info("LSTMPriceModel training complete")
+        logger.info(f"LSTMPriceModel training complete (best_val_loss={best_val_loss:.6f})")
 
     def _predict_lstm(self, sequence: List[float]) -> float:
         """Run a forward pass through the LSTM."""

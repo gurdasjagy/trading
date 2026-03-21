@@ -1957,6 +1957,21 @@ class TradingEngine:
             )
             self.ai_brain = AIBrain(llm_client=llm_client)
 
+            # Initialize WalkForwardValidator for ML model validation
+            try:
+                from ai.prediction.walk_forward_validator import WalkForwardValidator
+
+                self.walk_forward_validator = WalkForwardValidator(
+                    train_window_months=6,
+                    validation_window_months=1,
+                    step_months=1,
+                    min_samples=100,
+                )
+                logger.info("WalkForwardValidator initialized (6mo train, 1mo validate, 1mo step)")
+            except Exception as val_exc:
+                logger.warning("WalkForwardValidator initialization failed: {} — continuing without validation", val_exc)
+                self.walk_forward_validator = None
+
             active_providers = [
                 name
                 for name, key in [
