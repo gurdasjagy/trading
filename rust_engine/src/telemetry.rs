@@ -15,6 +15,7 @@ use crate::journal::{
     ENTRY_ORDER_RESULT, ENTRY_POSITION_CHANGE,
 };
 use crate::shared_state::{EngineStateHeader, SharedStateWriter, SymbolState, STATE_SHM_PATH};
+use crate::telegram_alert::TelegramAlertSender;
 
 use serde_json;
 use tracing::{info, warn};
@@ -49,6 +50,8 @@ pub struct TelemetryPublisher {
     state_init_attempts: u32,
     /// Maximum init attempts before giving up.
     max_state_init_attempts: u32,
+    /// Telegram alert sender (FEATURE 10).
+    telegram_sender: Option<TelegramAlertSender>,
 }
 
 impl TelemetryPublisher {
@@ -57,6 +60,17 @@ impl TelemetryPublisher {
     /// The `journal_dir` and `state_path` parameters control where the journal
     /// segments and shared state file are stored (typically in `/dev/shm/`).
     pub fn new(journal_dir: String, state_path: String) -> Self {
+        // Initialize Telegram alert sender from environment variables
+        let telegram_sender = {
+            let bot_token = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
+            let chat_id = std::env::var("TELEGRAM_CHAT_ID").unwrap_or_default();
+            if !bot_token.is_empty() && !chat_id.is_empty() {
+                Some(TelegramAlertSender::new(bot_token, chat_id))
+            } else {
+                None
+            }
+        };
+
         Self {
             journal: None,
             state_writer: None,
@@ -69,6 +83,7 @@ impl TelemetryPublisher {
             start_ns: journal::now_ns(),
             state_init_attempts: 0,
             max_state_init_attempts: 10,
+            telegram_sender,
         }
     }
 

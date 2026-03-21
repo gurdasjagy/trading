@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use crate::orderbook::RustOrderBook;
 use crate::tick_processor::KahanSum;
+use crate::trade_flow_analyzer::{TradeFlowAnalyzer, TradeFlowMetrics};
 
 // ---------------------------------------------------------------------------
 // Book side helper
@@ -795,6 +796,8 @@ pub struct MicrostructureEngine {
     pub last_tick_imbalance: f64,
     /// Current basic VPIN.
     pub last_vpin: f64,
+    /// Trade flow analyzer for buy/sell ratio and large trade detection.
+    trade_flow_analyzer: TradeFlowAnalyzer,
 }
 
 impl MicrostructureEngine {
@@ -810,6 +813,7 @@ impl MicrostructureEngine {
             last_vwap: 0.0,
             last_tick_imbalance: 0.0,
             last_vpin: 0.0,
+            trade_flow_analyzer: TradeFlowAnalyzer::default(),
         }
     }
 
@@ -876,6 +880,10 @@ impl MicrostructureEngine {
             BookSide::Bid
         };
         self.queue_tracker.on_trade(price, size, book_side);
+
+        // Trade flow analyzer update (FEATURE 4)
+        let trade_side = if side.eq_ignore_ascii_case("buy") { 0 } else { 1 };
+        self.trade_flow_analyzer.on_trade(price, size, trade_side, now);
     }
 
     /// Register a resting order for queue tracking.
@@ -945,6 +953,17 @@ impl MicrostructureEngine {
             microstructure_edge_score: edge,
         }
     }
+
+    /// Get trade flow metrics for use in strategy filtering.
+    pub fn get_trade_flow_metrics(&self) -> TradeFlowMetrics {
+        self.trade_flow_analyzer.get_metrics()
+    }
+
+    /// Check if trade flow analyzer is ready.
+    pub fn is_trade_flow_ready(&self) -> bool {
+        self.trade_flow_analyzer.is_ready()
+    }
+}
 
     fn compute_edge_score(
         &self,

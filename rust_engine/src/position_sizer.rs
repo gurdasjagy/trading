@@ -168,6 +168,43 @@ impl PositionSizer {
         self.specs.get(symbol)
     }
 
+    /// Calculate adaptive leverage based on realized volatility (FEATURE 8).
+    ///
+    /// # Formula
+    /// - ATR/price > 2% → leverage = 2x (high volatility)
+    /// - ATR/price < 0.5% → leverage = 10x (low volatility)
+    /// - Linear interpolation between 0.5% and 2%
+    /// - Clamped to [2x, 20x]
+    ///
+    /// # Arguments
+    /// * `atr` — Average True Range
+    /// * `price` — Current price
+    ///
+    /// # Returns
+    /// Adaptive leverage (2-20x)
+    pub fn calculate_adaptive_leverage(&self, atr: f64, price: f64) -> i32 {
+        if price <= 0.0 || atr <= 0.0 {
+            return 5; // Default leverage
+        }
+
+        let atr_pct = (atr / price) * 100.0;
+
+        let leverage = if atr_pct > 2.0 {
+            2 // High volatility: conservative leverage
+        } else if atr_pct < 0.5 {
+            10 // Low volatility: aggressive leverage
+        } else {
+            // Linear interpolation: 2x at 2%, 10x at 0.5%
+            // slope = (10 - 2) / (0.5 - 2.0) = -5.333
+            // leverage = 10 + (-5.333) * (atr_pct - 0.5)
+            let slope = (10.0 - 2.0) / (0.5 - 2.0);
+            let lev = 10.0 + slope * (atr_pct - 0.5);
+            lev.round() as i32
+        };
+
+        leverage.clamp(2, 20)
+    }
+
     /// Calculate the correct integer contract count for a trade.
     ///
     /// # Arguments

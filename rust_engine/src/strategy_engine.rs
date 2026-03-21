@@ -49,6 +49,7 @@ use tracing::{debug, info};
 use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
 use crate::execution_state::PlacementType;
 use crate::regime::RegimeState;
+use crate::candle_aggregator::{CandleAggregator, Timeframe};
 
 // ---------------------------------------------------------------------------
 // Configuration Constants
@@ -279,6 +280,8 @@ pub struct StrategyEngine {
     /// Strategy configuration (immutable after construction).
     /// Contains leverage, thresholds, and other strategy parameters.
     strategy_config: StrategyConfig,
+    /// Multi-timeframe candle aggregator for confluence filtering.
+    candle_aggregator: CandleAggregator,
 }
 
 impl StrategyEngine {
@@ -297,6 +300,7 @@ impl StrategyEngine {
             max_positions: 5,
             active_positions: 0,
             strategy_config: config,
+            candle_aggregator: CandleAggregator::default(),
         }
     }
 
@@ -313,6 +317,7 @@ impl StrategyEngine {
             max_positions: 5,
             active_positions: 0,
             strategy_config: StrategyConfig::default(),
+            candle_aggregator: CandleAggregator::default(),
         }
     }
 
@@ -361,6 +366,45 @@ impl StrategyEngine {
                 vpin, VPIN_TOXIC_THRESHOLD
             );
             return None;
+        }
+
+        // ── Multi-timeframe confluence filtering (FEATURE 2) ──
+        // Check 15m EMA(20) > EMA(50) AND RSI > 40 for long signals
+        // Check 15m EMA(20) < EMA(50) AND RSI < 60 for short signals
+        if self.candle_aggregator.is_ready(Timeframe::M15) {
+            if let Some(candle_15m) = self.candle_aggregator.get_candle(Timeframe::M15) {
+                let ema20 = candle_15m.ema20;
+                let ema50 = candle_15m.ema50;
+                let rsi = candle_15m.rsi14;
+
+                // Determine signal direction from imbalance
+                let is_long_signal = metrics.imbalance > 0.0;
+
+                if is_long_signal {
+                    // Long signal: require 15m EMA(20) > EMA(50) AND RSI > 40
+                    if ema20 <= ema50 || rsi <= 40.0 {
+                        debug!(
+                            "[strategy] Long signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
+                            ema20, ema50, rsi
+                        );
+                        return None;
+                    }
+                } else {
+                    // Short signal: require 15m EMA(20) < EMA(50) AND RSI < 60
+                    if ema20 >= ema50 || rsi >= 60.0 {
+                        debug!(
+                            "[strategy] Short signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
+                            ema20, ema50, rsi
+                        );
+                        return None;
+                    }
+                }
+
+                debug!(
+                    "[strategy] 15m confluence passed: EMA20={:.2}, EMA50={:.2}, RSI={:.1}",
+                    ema20, ema50, rsi
+                );
+            }
         }
 
         // ── Imbalance scoring ──
@@ -531,6 +575,20 @@ impl StrategyEngine {
     /// Notify the strategy that a position was closed.
     pub fn notify_position_closed(&mut self) {
         self.active_positions = self.active_positions.saturating_sub(1);
+    }
+
+    /// Update the candle aggregator with a trade event.
+    ///
+    /// Called from the strategy evaluator loop when processing trade events
+    /// (update_type=3 from the SPSC ring).
+    #[inline]
+    pub fn update_candles(&mut self, timestamp_ns: u64, price: f64, volume: f64) {
+        self.candle_aggregator.on_trade(timestamp_ns, price, volume);
+    }
+
+    /// Get a reference to the candle aggregator (for testing/diagnostics).
+    pub fn candle_aggregator(&self) -> &CandleAggregator {
+        &self.candle_aggregator
     }
 }
 
