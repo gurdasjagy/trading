@@ -488,6 +488,8 @@ struct AppState {
     ws_tx: broadcast::Sender<String>,
     /// HTTP client for proxying Gate.io public API requests (market data).
     gateio_client: reqwest::Client,
+    /// Task 5: Execution analytics (Phase 2 Feature 7).
+    exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
 }
 
 impl AppState {
@@ -1050,16 +1052,16 @@ async fn api_risk_dashboard(State(state): State<Arc<AppState>>) -> Json<Value> {
 
 /// GET /api/execution-analytics — Execution quality analytics (Task 4)
 async fn api_execution_analytics(State(state): State<Arc<AppState>>) -> Json<Value> {
-    // Read from exec_analytics (will be passed via AppState in Task 5-6)
-    // For now, return placeholder values
+    // Task 4: Read from exec_analytics and return real metrics
+    let analytics = state.exec_analytics.lock();
     Json(json!({
         "success": true,
-        "avg_slippage_bps": 0.0,
-        "avg_shortfall_bps": 0.0,
-        "avg_impact_bps": 0.0,
-        "should_use_limit_orders": false,
-        "should_reduce_size": false,
-        "is_ready": false,
+        "avg_slippage_bps": analytics.get_avg_slippage_bps(),
+        "avg_shortfall_bps": analytics.get_avg_shortfall_bps(),
+        "avg_impact_bps": analytics.get_avg_impact_bps(),
+        "should_use_limit_orders": analytics.should_use_limit_orders(),
+        "should_reduce_size": analytics.should_reduce_size(),
+        "is_ready": analytics.is_ready(),
     }))
 }
 
@@ -1600,7 +1602,11 @@ fn find_static_dir() -> PathBuf {
 /// - `POST /api/v1/emergency-stop`     — Emergency stop
 /// - `GET /ws/live`           — WebSocket real-time updates
 /// - `GET /ws`                — WebSocket (alias)
-pub fn run_dashboard_server(bind_addr: &str, state: Arc<DashboardState>) {
+pub fn run_dashboard_server(
+    bind_addr: &str,
+    state: Arc<DashboardState>,
+    exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
+) {
     let bind_addr = bind_addr.to_string();
 
     // Build the axum server inside a new tokio runtime on a dedicated thread
@@ -1640,6 +1646,7 @@ pub fn run_dashboard_server(bind_addr: &str, state: Arc<DashboardState>) {
                     templates,
                     ws_tx,
                     gateio_client,
+                    exec_analytics,
                 });
 
                 // ── Static files ──

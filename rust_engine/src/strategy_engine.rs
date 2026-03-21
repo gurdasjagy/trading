@@ -384,26 +384,37 @@ pub struct StrategyEngine {
     candle_aggregator: parking_lot::Mutex<CandleAggregator>,
     /// Adaptive imbalance threshold calculator (Phase 2 Feature 6).
     adaptive_threshold: parking_lot::Mutex<AdaptiveThreshold>,
+    /// Task 7: Per-symbol pair profiles (Phase 2 Feature 8).
+    pair_profiles: HashMap<String, crate::config::PairProfile>,
 }
 
 impl StrategyEngine {
-    /// Create a new StrategyEngine from a StrategyConfig.
+    /// Create a new StrategyEngine from an EngineConfig.
     /// Allocates per-symbol VPIN calculators for up to 64 symbols.
-    pub fn new(config: StrategyConfig) -> Self {
+    /// Task 13: Changed signature to accept &EngineConfig instead of StrategyConfig.
+    pub fn new(engine_config: &crate::config::EngineConfig) -> Self {
         let num_symbols = 64; // Pre-allocate for max symbols
         let mut vpin_calcs = Vec::with_capacity(num_symbols);
+        
+        // Task 9: Apply pair-specific VPIN bucket size
+        // For now, use default bucket size - will be customized per symbol in future
         for _ in 0..num_symbols {
             vpin_calcs.push(VPINCalculator::new(VPIN_BUCKET_SIZE_USD, VPIN_BUCKET_COUNT));
         }
+
+        // Task 7: Extract strategy config and pair profiles from engine config
+        let strategy_config = engine_config.strategy.clone();
+        let pair_profiles = engine_config.pair_profiles.clone();
 
         Self {
             vpin_calcs,
             last_signal: vec![None; num_symbols],
             max_positions: 5,
             active_positions: 0,
-            strategy_config: config,
+            strategy_config,
             candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
             adaptive_threshold: parking_lot::Mutex::new(AdaptiveThreshold::new(3600, 0.02, 1.5)),
+            pair_profiles,
         }
     }
 
@@ -422,6 +433,7 @@ impl StrategyEngine {
             strategy_config: StrategyConfig::default(),
             candle_aggregator: parking_lot::Mutex::new(CandleAggregator::default()),
             adaptive_threshold: parking_lot::Mutex::new(AdaptiveThreshold::new(3600, 0.02, 1.5)),
+            pair_profiles: HashMap::new(),
         }
     }
 
@@ -529,8 +541,14 @@ impl StrategyEngine {
         // Update the adaptive threshold with current imbalance
         self.adaptive_threshold.lock().update(abs_imbalance);
         
+        // Task 8: Apply pair-specific imbalance threshold
         // Get the dynamic threshold (mean + 1.5σ, floored at 2%)
-        let threshold = self.adaptive_threshold.lock().get_threshold();
+        let base_threshold = self.adaptive_threshold.lock().get_threshold();
+        
+        // Override with pair profile if available
+        let threshold = self.pair_profiles.get(symbol)
+            .map(|profile| profile.imbalance_threshold)
+            .unwrap_or(base_threshold);
         
         if abs_imbalance < threshold {
             return None; // Not enough signal
