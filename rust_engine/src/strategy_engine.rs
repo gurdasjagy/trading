@@ -896,7 +896,9 @@ mod tests {
             btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none());
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
+            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
+        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none());
     }
 
     #[test]
@@ -922,7 +924,9 @@ mod tests {
             btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
-        let intent = engine.evaluate(&metrics, &regime, "BTC_USDT");
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
+            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
+        let intent = engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1);
         assert!(intent.is_some(), "Should generate signal for high imbalance");
         let intent = intent.unwrap();
         assert!(matches!(intent.side, OrderSide::Buy)); // Bid-heavy → buy
@@ -951,7 +955,9 @@ mod tests {
             btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none(), "Should skip on toxic VPIN");
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
+            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
+        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none(), "Should skip on toxic VPIN");
     }
 
     #[test]
@@ -978,7 +984,9 @@ mod tests {
             btc_eth_correlation: 0.0,
         };
         let regime = RegimeState::default();
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT").is_none());
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
+            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
+        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none());
     }
 }
 

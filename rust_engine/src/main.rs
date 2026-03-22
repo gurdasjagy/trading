@@ -1108,7 +1108,8 @@ fn strategy_evaluator_loop(
                                 take_profit_fp: 0, // No TP — hold for funding collection
                                 placement_type: 0,
                                 post_only: 0,
-                                _pad2: [0; 6],
+                                is_close: 0,
+                                _pad2: [0; 5],
                             };
                             
                             // Pre-trade risk check
@@ -1277,7 +1278,8 @@ fn strategy_evaluator_loop(
                             take_profit_fp: 0,
                             placement_type: 0,
                             post_only: 0,
-                            _pad2: [0; 6],
+                            is_close: 1,
+                            _pad2: [0; 5],
                         };
                         if exec_ring.try_push(exit_cmd) {
                             lifecycle_mgr.untrack_position(sym_id);
@@ -1340,7 +1342,8 @@ fn strategy_evaluator_loop(
                             take_profit_fp: 0,
                             placement_type: 0,
                             post_only: 0,
-                            _pad2: [0; 6],
+                            is_close: 1,
+                            _pad2: [0; 5],
                         };
                         if exec_ring.try_push(exit_cmd) {
                             exit_evaluator.untrack_position(exit_signal.symbol_id);
@@ -1407,7 +1410,8 @@ fn strategy_evaluator_loop(
                                     take_profit_fp: 0,
                                     placement_type: 0,
                                     post_only: 0,
-                                    _pad2: [0; 6],
+                                    is_close: 1,
+                                    _pad2: [0; 5],
                                 };
                                 if exec_ring.try_push(partial_cmd) {
                                     info!(
@@ -2306,8 +2310,8 @@ fn execution_router_loop(
                                 res.order_id, res.filled_size, res.avg_fill_price, res.latency_us
                             );
 
-                            // BUG 9 FIX: Only insert position entries on non-reduce_only fills
-                            if !cmd.reduce_only {
+                            // FIX 1: Only insert position entries on non-close fills
+                            if cmd.is_close == 0 {
                                 position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
                             }
 
@@ -2357,8 +2361,8 @@ fn execution_router_loop(
                                 },
                             );
 
-                            // BUG 9 FIX: Only remove and calculate PnL on reduce_only fills
-                            let pnl_fp = if cmd.reduce_only {
+                            // FIX 1: Use is_close field instead of reduce_only for PnL calculation
+                            let pnl_fp = if cmd.is_close == 1 {
                                 if let Some((entry_price, size, is_long)) = position_entries.remove(&cmd.symbol_id) {
                                     let close_price = res.avg_fill_price;
                                     let pnl = if is_long {
