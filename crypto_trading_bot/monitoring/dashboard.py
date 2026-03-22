@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 import pathlib
 import secrets
 from datetime import datetime, timezone
@@ -1223,6 +1224,205 @@ def create_app(
             except Exception:
                 pass
         return JSONResponse({"trades": trades})
+
+    def read_last_n_trades_from_journal(n: int = 50) -> List[dict]:
+        """Read the last N trade entries from the Rust binary journal.
+        
+        Parses JournalTrade (type=8) and JournalPositionChange (type=9) entries
+        from segment_*.dat files in the journal directory.
+        """
+        import struct as _struct
+        import mmap as _mmap
+        
+        journal_dir = os.getenv("JOURNAL_DIR", "/dev/shm/trading_journal")
+        if not os.path.isdir(journal_dir):
+            return []
+        
+        HEADER_SIZE = 8
+        HEADER_FMT = "<HHI"  # entry_type(u16), payload_size(u16), sequence(u32)
+        # JournalTrade: timestamp_ns(Q) symbol_id(H) side(B) _pad(B) size(q) price_fp(q) fee_fp(q) is_maker(B) _reserved(15s)
+        TRADE_ENTRY_FMT = "<Q HBB qqq B 15s"
+        TRADE_ENTRY_TYPE = 8
+        # JournalPositionChange: timestamp_ns(Q) symbol_id(H) side(B) action(B) old_size(q) new_size(q) entry_price_fp(q) mark_price_fp(q) unrealized_pnl_fp(q) realized_pnl_fp(q) _reserved(8s)
+        POSITION_CHANGE_FMT = "<Q HBB qqqqqq 8s"
+        POSITION_CHANGE_TYPE = 9
+        
+        FP_PRECISION = 1e8
+        FQ_PRECISION = 1e4
+        
+        trades = []
+        
+        try:
+            # Find all segment files sorted by index
+            segment_files = sorted(
+                f for f in os.listdir(journal_dir)
+                if f.startswith("segment_") and f.endswith(".dat")
+            )
+            
+            for seg_file in reversed(segment_files):  # Start from newest
+                filepath = os.path.join(journal_dir, seg_file)
+                try:
+                    file_size = os.path.getsize(filepath)
+                    if file_size < HEADER_SIZE:
+                        continue
+                    
+                    with open(filepath, "rb") as f:
+                        with _mmap.mmap(f.fileno(), 0, access=_mmap.ACCESS_READ) as mm:
+                            pos = 0
+                            while pos + HEADER_SIZE <= file_size:
+                                hdr = _struct.unpack_from(HEADER_FMT, mm, pos)
+                                entry_type, payload_size, sequence = hdr
+                                
+                                if entry_type == 0:
+                                    break  # Reached unused frontier
+                                
+                                entry_total = HEADER_SIZE + payload_size
+                                if pos + entry_total > file_size:
+                                    break  # Partial entry
+                                
+                                payload_offset = pos + HEADER_SIZE
+                                
+                                if entry_type == TRADE_ENTRY_TYPE:
+                                    try:
+                                        vals = _struct.unpack_from(TRADE_ENTRY_FMT, mm, payload_offset)
+                                        ts_ns, sym_id, side, _pad, size_fp, price_fp, fee_fp, is_maker, _res = vals
+                                        trades.append({
+                                            "timestamp": ts_ns / 1e9,
+                                            "symbol": f"SYM_{sym_id}",
+                                            "side": "buy" if side == 0 else "sell",
+                                            "entry_price": price_fp / FP_PRECISION,
+                                            "exit_price": price_fp / FP_PRECISION,
+                                            "pnl": 0.0,  # Not available in trade entry
+                                            "size": abs(size_fp) / FQ_PRECISION,
+                                        })
+                                    except Exception:
+                                        pass
+                                
+                                elif entry_type == POSITION_CHANGE_TYPE:
+                                    try:
+                                        vals = _struct.unpack_from(POSITION_CHANGE_FMT, mm, payload_offset)
+                                        ts_ns, sym_id, side, action, old_size, new_size, entry_price_fp, mark_price_fp, unrealized_pnl_fp, realized_pnl_fp, _res = vals
+                                        # action: 0=open, 1=close, 2=modify
+                                        if action == 1:  # Close position
+                                            trades.append({
+                                                "timestamp": ts_ns / 1e9,
+                                                "symbol": f"SYM_{sym_id}",
+                                                "side": "long" if side == 0 else "short",
+                                                "entry_price": entry_price_fp / FP_PRECISION,
+                                                "exit_price": mark_price_fp / FP_PRECISION,
+                                                "pnl": realized_pnl_fp / FP_PRECISION,
+                                                "size": abs(old_size) / FQ_PRECISION,
+                                            })
+                                    except Exception:
+                                        pass
+                                
+                                pos += entry_total
+                                
+                                if len(trades) >= n:
+                                    break
+                    
+                    if len(trades) >= n:
+                        break
+                        
+                except Exception:
+                    pass
+            
+        except Exception:
+            pass
+        
+        return trades[-n:] if len(trades) > n else trades
+
+    def compute_equity_curve_from_journal() -> List[dict]:
+        """Compute cumulative equity curve from all trade entries in the journal.
+        
+        Returns a list of {timestamp: int, equity: float, drawdown_pct: float} data points.
+        """
+        import struct as _struct
+        import mmap as _mmap
+        
+        journal_dir = os.getenv("JOURNAL_DIR", "/dev/shm/trading_journal")
+        if not os.path.isdir(journal_dir):
+            return []
+        
+        HEADER_SIZE = 8
+        HEADER_FMT = "<HHI"
+        POSITION_CHANGE_FMT = "<Q HBB qqqqqq 8s"
+        POSITION_CHANGE_TYPE = 9
+        FP_PRECISION = 1e8
+        
+        equity_points = []
+        cumulative_pnl = 0.0
+        peak_equity = 0.0
+        
+        try:
+            segment_files = sorted(
+                f for f in os.listdir(journal_dir)
+                if f.startswith("segment_") and f.endswith(".dat")
+            )
+            
+            for seg_file in segment_files:
+                filepath = os.path.join(journal_dir, seg_file)
+                try:
+                    file_size = os.path.getsize(filepath)
+                    if file_size < HEADER_SIZE:
+                        continue
+                    
+                    with open(filepath, "rb") as f:
+                        with _mmap.mmap(f.fileno(), 0, access=_mmap.ACCESS_READ) as mm:
+                            pos = 0
+                            while pos + HEADER_SIZE <= file_size:
+                                hdr = _struct.unpack_from(HEADER_FMT, mm, pos)
+                                entry_type, payload_size, sequence = hdr
+                                
+                                if entry_type == 0:
+                                    break
+                                
+                                entry_total = HEADER_SIZE + payload_size
+                                if pos + entry_total > file_size:
+                                    break
+                                
+                                payload_offset = pos + HEADER_SIZE
+                                
+                                if entry_type == POSITION_CHANGE_TYPE:
+                                    try:
+                                        vals = _struct.unpack_from(POSITION_CHANGE_FMT, mm, payload_offset)
+                                        ts_ns, sym_id, side, action, old_size, new_size, entry_price_fp, mark_price_fp, unrealized_pnl_fp, realized_pnl_fp, _res = vals
+                                        
+                                        if action == 1:  # Close position
+                                            realized_pnl = realized_pnl_fp / FP_PRECISION
+                                            cumulative_pnl += realized_pnl
+                                            peak_equity = max(peak_equity, cumulative_pnl)
+                                            drawdown_pct = ((peak_equity - cumulative_pnl) / peak_equity * 100.0) if peak_equity > 0 else 0.0
+                                            
+                                            equity_points.append({
+                                                "timestamp": int(ts_ns / 1e9),
+                                                "equity": round(cumulative_pnl, 2),
+                                                "drawdown_pct": round(drawdown_pct, 2),
+                                            })
+                                    except Exception:
+                                        pass
+                                
+                                pos += entry_total
+                        
+                except Exception:
+                    pass
+            
+        except Exception:
+            pass
+        
+        return equity_points
+
+    @app.get("/trades", dependencies=_auth_dep)
+    async def get_trades() -> JSONResponse:
+        """Get last 50 trades from the Rust binary journal."""
+        trades = read_last_n_trades_from_journal(50)
+        return JSONResponse({"trades": trades})
+
+    @app.get("/equity_curve", dependencies=_auth_dep)
+    async def get_equity_curve() -> JSONResponse:
+        """Get equity curve data from the Rust binary journal."""
+        curve = compute_equity_curve_from_journal()
+        return JSONResponse({"equity_curve": curve})
 
     @app.get("/api/performance", dependencies=_auth_dep)
     async def api_performance() -> JSONResponse:

@@ -59,11 +59,12 @@ vpin_bucket_size = 200000.0
 trailing_stop_atr_multiplier = 2.0
 max_leverage = 25
 
+# Task 9: SOL-Specific Pair Profile (Phase 2 Feature 8)
 # SOL: Medium liquidity, aggressive thresholds
 [[pair_profiles]]
 symbol = "SOL_USDT"
-imbalance_threshold = 0.02
+imbalance_threshold = 0.05
 vpin_bucket_size = 50000.0
-trailing_stop_atr_multiplier = 1.5
-max_leverage = 15
+trailing_stop_atr_multiplier = 3.0
+max_leverage = 10
 

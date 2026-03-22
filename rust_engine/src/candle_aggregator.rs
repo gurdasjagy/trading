@@ -44,6 +44,12 @@ pub struct CandleData {
     pub rsi14: f64,
     /// Average Directional Index (14-period).
     pub adx14: f64,
+    /// Task 18: Bollinger Bands upper (20, 2.0).
+    pub bb_upper: f64,
+    /// Task 18: Bollinger Bands middle (SMA20).
+    pub bb_middle: f64,
+    /// Task 18: Bollinger Bands lower (20, 2.0).
+    pub bb_lower: f64,
 }
 
 impl Default for CandleData {
@@ -59,6 +65,9 @@ impl Default for CandleData {
             ema50: 0.0,
             rsi14: 50.0, // Neutral RSI
             adx14: 25.0, // Neutral ADX
+            bb_upper: 0.0,
+            bb_middle: 0.0,
+            bb_lower: 0.0,
         }
     }
 }
@@ -358,6 +367,76 @@ impl AdxCalculator {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Bollinger Bands Calculator (Task 17)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Bollinger Bands calculator with O(1) updates.
+/// Bands are calculated as: upper = SMA + (multiplier * std_dev), lower = SMA - (multiplier * std_dev)
+#[derive(Debug, Clone)]
+struct BollingerBands {
+    /// Period for SMA and standard deviation.
+    period: usize,
+    /// Standard deviation multiplier (typically 2.0).
+    multiplier: f64,
+    /// Ring buffer of prices.
+    prices: VecDeque<f64>,
+    /// Running sum for SMA.
+    sum: f64,
+}
+
+impl BollingerBands {
+    fn new(period: usize, multiplier: f64) -> Self {
+        Self {
+            period,
+            multiplier,
+            prices: VecDeque::with_capacity(period),
+            sum: 0.0,
+        }
+    }
+
+    /// Update with a new price.
+    fn update(&mut self, price: f64) {
+        if self.prices.len() >= self.period {
+            if let Some(old) = self.prices.pop_front() {
+                self.sum -= old;
+            }
+        }
+        
+        self.prices.push_back(price);
+        self.sum += price;
+    }
+
+    /// Get current Bollinger Bands (upper, middle, lower).
+    fn get(&self) -> (f64, f64, f64) {
+        if self.prices.len() < self.period {
+            return (0.0, 0.0, 0.0);
+        }
+
+        let sma = self.sum / self.period as f64;
+        
+        // Calculate standard deviation
+        let variance: f64 = self.prices.iter()
+            .map(|&p| {
+                let diff = p - sma;
+                diff * diff
+            })
+            .sum::<f64>() / self.period as f64;
+        
+        let std_dev = variance.sqrt();
+        
+        let upper = sma + (self.multiplier * std_dev);
+        let lower = sma - (self.multiplier * std_dev);
+        
+        (upper, sma, lower)
+    }
+
+    /// Check if Bollinger Bands are warmed up.
+    fn is_ready(&self) -> bool {
+        self.prices.len() >= self.period
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Candle Builder (Per-Timeframe)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -382,6 +461,8 @@ struct CandleBuilder {
     rsi14: RsiCalculator,
     /// ADX(14) calculator.
     adx14: AdxCalculator,
+    /// Task 17: Bollinger Bands (20, 2.0) calculator.
+    bb20: BollingerBands,
 }
 
 impl CandleBuilder {
@@ -396,6 +477,7 @@ impl CandleBuilder {
             ema50: EmaCalculator::new(50),
             rsi14: RsiCalculator::new(14),
             adx14: AdxCalculator::new(14),
+            bb20: BollingerBands::new(20, 2.0),
         }
     }
 
@@ -442,12 +524,19 @@ impl CandleBuilder {
         self.ema50.update(self.current.close);
         self.rsi14.update(self.current.close);
         self.adx14.update(self.current.high, self.current.low, self.current.close);
+        self.bb20.update(self.current.close);
 
         // Store indicator values in the candle
         self.current.ema20 = self.ema20.get();
         self.current.ema50 = self.ema50.get();
         self.current.rsi14 = self.rsi14.get();
         self.current.adx14 = self.adx14.get();
+        
+        // Task 17: Store Bollinger Bands values
+        let (bb_upper, bb_middle, bb_lower) = self.bb20.get();
+        self.current.bb_upper = bb_upper;
+        self.current.bb_middle = bb_middle;
+        self.current.bb_lower = bb_lower;
 
         // Add to completed candles
         self.completed.push_back(self.current);
