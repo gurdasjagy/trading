@@ -23,9 +23,9 @@ class CrossExchangeFundingMonitor(BaseSource):
     # Public funding rate endpoints
     ENDPOINTS = {
         "binance": "https://fapi.binance.com/fapi/v1/premiumIndex",
-        "bybit": "https://api.bybit.com/v5/market/tickers?category=linear",
-        "okx": "https://www.okx.com/api/v5/public/funding-rate",
         "gateio": "https://api.gateio.ws/api/v4/futures/usdt/contracts",
+        "okx": "https://www.okx.com/api/v5/public/funding-rate",
+        "bybit": "https://api.bybit.com/v5/market/tickers?category=linear",
     }
     
     def __init__(
