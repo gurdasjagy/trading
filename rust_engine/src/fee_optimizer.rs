@@ -1,0 +1,488 @@
+//! Fee Tier and Maker Rebate Optimization.
+//!
+//! Tracks current fee tier based on 30-day volume and optimizes order
+//! placement to maximize maker rebates.
+//!
+//! # Overview
+//!
+//! This module provides:
+//! - Fee tier tracking based on 30-day trading volume
+//! - Maker/taker fee calculation for different VIP levels
+//! - Recommendations for order types (limit vs market)
+//! - Break-even calculation for profitable trades
+//!
+//! # Exchange Support
+//!
+//! Currently implements Gate.io VIP tier structure.
+//! Can be extended to support other exchanges.
+
+use std::collections::HashMap;
+use tracing::{debug, info, warn};
+
+/// Fee tier definition.
+#[derive(Debug, Clone)]
+pub struct FeeTier {
+    /// Tier name (e.g., "VIP0", "VIP5").
+    pub tier_name: String,
+    /// 30-day volume threshold in USDT.
+    pub volume_threshold_usdt: f64,
+    /// Maker fee in basis points (negative = rebate).
+    pub maker_fee_bps: f64,
+    /// Taker fee in basis points.
+    pub taker_fee_bps: f64,
+}
+
+/// Fee optimizer for a single exchange.
+pub struct FeeOptimizer {
+    /// Current 30-day volume in USDT.
+    volume_30d: f64,
+    /// Fee tiers for the exchange.
+    tiers: Vec<FeeTier>,
+    /// Current tier index.
+    current_tier: usize,
+    /// Volume needed for next tier.
+    volume_to_next_tier: f64,
+    /// Daily volume per symbol.
+    daily_volume: HashMap<u16, f64>,
+    /// Total fees paid (USDT).
+    total_fees_paid: f64,
+    /// Total rebates earned (USDT).
+    total_rebates_earned: f64,
+    /// Last 30-day volume update timestamp.
+    last_volume_update_ns: u64,
+}
+
+impl FeeOptimizer {
+    /// Create a new fee optimizer for Gate.io.
+    pub fn new_gateio() -> Self {
+        // Gate.io VIP tiers (as of 2024)
+        let tiers = vec![
+            FeeTier {
+                tier_name: "VIP0".to_string(),
+                volume_threshold_usdt: 0.0,
+                maker_fee_bps: 2.0,
+                taker_fee_bps: 5.0,
+            },
+            FeeTier {
+                tier_name: "VIP1".to_string(),
+                volume_threshold_usdt: 100_000.0,
+                maker_fee_bps: 1.6,
+                taker_fee_bps: 4.5,
+            },
+            FeeTier {
+                tier_name: "VIP2".to_string(),
+                volume_threshold_usdt: 500_000.0,
+                maker_fee_bps: 1.4,
+                taker_fee_bps: 4.0,
+            },
+            FeeTier {
+                tier_name: "VIP3".to_string(),
+                volume_threshold_usdt: 1_000_000.0,
+                maker_fee_bps: 1.2,
+                taker_fee_bps: 3.5,
+            },
+            FeeTier {
+                tier_name: "VIP4".to_string(),
+                volume_threshold_usdt: 2_500_000.0,
+                maker_fee_bps: 1.0,
+                taker_fee_bps: 3.0,
+            },
+            FeeTier {
+                tier_name: "VIP5".to_string(),
+                volume_threshold_usdt: 5_000_000.0,
+                maker_fee_bps: 0.8,
+                taker_fee_bps: 2.5,
+            },
+            FeeTier {
+                tier_name: "VIP6".to_string(),
+                volume_threshold_usdt: 10_000_000.0,
+                maker_fee_bps: 0.6,
+                taker_fee_bps: 2.0,
+            },
+            FeeTier {
+                tier_name: "VIP7".to_string(),
+                volume_threshold_usdt: 25_000_000.0,
+                maker_fee_bps: 0.4,
+                taker_fee_bps: 1.8,
+            },
+            FeeTier {
+                tier_name: "VIP8".to_string(),
+                volume_threshold_usdt: 50_000_000.0,
+                maker_fee_bps: 0.2,
+                taker_fee_bps: 1.6,
+            },
+            FeeTier {
+                tier_name: "VIP9".to_string(),
+                volume_threshold_usdt: 100_000_000.0,
+                maker_fee_bps: 0.0, // Zero maker fee
+                taker_fee_bps: 1.4,
+            },
+            FeeTier {
+                tier_name: "VIP10".to_string(),
+                volume_threshold_usdt: 200_000_000.0,
+                maker_fee_bps: -1.0, // Maker rebate!
+                taker_fee_bps: 1.2,
+            },
+        ];
+        
+        Self {
+            volume_30d: 0.0,
+            tiers,
+            current_tier: 0,
+            volume_to_next_tier: 100_000.0,
+            daily_volume: HashMap::new(),
+            total_fees_paid: 0.0,
+            total_rebates_earned: 0.0,
+            last_volume_update_ns: 0,
+        }
+    }
+    
+    /// Create a fee optimizer for Binance.
+    pub fn new_binance() -> Self {
+        let tiers = vec![
+            FeeTier {
+                tier_name: "Regular".to_string(),
+                volume_threshold_usdt: 0.0,
+                maker_fee_bps: 2.0,
+                taker_fee_bps: 4.0,
+            },
+            FeeTier {
+                tier_name: "VIP1".to_string(),
+                volume_threshold_usdt: 250_000.0,
+                maker_fee_bps: 1.6,
+                taker_fee_bps: 4.0,
+            },
+            FeeTier {
+                tier_name: "VIP2".to_string(),
+                volume_threshold_usdt: 2_500_000.0,
+                maker_fee_bps: 1.4,
+                taker_fee_bps: 3.5,
+            },
+            FeeTier {
+                tier_name: "VIP3".to_string(),
+                volume_threshold_usdt: 5_000_000.0,
+                maker_fee_bps: 1.2,
+                taker_fee_bps: 3.2,
+            },
+            FeeTier {
+                tier_name: "VIP4".to_string(),
+                volume_threshold_usdt: 10_000_000.0,
+                maker_fee_bps: 1.0,
+                taker_fee_bps: 3.0,
+            },
+            FeeTier {
+                tier_name: "VIP5".to_string(),
+                volume_threshold_usdt: 25_000_000.0,
+                maker_fee_bps: 0.8,
+                taker_fee_bps: 2.7,
+            },
+            FeeTier {
+                tier_name: "VIP6".to_string(),
+                volume_threshold_usdt: 100_000_000.0,
+                maker_fee_bps: 0.6,
+                taker_fee_bps: 2.5,
+            },
+            FeeTier {
+                tier_name: "VIP7".to_string(),
+                volume_threshold_usdt: 250_000_000.0,
+                maker_fee_bps: 0.4,
+                taker_fee_bps: 2.2,
+            },
+            FeeTier {
+                tier_name: "VIP8".to_string(),
+                volume_threshold_usdt: 500_000_000.0,
+                maker_fee_bps: 0.2,
+                taker_fee_bps: 2.0,
+            },
+            FeeTier {
+                tier_name: "VIP9".to_string(),
+                volume_threshold_usdt: 1_000_000_000.0,
+                maker_fee_bps: 0.0,
+                taker_fee_bps: 1.7,
+            },
+        ];
+        
+        Self {
+            volume_30d: 0.0,
+            tiers,
+            current_tier: 0,
+            volume_to_next_tier: 250_000.0,
+            daily_volume: HashMap::new(),
+            total_fees_paid: 0.0,
+            total_rebates_earned: 0.0,
+            last_volume_update_ns: 0,
+        }
+    }
+    
+    /// Update 30-day volume from exchange API.
+    pub fn update_volume(&mut self, volume: f64) {
+        self.volume_30d = volume;
+        self.recalculate_tier();
+        self.last_volume_update_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        info!(
+            "Volume updated: ${:.2} -> Tier {} ({})",
+            volume,
+            self.current_tier,
+            self.tiers[self.current_tier].tier_name
+        );
+    }
+    
+    /// Record a trade for volume tracking.
+    pub fn record_trade(&mut self, symbol_id: u16, volume_usdt: f64, is_maker: bool) {
+        *self.daily_volume.entry(symbol_id).or_insert(0.0) += volume_usdt;
+        
+        let fee_bps = if is_maker { self.maker_fee_bps() } else { self.taker_fee_bps() };
+        let fee_usdt = volume_usdt * fee_bps / 10000.0;
+        
+        if fee_usdt >= 0.0 {
+            self.total_fees_paid += fee_usdt;
+        } else {
+            self.total_rebates_earned += fee_usdt.abs();
+        }
+        
+        debug!(
+            "Trade recorded: ${:.2} volume, ${:.4} {} ({})",
+            volume_usdt,
+            fee_usdt.abs(),
+            if fee_usdt >= 0.0 { "fee" } else { "rebate" },
+            if is_maker { "maker" } else { "taker" }
+        );
+    }
+    
+    fn recalculate_tier(&mut self) {
+        for (i, tier) in self.tiers.iter().enumerate().rev() {
+            if self.volume_30d >= tier.volume_threshold_usdt {
+                self.current_tier = i;
+                if i < self.tiers.len() - 1 {
+                    self.volume_to_next_tier = 
+                        self.tiers[i + 1].volume_threshold_usdt - self.volume_30d;
+                } else {
+                    self.volume_to_next_tier = 0.0;
+                }
+                return;
+            }
+        }
+        self.current_tier = 0;
+        self.volume_to_next_tier = self.tiers[1].volume_threshold_usdt - self.volume_30d;
+    }
+    
+    /// Get current maker fee in basis points.
+    pub fn maker_fee_bps(&self) -> f64 {
+        self.tiers[self.current_tier].maker_fee_bps
+    }
+    
+    /// Get current taker fee in basis points.
+    pub fn taker_fee_bps(&self) -> f64 {
+        self.tiers[self.current_tier].taker_fee_bps
+    }
+    
+    /// Get current tier name.
+    pub fn tier_name(&self) -> &str {
+        &self.tiers[self.current_tier].tier_name
+    }
+    
+    /// Should we aggressively try to be maker?
+    /// Returns true if maker fee is significantly lower than taker.
+    pub fn prefer_maker(&self) -> bool {
+        let tier = &self.tiers[self.current_tier];
+        (tier.taker_fee_bps - tier.maker_fee_bps) >= 2.0
+    }
+    
+    /// Is maker rebate available (negative maker fee)?
+    pub fn has_maker_rebate(&self) -> bool {
+        self.tiers[self.current_tier].maker_fee_bps < 0.0
+    }
+    
+    /// Calculate fee-adjusted break-even for a round-trip trade.
+    pub fn break_even_bps(&self, is_maker: bool) -> f64 {
+        if is_maker {
+            self.maker_fee_bps() * 2.0 // Entry + exit as maker
+        } else {
+            self.taker_fee_bps() * 2.0 // Entry + exit as taker
+        }
+    }
+    
+    /// Calculate mixed break-even (maker entry, taker exit).
+    pub fn mixed_break_even_bps(&self) -> f64 {
+        self.maker_fee_bps() + self.taker_fee_bps()
+    }
+    
+    /// Get fee savings from using maker vs taker orders.
+    pub fn maker_savings_bps(&self) -> f64 {
+        self.taker_fee_bps() - self.maker_fee_bps()
+    }
+    
+    /// Calculate fee for a trade.
+    pub fn calculate_fee(&self, volume_usdt: f64, is_maker: bool) -> f64 {
+        let fee_bps = if is_maker { self.maker_fee_bps() } else { self.taker_fee_bps() };
+        volume_usdt * fee_bps / 10000.0
+    }
+    
+    /// Get volume needed to reach next tier.
+    pub fn volume_to_next_tier(&self) -> f64 {
+        self.volume_to_next_tier
+    }
+    
+    /// Get tier progression percentage to next level.
+    pub fn tier_progress_pct(&self) -> f64 {
+        if self.current_tier >= self.tiers.len() - 1 {
+            return 100.0; // Already at max tier
+        }
+        
+        let current_threshold = self.tiers[self.current_tier].volume_threshold_usdt;
+        let next_threshold = self.tiers[self.current_tier + 1].volume_threshold_usdt;
+        let range = next_threshold - current_threshold;
+        
+        if range > 0.0 {
+            ((self.volume_30d - current_threshold) / range * 100.0).clamp(0.0, 100.0)
+        } else {
+            100.0
+        }
+    }
+    
+    /// Get daily volume total.
+    pub fn total_daily_volume(&self) -> f64 {
+        self.daily_volume.values().sum()
+    }
+    
+    /// Reset daily volume counters.
+    pub fn reset_daily_volume(&mut self) {
+        self.daily_volume.clear();
+    }
+    
+    /// Get statistics.
+    pub fn stats(&self) -> FeeStats {
+        FeeStats {
+            current_tier: self.tier_name().to_string(),
+            tier_index: self.current_tier,
+            volume_30d: self.volume_30d,
+            volume_to_next_tier: self.volume_to_next_tier,
+            tier_progress_pct: self.tier_progress_pct(),
+            maker_fee_bps: self.maker_fee_bps(),
+            taker_fee_bps: self.taker_fee_bps(),
+            total_fees_paid: self.total_fees_paid,
+            total_rebates_earned: self.total_rebates_earned,
+            prefer_maker: self.prefer_maker(),
+            has_maker_rebate: self.has_maker_rebate(),
+        }
+    }
+}
+
+impl Default for FeeOptimizer {
+    fn default() -> Self {
+        Self::new_gateio()
+    }
+}
+
+/// Fee optimizer statistics.
+#[derive(Debug, Clone)]
+pub struct FeeStats {
+    pub current_tier: String,
+    pub tier_index: usize,
+    pub volume_30d: f64,
+    pub volume_to_next_tier: f64,
+    pub tier_progress_pct: f64,
+    pub maker_fee_bps: f64,
+    pub taker_fee_bps: f64,
+    pub total_fees_paid: f64,
+    pub total_rebates_earned: f64,
+    pub prefer_maker: bool,
+    pub has_maker_rebate: bool,
+}
+
+/// Order type recommendation based on fee optimization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderTypeRecommendation {
+    /// Use limit order (post-only) to ensure maker fee.
+    LimitPostOnly,
+    /// Use limit order with standard behavior.
+    Limit,
+    /// Use market order (urgent execution needed).
+    Market,
+    /// Use iceberg order for large sizes.
+    Iceberg,
+}
+
+impl FeeOptimizer {
+    /// Get order type recommendation based on urgency and size.
+    pub fn recommend_order_type(&self, urgency: f64, size_usdt: f64) -> OrderTypeRecommendation {
+        let savings = self.maker_savings_bps();
+        
+        // Large orders benefit from iceberg
+        if size_usdt > 50_000.0 {
+            return OrderTypeRecommendation::Iceberg;
+        }
+        
+        // High urgency = market order
+        if urgency > 0.8 {
+            return OrderTypeRecommendation::Market;
+        }
+        
+        // If maker savings are significant, use post-only
+        if savings >= 2.0 {
+            return OrderTypeRecommendation::LimitPostOnly;
+        }
+        
+        OrderTypeRecommendation::Limit
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_tier_calculation() {
+        let mut optimizer = FeeOptimizer::new_gateio();
+        
+        // VIP0 by default
+        assert_eq!(optimizer.current_tier, 0);
+        assert_eq!(optimizer.maker_fee_bps(), 2.0);
+        
+        // Update to VIP3 volume
+        optimizer.update_volume(1_500_000.0);
+        assert_eq!(optimizer.current_tier, 3);
+        assert_eq!(optimizer.maker_fee_bps(), 1.2);
+        
+        // Update to VIP10 volume (maker rebate)
+        optimizer.update_volume(250_000_000.0);
+        assert_eq!(optimizer.current_tier, 10);
+        assert!(optimizer.maker_fee_bps() < 0.0);
+        assert!(optimizer.has_maker_rebate());
+    }
+    
+    #[test]
+    fn test_break_even_calculation() {
+        let mut optimizer = FeeOptimizer::new_gateio();
+        optimizer.update_volume(0.0); // VIP0
+        
+        // VIP0: maker=2bps, taker=5bps
+        let maker_be = optimizer.break_even_bps(true);
+        let taker_be = optimizer.break_even_bps(false);
+        
+        assert_eq!(maker_be, 4.0); // 2 * 2 = 4 bps
+        assert_eq!(taker_be, 10.0); // 2 * 5 = 10 bps
+        assert_eq!(optimizer.mixed_break_even_bps(), 7.0); // 2 + 5 = 7 bps
+    }
+    
+    #[test]
+    fn test_order_recommendation() {
+        let optimizer = FeeOptimizer::new_gateio();
+        
+        // Normal trade, low urgency
+        let rec = optimizer.recommend_order_type(0.3, 5000.0);
+        assert_eq!(rec, OrderTypeRecommendation::LimitPostOnly);
+        
+        // High urgency
+        let rec = optimizer.recommend_order_type(0.9, 5000.0);
+        assert_eq!(rec, OrderTypeRecommendation::Market);
+        
+        // Large size
+        let rec = optimizer.recommend_order_type(0.3, 100_000.0);
+        assert_eq!(rec, OrderTypeRecommendation::Iceberg);
+    }
+}
