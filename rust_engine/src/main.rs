@@ -565,6 +565,10 @@ mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
 mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
 mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
 
+// ── Multi-Exchange Gateway Support (for arbitrage) ──
+mod bybit_gateway;   // Bybit v5 unified API gateway
+mod binance_gateway; // Binance Futures gateway
+
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
 // ---------------------------------------------------------------------------

@@ -392,6 +392,244 @@ impl Default for TwapExecutor {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Feature 7: Intelligent Order Splitting with Participation Rate Adaptation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Intelligent Order Splitting with Participation Rate Adaptation.
+///
+/// Key improvements over basic TWAP:
+/// 1. Adapts to market volume - trades more when volume is high
+/// 2. Spread awareness - pauses when spread widens
+/// 3. Adverse selection detection - backs off when toxicity rises
+/// 4. End-of-period acceleration - completes order within deadline
+#[derive(Debug, Clone)]
+pub struct AdaptiveTwap {
+    /// Total quantity to execute
+    pub target_qty: f64,
+    /// Executed quantity so far
+    pub executed_qty: f64,
+    /// Target participation rate (fraction of market volume)
+    pub target_participation: f64,
+    /// Maximum participation rate
+    pub max_participation: f64,
+    /// End time (nanoseconds since epoch)
+    pub deadline_ns: u64,
+    /// Start time
+    pub start_ns: u64,
+    /// Rolling market volume estimate (per second)
+    pub market_volume_per_sec: f64,
+    /// Last slice sent timestamp
+    pub last_slice_ns: u64,
+    /// Slices executed
+    pub slice_count: u32,
+    /// Symbol being executed
+    pub symbol: String,
+    /// Side (0=buy, 1=sell)
+    pub side: u8,
+}
+
+impl AdaptiveTwap {
+    /// Create a new adaptive TWAP order.
+    /// 
+    /// # Arguments
+    /// * `symbol` - Trading symbol
+    /// * `side` - Order side (0=buy, 1=sell)
+    /// * `target_qty` - Total quantity to execute
+    /// * `duration_secs` - Duration over which to execute
+    /// * `target_participation` - Target fraction of market volume (0.01-0.25)
+    pub fn new(
+        symbol: String, 
+        side: u8,
+        target_qty: f64, 
+        duration_secs: u64, 
+        target_participation: f64
+    ) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        Self {
+            target_qty,
+            executed_qty: 0.0,
+            target_participation: target_participation.clamp(0.01, 0.25),
+            max_participation: 0.30,
+            deadline_ns: now + duration_secs * 1_000_000_000,
+            start_ns: now,
+            market_volume_per_sec: 0.0,
+            last_slice_ns: 0,
+            slice_count: 0,
+            symbol,
+            side,
+        }
+    }
+    
+    /// Update market volume estimate from trade stream.
+    /// Uses exponential smoothing with alpha=0.2.
+    pub fn update_volume(&mut self, volume_last_second: f64) {
+        // Exponential smoothing
+        self.market_volume_per_sec = 0.2 * volume_last_second + 0.8 * self.market_volume_per_sec;
+    }
+    
+    /// Calculate next slice size considering market conditions.
+    /// 
+    /// # Arguments
+    /// * `spread_bps` - Current bid-ask spread in basis points
+    /// * `vpin` - Volume-synchronized probability of informed trading (0-1)
+    /// 
+    /// # Returns
+    /// * `Some(size)` - Next slice size to execute
+    /// * `None` - Should wait (spread too wide, complete, etc.)
+    pub fn next_slice(&mut self, spread_bps: f64, vpin: f64) -> Option<f64> {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        // Check if complete
+        if self.executed_qty >= self.target_qty {
+            return None;
+        }
+        
+        // Check deadline
+        if now_ns >= self.deadline_ns {
+            // Deadline reached - execute remaining as market
+            let remaining = self.target_qty - self.executed_qty;
+            tracing::warn!(
+                "AdaptiveTwap {} deadline reached, executing remaining {:.4} as market",
+                self.symbol, remaining
+            );
+            return Some(remaining);
+        }
+        
+        // Spread gating - pause if spread too wide (>20 bps)
+        if spread_bps > 20.0 {
+            tracing::debug!(
+                "AdaptiveTwap {} pausing: spread {:.1} bps > 20 bps threshold",
+                self.symbol, spread_bps
+            );
+            return None; // Wait for tighter spread
+        }
+        
+        // VPIN gating - reduce size if flow is toxic
+        let vpin_multiplier = if vpin > 0.7 {
+            0.25 // Very toxic - trade small
+        } else if vpin > 0.5 {
+            0.5  // Somewhat toxic
+        } else {
+            1.0  // Safe
+        };
+        
+        // Time-weighted remaining
+        let time_remaining_secs = (self.deadline_ns - now_ns) as f64 / 1e9;
+        let qty_remaining = self.target_qty - self.executed_qty;
+        
+        // Baseline slice: divide remaining qty by remaining 5-second intervals
+        let baseline_slice = qty_remaining / (time_remaining_secs / 5.0).max(1.0);
+        
+        // Volume-adapted slice: participate at target rate
+        let volume_slice = self.market_volume_per_sec * self.target_participation * 5.0;
+        
+        // Take minimum of baseline and volume-adapted, apply VPIN multiplier
+        let slice = baseline_slice.min(volume_slice.max(baseline_slice * 0.1)) * vpin_multiplier;
+        
+        // Ensure minimum slice size (1% of target)
+        let min_slice = self.target_qty * 0.01;
+        let final_slice = slice.max(min_slice).min(qty_remaining);
+        
+        // Don't execute more than remaining
+        if final_slice > 0.0 {
+            tracing::debug!(
+                "AdaptiveTwap {} slice: {:.4} (baseline={:.4}, vol_adj={:.4}, vpin_mult={:.2})",
+                self.symbol, final_slice, baseline_slice, volume_slice, vpin_multiplier
+            );
+        }
+        
+        Some(final_slice)
+    }
+    
+    /// Record an execution fill.
+    pub fn record_fill(&mut self, qty: f64) {
+        self.executed_qty += qty;
+        self.slice_count += 1;
+        self.last_slice_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        tracing::debug!(
+            "AdaptiveTwap {} filled {:.4}, progress {:.1}%",
+            self.symbol, qty, self.progress()
+        );
+    }
+    
+    /// Get completion percentage.
+    pub fn progress(&self) -> f64 {
+        if self.target_qty > 0.0 {
+            (self.executed_qty / self.target_qty * 100.0).min(100.0)
+        } else {
+            100.0
+        }
+    }
+    
+    /// Check if the order is complete.
+    pub fn is_complete(&self) -> bool {
+        self.executed_qty >= self.target_qty
+    }
+    
+    /// Get time remaining until deadline in seconds.
+    pub fn time_remaining_secs(&self) -> f64 {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        if now_ns >= self.deadline_ns {
+            0.0
+        } else {
+            (self.deadline_ns - now_ns) as f64 / 1e9
+        }
+    }
+    
+    /// Get execution quality metrics.
+    pub fn quality_metrics(&self) -> AdaptiveTwapMetrics {
+        let elapsed_secs = (self.last_slice_ns.saturating_sub(self.start_ns)) as f64 / 1e9;
+        
+        AdaptiveTwapMetrics {
+            target_qty: self.target_qty,
+            executed_qty: self.executed_qty,
+            progress_pct: self.progress(),
+            slice_count: self.slice_count,
+            elapsed_secs,
+            avg_slice_size: if self.slice_count > 0 {
+                self.executed_qty / self.slice_count as f64
+            } else {
+                0.0
+            },
+            market_volume_per_sec: self.market_volume_per_sec,
+            participation_rate: if self.market_volume_per_sec > 0.0 && elapsed_secs > 0.0 {
+                self.executed_qty / (self.market_volume_per_sec * elapsed_secs)
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+/// Execution quality metrics for AdaptiveTwap.
+#[derive(Debug, Clone)]
+pub struct AdaptiveTwapMetrics {
+    pub target_qty: f64,
+    pub executed_qty: f64,
+    pub progress_pct: f64,
+    pub slice_count: u32,
+    pub elapsed_secs: f64,
+    pub avg_slice_size: f64,
+    pub market_volume_per_sec: f64,
+    pub participation_rate: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
