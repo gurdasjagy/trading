@@ -1,0 +1,215 @@
+You are fixing a Rust+Python automated futures crypto trading bot (Gate.io only). The Rust engine is in rust_engine/ and the Python cold path is in crypto_trading_bot/. Below is every error, bug, and issue identified. Apply ALL fixes. After all fixes, the bot must be ready for live trading.
+
+BUG 1: strategy_engine.rs - Undefined variable raw_signal in position sizing
+In strategy_engine.rs, the evaluate() method uses a variable raw_signal in the position sizing calculation (let position_size = (base_size * raw_signal * regime_scale * vpin_scale)) but raw_signal is never defined. This will cause a compilation error.
+Fix: Replace raw_signal with abs_imbalance / threshold (the signal strength relative to the threshold), which is already computed as confidence. Change the line to:
+
+
+Insert at cursor
+let position_size = (base_size * (abs_imbalance / threshold).min(3.0) * regime_scale * vpin_scale)
+    .max(1.0)
+    .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
+
+
+BUG 2: strategy_engine.rs - Missing MicrostructureMetrics fields in test cases
+The test functions test_strategy_no_signal_low_imbalance, test_strategy_signal_high_imbalance, test_strategy_no_signal_toxic_vpin, and test_strategy_no_signal_invalid_spread are missing the new fields added to MicrostructureMetrics: cvd_divergence_bearish, cvd_divergence_bullish, funding_rate, vpoc_distance_pct, realized_vol_regime, and cascade_active.
+Fix: Add these fields to every test's MicrostructureMetrics construction:
+
+
+Insert at cursor
+cvd_divergence_bearish: false,
+cvd_divergence_bullish: false,
+funding_rate: 0.0001,
+vpoc_distance_pct: 1.0,
+realized_vol_regime: "Normal".to_string(),
+cascade_active: false,
+
+
+BUG 3: strategy_engine.rs - Duplicate use serde import
+The file has use serde::{Deserialize, Serialize}; at the bottom (for StrategyConfig) but serde is already imported at the top of the file via crate::execution_gateway. This causes a duplicate import warning and potential compilation issues.
+Fix: Remove the duplicate use serde::{Deserialize, Serialize}; near the StrategyConfig definition. The import from crate::execution_gateway already brings serde into scope, or add it once at the top of the file.
+
+BUG 4: main.rs - symbol_name used before definition in strategy evaluator loop
+In strategy_evaluator_loop, symbol_name is used in the MicrostructureMetrics construction (funding_rate: funding_rates.read().get(symbol_name).copied()...) BEFORE it is defined (let symbol_name = registry.get_name(snapshot.symbol_id); appears later in the function).
+Fix: Move the let symbol_name = registry.get_name(snapshot.symbol_id); line to immediately after if let Some(snapshot) = book_ring.try_pop() {, before any usage of symbol_name.
+
+BUG 5: main.rs - Timeframe enum not imported in strategy evaluator
+The strategy evaluator loop uses Timeframe::H1 and Timeframe::M15 but Timeframe is not imported in main.rs.
+Fix: Add use crate::candle_aggregator::Timeframe; to the imports at the top of main.rs, or add use crate::strategy_engine::*; if Timeframe is re-exported.
+
+BUG 6: main.rs - Missing candle_aggregator module declaration
+The main.rs file uses crate::candle_aggregator::CandleAggregator and Timeframe but mod candle_aggregator; is never declared in main.rs.
+Fix: Add mod candle_aggregator; to the module declarations in main.rs (near the other mod statements).
+
+BUG 7: main.rs - _pad2 field size mismatch in OrderCommand construction
+In the strategy evaluator loop, OrderCommand is constructed with _pad2: [0; 6] in some places and _pad2: [0; 5] in others. The OrderCommand struct in spsc.rs defines _pad2: [u8; 5]. The _pad2: [0; 6] instances will cause a compilation error.
+Fix: Change all _pad2: [0; 6] to _pad2: [0; 5] in main.rs to match the struct definition.
+
+BUG 8: gateio_gateway.rs - PlacementType not imported for monitor_liquidation_prices
+The monitor_liquidation_prices method constructs OrderIntent with placement: PlacementType::AtBest but PlacementType is not imported in the impl ExecutionGateway for GateIoGateway block.
+Fix: Add use crate::execution_state::PlacementType; at the top of gateio_gateway.rs.
+
+BUG 9: gateio_gateway.rs - REST URL inconsistency for mainnet
+The GATEIO_REST_URL constant is "https://fx-api.gateio.ws/api/v4" but the GateIoGatewaySlTpHelper::base_url() also uses "https://fx-api.gateio.ws/api/v4" for mainnet. However, the main GateIoGateway::base_url() uses GATEIO_REST_URL which is the same. The issue is that fx-api.gateio.ws is the old domain. Gate.io's current mainnet REST API is at https://api.gateio.ws/api/v4.
+Fix: Change GATEIO_REST_URL to "https://api.gateio.ws/api/v4" and update GateIoGatewaySlTpHelper::base_url() to match:
+
+
+Insert at cursor
+const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
+
+
+BUG 10: main.rs - execution_gateway::submit_with_retry borrows gw incorrectly
+In the execution router loop, gw.as_ref() is called on Option<Arc<dyn ExecutionGateway>> but submit_with_retry expects &dyn ExecutionGateway. The active_gw variable is Option<&Arc<...>>, so gw.as_ref() returns &Arc<...>, not &dyn ExecutionGateway.
+Fix: Change execution_gateway::submit_with_retry(gw.as_ref(), intent).await to execution_gateway::submit_with_retry(gw.as_ref(), intent).await where gw is dereferenced properly: execution_gateway::submit_with_retry(&**gw, intent).await.
+
+BUG 11: main.rs - get_ticker not implemented on GateIoGateway
+The execution router spawns a task that calls gw_clone.get_ticker(&symbol_name_clone) but GateIoGateway only has the default get_ticker implementation from the trait which returns Err(Unsupported).
+Fix: Implement get_ticker on GateIoGateway using the REST API: async fn get_ticker(&self, symbol: &str) -> Result<RustTicker, ExchangeError> {
+    let normalized = Self::normalize_symbol(symbol);
+    let url = format!("{}/futures/usdt/tickers?contract={}", self.base_url(), normalized);
+    match self.rest_client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(data) => {
+                    let ticker = if data.is_array() {
+                        data.as_array().and_then(|a| a.first())
+                    } else {
+                        Some(&data)
+                    };
+                    let t = ticker.unwrap_or(&data);
+                    Ok(RustTicker {
+                        last: Self::extract_json_float(&t.to_string(), "last").unwrap_or(0.0),
+                        bid: Self::extract_json_float(&t.to_string(), "highest_bid").unwrap_or(0.0),
+                        ask: Self::extract_json_float(&t.to_string(), "lowest_ask").unwrap_or(0.0),
+                        volume_24h: Self::extract_json_float(&t.to_string(), "volume_24h").unwrap_or(0.0),
+                    })
+                }
+                Err(e) => Err(ExchangeError::Unknown { code: "PARSE".into(), message: e.to_string() }),
+            }
+        }
+        _ => Err(ExchangeError::Timeout),
+    }
+}
+BUG 12: main.rs - gw_clone type mismatch in spawned ticker task
+The spawned task for mid_after_1s captures gw_clone as Arc<dyn ExecutionGateway> but then does if let Some(ref gw) = gw_clone which treats it as an Option. It's already an Arc, not an Option.
+Fix: Change the spawned task to use gw_clone directly:
+
+
+Insert at cursor
+let mid_after_1s = match gw_clone.get_ticker(&symbol_name_clone).await {
+    Ok(ticker) => ticker.last,
+    Err(_) => fill_price,
+};
+
+
+BUG 13: main.rs - cmd.is_close field check uses == 0 but is_close is u8
+The is_close field is u8 and the check cmd.is_close == 0 is correct, but the OrderCommand struct has is_close: u8 with _pad2: [u8; 5]. When constructing close commands, _pad2 is sometimes [0; 5] and sometimes [0; 6]. This is the same as BUG 7.
+Fix: Already covered by BUG 7 fix.
+
+BUG 14: main.rs - Missing bybit_gateway module but referenced in lib.rs
+The lib.rs doesn't reference bybit_gateway but the file bybit_gateway.rs exists in the source tree. This is dead code but not an error. However, main.rs doesn't declare it either, which is fine.
+Fix: No action needed. The file is unused dead code.
+
+BUG 15: config.rs - EngineConfig default REST URL uses old domain
+The default ExchangeConfig in EngineConfig::default() uses rest_url: Some("https://api.gateio.ws/api/v4".to_string()) which is correct, but the WS URL "wss://fx-ws.gateio.ws/v4/ws/usdt" is the old domain. Gate.io's current mainnet WS is "wss://ws.gate.com/v4/ws/futures/usdt".
+Fix: Update the default WS URL:
+
+
+Insert at cursor
+ws_url: "wss://ws.gate.com/v4/ws/futures/usdt".to_string(),
+
+
+BUG 16: strategy_engine.rs - candle_aggregator module not declared
+The strategy_engine.rs imports use crate::candle_aggregator::{CandleAggregator, Timeframe}; but candle_aggregator is not declared as a module in either main.rs or lib.rs.
+Fix: Add mod candle_aggregator; to both main.rs and lib.rs. Also ensure the file rust_engine/src/candle_aggregator.rs exists (it does based on the tree listing).
+
+BUG 17: main.rs - fibonacci_detector.calculate_fib_levels() return type mismatch
+The code calls fibonacci_detector.calculate_fib_levels() and expects Option<FibLevels> with a .levels field that is iterable. If the actual return type doesn't match, this will fail to compile.
+Fix: Verify the FibonacciDetector::calculate_fib_levels() return type in fibonacci_detector.rs and ensure it returns Option<FibLevels> where FibLevels has a pub levels: Vec<f64> field. If the struct is named differently, update the usage in main.rs to match.
+
+BUG 18: main.rs - wyckoff_detector::WyckoffPhase pattern matching may be non-exhaustive
+The match on wyckoff_phase uses specific variants (Accumulation, Distribution) with if is_buy / if !is_buy guards, plus a catch-all _ => {}. If WyckoffPhase has variants like Markup or Markdown, they're silently ignored. This is intentional but should be documented.
+Fix: No code change needed, but add a comment: // Markup and Markdown phases: no confidence adjustment (neutral)
+
+BUG 19: main.rs - ichimoku_cloud::CloudPosition variants may not exist
+The code matches on ichimoku_cloud::CloudPosition::BelowCloud and AboveCloud. If the enum has different variant names (e.g., Below, Above, Inside), this will fail to compile.
+Fix: Verify the enum variants in ichimoku_cloud.rs and update the match arms in main.rs to use the correct variant names.
+
+BUG 20: main.rs - mm_inventory.get_inventory_signal() return type
+The code destructures let (mm_direction, mm_pressure_score) = mm_inventory.get_inventory_signal(); but also calls mm_inventory.get_inventory_pressure() separately. Verify both methods exist and return the expected types.
+Fix: Verify in market_maker_inventory.rs that both get_inventory_signal() -> (i32, f64) and get_inventory_pressure() -> f64 exist. If get_inventory_signal doesn't exist, create it or use get_inventory_pressure with a direction calculation.
+
+BUG 21: gateio_gateway.rs - set_margin_mode uses wrong API endpoint
+The set_margin_mode method uses /futures/usdt/positions/{symbol}/margin_mode but Gate.io's actual API endpoint for setting dual mode is POST /futures/usdt/dual_mode with body {"dual_mode": true/false}. For cross/isolated margin, the endpoint is POST /futures/usdt/positions/{contract}/margin with {"change": amount}.
+Fix: Gate.io doesn't have a direct "margin_mode" endpoint for cross vs isolated. The margin mode is set per-position via the leverage endpoint. Change set_margin_mode to be a no-op that logs a warning, since Gate.io futures default to cross margin:
+
+
+Insert at cursor
+async fn set_margin_mode(&self, symbol: &str, mode: &str) -> Result<(), ExchangeError> {
+    // Gate.io futures default to cross margin. Margin mode is controlled
+    // via the dual_mode setting, not per-position.
+    debug!("[gateio-ws] Margin mode '{}' requested for {} (Gate.io defaults to cross)", mode, symbol);
+    Ok(())
+}
+
+
+BUG 22: main.rs - funding_rate::fetch_funding_rate function signature
+The execution router calls funding_rate::fetch_funding_rate(&reqwest::Client::new(), "https://api.gateio.ws", &symbol) but the base URL should include /api/v4 and the function may expect a different signature.
+Fix: Verify the function signature in funding_rate.rs. If it expects the full base URL, change to "https://api.gateio.ws/api/v4". Also, creating a new reqwest::Client on every call is wasteful. Pass the existing REST client from the gateway instead.
+
+BUG 23: Python engine.py - get_trade_history method may not exist on exchange
+The _get_realized_pnl_for_closed_position method calls self.exchange.get_trade_history(symbol, limit=50) but get_trade_history is not defined in BaseExchange. This will raise AttributeError at runtime.
+Fix: Add get_trade_history as an abstract method to BaseExchange:
+
+
+Insert at cursor
+@abstractmethod
+async def get_trade_history(self, symbol: str, limit: int = 50) -> List[Any]:
+    """Return recent trade history for *symbol*."""
+
+And implement it in the concrete exchange class (Gate.io client).
+
+BUG 24: Python engine.py - create_stop_loss_order missing in Gate.io exchange
+The _ensure_shutdown_sltp_coverage method calls self.exchange.create_stop_loss_order() which is defined in BaseExchange but may not be implemented in the Gate.io exchange client.
+Fix: Verify the Gate.io exchange client implements create_stop_loss_order. If not, implement it using Gate.io's price_orders API endpoint.
+
+BUG 25: main.rs - position_slots.release() called from spawned async task
+In the post-only verification task, position_slots.release() is called from a tokio::spawn context. Since position_slots is &'static PositionSlotManager (AtomicU32-based), this is actually safe. No fix needed.
+
+BUG 26: main.rs - Dashboard start_time not initialized
+The DashboardState::new() creates a dashboard state but start_time may not be set to the current epoch time, causing uptime calculation to show incorrect values.
+Fix: In dashboard_server.rs, ensure DashboardState::new() initializes start_time to the current epoch:
+
+
+Insert at cursor
+pub fn new() -> Self {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Self {
+        start_time: AtomicU64::new(now),
+        // ... other fields
+    }
+}
+
+
+BUG 27: main.rs - std::env::set_var is deprecated/unsafe in Rust 2024
+The line std::env::set_var("JOURNAL_DIR", &journal_dir_env); uses set_var which is marked as unsafe in newer Rust editions because it's not thread-safe.
+Fix: Wrap in unsafe block with a safety comment:
+
+
+Insert at cursor
+// SAFETY: Called before any threads read JOURNAL_DIR. The dashboard thread
+// hasn't started yet at this point in main().
+unsafe { std::env::set_var("JOURNAL_DIR", &journal_dir_env); }
+
+
+BUG 28: gateio_gateway.rs - WS mainnet URL uses old domain
+GATEIO_WS_URL is "wss://fx-ws.gateio.ws/v4/ws/usdt" which is the old domain. Gate.io's current mainnet WS for USDT futures is "wss://ws.gate.com/v4/ws/futures/usdt".
+Fix:
+
+
+Insert at cursor
+const GATEIO_WS_URL: &str = "wss://ws.gate.com/v4/ws/futures/usdt";
+
