@@ -33,6 +33,8 @@ services:
       - engine-logs:/var/log/trading
       - ./.env:/app/.env:ro
       - ${BACKTEST_L2_DATA_DIR:-./data/l2_snapshots}:/app/data/l2_snapshots
+      # Feature 2: Tick Database volume for persistent tick storage
+      - tick-data:/data/ticks
     environment:
       - RUST_LOG=info
       # Path to .env file for dotenvy to load inside the container
@@ -62,6 +64,24 @@ services:
       - REGIME_SHM_PATH=/dev/shm/regime_weights
       - TRADING_CONFIG=/etc/trading/engine_config.toml
       - THREAD_TOPOLOGY=auto
+      # Feature 1: Hardware Timestamps
+      - ENABLE_HW_TIMESTAMPS=${ENABLE_HW_TIMESTAMPS:-false}
+      # Feature 2: Tick Database
+      - TICK_STORE_ENABLED=${TICK_STORE_ENABLED:-true}
+      - TICK_STORE_PATH=/data/ticks
+      # Feature 3: VaR Engine
+      - VAR_ENABLED=${VAR_ENABLED:-true}
+      - VAR_LIMIT_PCT=${VAR_LIMIT_PCT:-0.05}
+      # Feature 5: Arbitrage
+      - ENABLE_ARBITRAGE=${ENABLE_ARBITRAGE:-false}
+      - ARB_MIN_SPREAD_BPS=${ARB_MIN_SPREAD_BPS:-10}
+      # Feature 6: Fee Optimization
+      - PREFER_MAKER_ORDERS=${PREFER_MAKER_ORDERS:-true}
+      # Multi-exchange API keys (for arbitrage)
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY:-}
+      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
+      - BYBIT_SECRET_KEY=${BYBIT_SECRET_KEY:-}
     restart: unless-stopped
     deploy:
       resources:
@@ -178,7 +198,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # ═══════════════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════���═══════
   # INFRASTRUCTURE: Redis (in-memory cache & pub/sub)
   # ═══════════════════════════════════════════════════════════
   redis:
@@ -260,4 +280,7 @@ volumes:
   trade-data:
     driver: local
   engine-logs:
+    driver: local
+  # Feature 2: Tick Database persistent storage
+  tick-data:
     driver: local

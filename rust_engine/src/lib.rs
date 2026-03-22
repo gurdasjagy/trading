@@ -89,6 +89,11 @@ pub mod options_greeks;  // Feature 4: Options Greeks (Black-Scholes)
 pub mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
 pub mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
 pub mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
+pub mod twap_executor;   // Feature 7: Adaptive TWAP (with AdaptiveTwap)
+
+// ── Multi-Exchange Gateway Support (for arbitrage) ──
+pub mod bybit_gateway;   // Bybit v5 unified API gateway
+pub mod binance_gateway; // Binance Futures gateway
 
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;

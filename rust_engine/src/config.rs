@@ -307,6 +307,255 @@ impl FlatBookSymbolConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Institutional Feature Configs
+// ---------------------------------------------------------------------------
+
+/// Feature 1: Hardware Timestamp configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HwTimestampConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Feature 2: Tick Store configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TickStoreConfig {
+    #[serde(default = "default_tick_store_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_tick_store_path")]
+    pub base_path: String,
+    #[serde(default = "default_tick_retention_days")]
+    pub retention_days: u32,
+    #[serde(default = "default_tick_sync_interval")]
+    pub sync_interval_ms: u64,
+    #[serde(default = "default_tick_prealloc")]
+    pub prealloc_ticks: usize,
+}
+
+fn default_tick_store_enabled() -> bool { true }
+fn default_tick_store_path() -> String { "/data/ticks".to_string() }
+fn default_tick_retention_days() -> u32 { 30 }
+fn default_tick_sync_interval() -> u64 { 1000 }
+fn default_tick_prealloc() -> usize { 10_000_000 }
+
+impl Default for TickStoreConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_tick_store_enabled(),
+            base_path: default_tick_store_path(),
+            retention_days: default_tick_retention_days(),
+            sync_interval_ms: default_tick_sync_interval(),
+            prealloc_ticks: default_tick_prealloc(),
+        }
+    }
+}
+
+/// Feature 3: VaR Engine configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaRConfig {
+    #[serde(default = "default_var_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_var_limit_pct")]
+    pub limit_pct: f64,
+    #[serde(default = "default_var_confidence")]
+    pub confidence_level: f64,
+    #[serde(default = "default_var_update_interval")]
+    pub update_interval_ms: u64,
+    #[serde(default = "default_var_rolling_window")]
+    pub rolling_window_minutes: usize,
+    #[serde(default = "default_var_circuit_breaker")]
+    pub circuit_breaker_threshold_pct: f64,
+}
+
+fn default_var_enabled() -> bool { true }
+fn default_var_limit_pct() -> f64 { 0.05 }
+fn default_var_confidence() -> f64 { 0.99 }
+fn default_var_update_interval() -> u64 { 1000 }
+fn default_var_rolling_window() -> usize { 1000 }
+fn default_var_circuit_breaker() -> f64 { 90.0 }
+
+impl Default for VaRConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_var_enabled(),
+            limit_pct: default_var_limit_pct(),
+            confidence_level: default_var_confidence(),
+            update_interval_ms: default_var_update_interval(),
+            rolling_window_minutes: default_var_rolling_window(),
+            circuit_breaker_threshold_pct: default_var_circuit_breaker(),
+        }
+    }
+}
+
+/// Feature 4: Gamma Hedging configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GammaHedgingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_options_source")]
+    pub options_data_source: String,
+    #[serde(default = "default_flip_alert_threshold")]
+    pub flip_alert_threshold: f64,
+    #[serde(default = "default_implied_vol")]
+    pub default_implied_vol: f64,
+    #[serde(default = "default_risk_free_rate")]
+    pub risk_free_rate: f64,
+    #[serde(default)]
+    pub tracked_symbols: Vec<String>,
+}
+
+fn default_options_source() -> String { "deribit".to_string() }
+fn default_flip_alert_threshold() -> f64 { 0.2 }
+fn default_implied_vol() -> f64 { 0.50 }
+fn default_risk_free_rate() -> f64 { 0.05 }
+
+impl Default for GammaHedgingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            options_data_source: default_options_source(),
+            flip_alert_threshold: default_flip_alert_threshold(),
+            default_implied_vol: default_implied_vol(),
+            risk_free_rate: default_risk_free_rate(),
+            tracked_symbols: vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()],
+        }
+    }
+}
+
+/// Feature 5: Arbitrage Engine configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArbitrageConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_arb_min_spread")]
+    pub min_spread_bps: i64,
+    #[serde(default = "default_arb_max_size")]
+    pub max_size_usdt: f64,
+    #[serde(default = "default_arb_max_latency")]
+    pub max_latency_us: u64,
+    #[serde(default)]
+    pub enabled_exchanges: Vec<String>,
+}
+
+fn default_arb_min_spread() -> i64 { 10 }
+fn default_arb_max_size() -> f64 { 10000.0 }
+fn default_arb_max_latency() -> u64 { 500 }
+
+impl Default for ArbitrageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_spread_bps: default_arb_min_spread(),
+            max_size_usdt: default_arb_max_size(),
+            max_latency_us: default_arb_max_latency(),
+            enabled_exchanges: vec!["gateio".to_string()],
+        }
+    }
+}
+
+/// Feature 6: Fee Optimizer configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeeOptimizerConfig {
+    #[serde(default = "default_fee_optimizer_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_fee_exchange")]
+    pub exchange: String,
+    #[serde(default = "default_fee_refresh_hours")]
+    pub refresh_hours: u32,
+    #[serde(default = "default_prefer_maker")]
+    pub prefer_maker_orders: bool,
+}
+
+fn default_fee_optimizer_enabled() -> bool { true }
+fn default_fee_exchange() -> String { "gateio".to_string() }
+fn default_fee_refresh_hours() -> u32 { 24 }
+fn default_prefer_maker() -> bool { true }
+
+impl Default for FeeOptimizerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_fee_optimizer_enabled(),
+            exchange: default_fee_exchange(),
+            refresh_hours: default_fee_refresh_hours(),
+            prefer_maker_orders: default_prefer_maker(),
+        }
+    }
+}
+
+/// Feature 7: Adaptive TWAP configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdaptiveTwapConfig {
+    #[serde(default = "default_adaptive_twap_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_target_participation")]
+    pub target_participation: f64,
+    #[serde(default = "default_max_twap_participation")]
+    pub max_participation: f64,
+    #[serde(default = "default_max_twap_spread")]
+    pub max_spread_bps: f64,
+    #[serde(default = "default_vpin_high")]
+    pub vpin_high_threshold: f64,
+    #[serde(default = "default_vpin_medium")]
+    pub vpin_medium_threshold: f64,
+    #[serde(default = "default_min_slice_pct")]
+    pub min_slice_pct: f64,
+}
+
+fn default_adaptive_twap_enabled() -> bool { true }
+fn default_target_participation() -> f64 { 0.05 }
+fn default_max_twap_participation() -> f64 { 0.30 }
+fn default_max_twap_spread() -> f64 { 20.0 }
+fn default_vpin_high() -> f64 { 0.7 }
+fn default_vpin_medium() -> f64 { 0.5 }
+fn default_min_slice_pct() -> f64 { 0.01 }
+
+impl Default for AdaptiveTwapConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_adaptive_twap_enabled(),
+            target_participation: default_target_participation(),
+            max_participation: default_max_twap_participation(),
+            max_spread_bps: default_max_twap_spread(),
+            vpin_high_threshold: default_vpin_high(),
+            vpin_medium_threshold: default_vpin_medium(),
+            min_slice_pct: default_min_slice_pct(),
+        }
+    }
+}
+
+/// Feature 8: Alert Manager configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertManagerConfig {
+    #[serde(default = "default_alert_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit_per_minute: u32,
+    #[serde(default = "default_dedup_window")]
+    pub dedup_window_secs: u64,
+    #[serde(default = "default_alert_min_priority")]
+    pub min_priority: String,
+    #[serde(default)]
+    pub enabled_channels: Vec<String>,
+}
+
+fn default_alert_enabled() -> bool { true }
+fn default_rate_limit() -> u32 { 10 }
+fn default_dedup_window() -> u64 { 300 }
+fn default_alert_min_priority() -> String { "info".to_string() }
+
+impl Default for AlertManagerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_alert_enabled(),
+            rate_limit_per_minute: default_rate_limit(),
+            dedup_window_secs: default_dedup_window(),
+            min_priority: default_alert_min_priority(),
+            enabled_channels: vec!["telegram".to_string(), "console".to_string()],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared Memory Config
 // ---------------------------------------------------------------------------
 
@@ -352,7 +601,12 @@ pub struct ExchangeConfig {
     pub rest_url: Option<String>,
     #[serde(default = "default_max_leverage")]
     pub max_leverage: i32,
+    /// Whether this exchange is enabled (for multi-exchange arbitrage)
+    #[serde(default = "default_exchange_enabled")]
+    pub enabled: bool,
 }
+
+fn default_exchange_enabled() -> bool { true }
 
 fn default_max_leverage() -> i32 { 20 }
 
@@ -476,6 +730,31 @@ pub struct EngineConfig {
     /// Task 8: Per-symbol pair profiles (Phase 2 Feature 8).
     #[serde(default)]
     pub pair_profiles: HashMap<String, PairProfile>,
+    // === Institutional Features Configuration ===
+    /// Feature 1: Hardware Timestamps
+    #[serde(default, alias = "hw_timestamps")]
+    pub hw_timestamp: HwTimestampConfig,
+    /// Feature 2: Tick Store
+    #[serde(default)]
+    pub tick_store: TickStoreConfig,
+    /// Feature 3: VaR Engine
+    #[serde(default, alias = "var_engine")]
+    pub var_config: VaRConfig,
+    /// Feature 4: Gamma Hedging
+    #[serde(default)]
+    pub gamma_hedging: GammaHedgingConfig,
+    /// Feature 5: Arbitrage Engine
+    #[serde(default)]
+    pub arbitrage: ArbitrageConfig,
+    /// Feature 6: Fee Optimizer
+    #[serde(default)]
+    pub fee_optimizer: FeeOptimizerConfig,
+    /// Feature 7: Adaptive TWAP
+    #[serde(default)]
+    pub adaptive_twap: AdaptiveTwapConfig,
+    /// Feature 8: Alert Manager
+    #[serde(default)]
+    pub alert_manager: AlertManagerConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +807,7 @@ impl Default for EngineConfig {
                     testnet: false,
                     rest_url: Some("https://api.gateio.ws/api/v4".to_string()),
                     max_leverage: 20,
+                    enabled: true,
                 },
             ],
             strategy: StrategyConfig::default(),
@@ -546,6 +826,15 @@ impl Default for EngineConfig {
             flat_book_configs: vec![],
             shared_mem: SharedMemConfig::default(),
             pair_profiles: HashMap::new(),
+            // Institutional Features (defaults)
+            hw_timestamp: HwTimestampConfig::default(),
+            tick_store: TickStoreConfig::default(),
+            var_config: VaRConfig::default(),
+            gamma_hedging: GammaHedgingConfig::default(),
+            arbitrage: ArbitrageConfig::default(),
+            fee_optimizer: FeeOptimizerConfig::default(),
+            adaptive_twap: AdaptiveTwapConfig::default(),
+            alert_manager: AlertManagerConfig::default(),
         }
     }
 }
