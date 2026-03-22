@@ -155,6 +155,16 @@ class RegimeService:
         self._last_update_ts: float = 0.0
         self._update_count: int = 0
         self._error_count: int = 0
+        
+        # ── Task 12: Gamma Exposure Writer initialization ────
+        self._gamma_writer: Optional[Any] = None
+        self._tasks: Dict[str, asyncio.Task] = {}
+        try:
+            from ai.market_analyzer.options_gamma_writer import GammaExposureWriter
+            self._gamma_writer = GammaExposureWriter()
+            logger.info("RegimeService: GammaExposureWriter initialized")
+        except Exception as exc:
+            logger.debug(f"RegimeService: GammaExposureWriter not available: {exc}")
 
         # ── Issue 4: SharedRegimeWriter for shared memory persistence ────
         # Writes to /dev/shm/regime_weights alongside the JSON file for
@@ -245,6 +255,15 @@ class RegimeService:
             exchange: Exchange client passed through to the cross-asset detector.
         """
         logger.info(f"RegimeService background loop started (interval={self._interval}s)")
+        
+        # Task 12: Start gamma exposure writer task
+        if self._gamma_writer is not None:
+            self._tasks["gamma_writer"] = asyncio.create_task(
+                self._gamma_exposure_loop(), 
+                name="gamma_writer"
+            )
+            logger.info("RegimeService: Gamma exposure writer task started")
+        
         while True:
             try:
                 md: Dict[str, Any] = {}
@@ -269,6 +288,20 @@ class RegimeService:
     def is_stale(self) -> bool:
         """``True`` if the current state is older than ``ttl_seconds``."""
         return (time.time() - self._last_update_ts) > self._ttl
+    
+    # Task 12: Gamma exposure writer loop
+    async def _gamma_exposure_loop(self):
+        """Background loop that updates gamma exposure every 5 minutes."""
+        if self._gamma_writer is None:
+            return
+            
+        logger.info("Gamma exposure loop started (interval=300s)")
+        while True:
+            try:
+                await self._gamma_writer.update_and_publish()
+            except Exception as exc:
+                logger.error(f"Gamma exposure update failed: {exc}")
+            await asyncio.sleep(300)  # 5 minutes
 
     # ------------------------------------------------------------------
     # Internal computation

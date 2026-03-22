@@ -1245,8 +1245,14 @@ fn strategy_evaluator_loop(
             let btc_eth_corr = correlation_monitor.get_correlation("BTC_USDT", "ETH_USDT").unwrap_or(0.0);
             
             // Build microstructure metrics from the snapshot
+            let current_price = FixedPrice(snapshot.mid_price).to_f64();
+            
+            // Task 8: Calculate CVD divergence signals
+            let bearish_divergence = cvd_tracker.detect_bearish_divergence(&recent_highs);
+            let bullish_divergence = cvd_tracker.detect_bullish_divergence(&recent_lows);
+            
             let metrics = strategy_engine::MicrostructureMetrics {
-                mid_price: FixedPrice(snapshot.mid_price).to_f64(),
+                mid_price: current_price,
                 spread_bps: snapshot.spread_bps as f64,
                 imbalance: snapshot.imbalance_bps as f64 / 10000.0,
                 bid_depth_usdt: snapshot.bid_depth_usdt as f64 / FixedPrice::PRECISION as f64,
@@ -1263,6 +1269,13 @@ fn strategy_evaluator_loop(
                 ichimoku_cloud_position: ichimoku_position.to_string(),
                 mm_inventory_pressure,
                 btc_eth_correlation: btc_eth_corr,
+                // Task 8: Add new FEATURE 1 fields
+                cvd_divergence_bearish: bearish_divergence,
+                cvd_divergence_bullish: bullish_divergence,
+                funding_rate: funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001),
+                vpoc_distance_pct: volume_profile.get_vpoc().map(|vpoc| ((current_price - vpoc) / vpoc).abs()).unwrap_or(1.0),
+                realized_vol_regime: realized_vol_calc.get_regime().to_string(),
+                cascade_active: liq_detector.get_state() == LiquidationCascadeState::Active || liq_detector.get_state() == LiquidationCascadeState::Extreme,
             };
 
             // Evaluate strategy
@@ -3274,6 +3287,10 @@ fn main() {
         let exec_analytics_dash = exec_analytics_arc.clone();
         let bind_addr = std::env::var("DASHBOARD_BIND")
             .unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        // Set JOURNAL_DIR environment variable for Python dashboard to read
+        let journal_dir_env = std::env::var("JOURNAL_DIR")
+            .unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
+        std::env::set_var("JOURNAL_DIR", &journal_dir_env);
         let handle = thread::Builder::new()
             .name("dashboard-http".into())
             .spawn(move || {

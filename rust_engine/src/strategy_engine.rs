@@ -135,16 +135,16 @@ pub struct MicrostructureMetrics {
     pub mm_inventory_pressure: f64,
     /// Phase 3 Feature 15: BTC-ETH correlation (-1.0 to 1.0).
     pub btc_eth_correlation: f64,
-    /// FEATURE 1 (Task 9): CVD divergence signals
+    /// FEATURE 1 (Task 1): CVD divergence signals
     pub cvd_divergence_bearish: bool,
     pub cvd_divergence_bullish: bool,
-    /// FEATURE 1 (Task 9): Current funding rate for this symbol
+    /// FEATURE 1 (Task 2): Current funding rate for this symbol
     pub funding_rate: f64,
-    /// FEATURE 1 (Task 9): Distance to VPOC in percentage
+    /// FEATURE 1 (Task 3): Distance to VPOC in percentage
     pub vpoc_distance_pct: f64,
-    /// FEATURE 1 (Task 9): Realized volatility regime (Low, Normal, High, Extreme)
+    /// FEATURE 1 (Task 4): Realized volatility regime (Low, Normal, High, Extreme)
     pub realized_vol_regime: String,
-    /// FEATURE 1 (Task 9): Liquidation cascade active flag
+    /// FEATURE 1 (Task 5): Liquidation cascade active flag
     pub cascade_active: bool,
 }
 
@@ -551,6 +551,12 @@ impl StrategyEngine {
         }
         drop(candle_agg); // Release lock before continuing
 
+        // ── Task 7: Cascade active gating ──
+        // Skip signal generation during liquidation cascades
+        if metrics.cascade_active {
+            return None;
+        }
+
         // ── Imbalance scoring ──
         //
         // The imbalance is already computed as:
@@ -580,22 +586,60 @@ impl StrategyEngine {
             return None; // Not enough signal
         }
 
-        // ── Composite signal strength ──
+        // ── Task 6: Composite signal scoring with multi-signal confluence ──
         //
-        // signal = imbalance × (1 - vpin_penalty)
-        //
-        // When VPIN is high (approaching toxic), we reduce confidence.
-        // When VPIN is low (safe flow), we trade at full confidence.
+        // CVD divergence score: penalize signals against divergence
+        let cvd_score = if metrics.cvd_divergence_bearish && imbalance > 0.0 {
+            0.0 // Bearish divergence on long signal = reject
+        } else if metrics.cvd_divergence_bullish && imbalance < 0.0 {
+            0.0 // Bullish divergence on short signal = reject
+        } else {
+            1.0
+        };
+        
+        // Funding rate score: boost signals aligned with funding arbitrage
+        let funding_score = if metrics.funding_rate > 0.0001 && imbalance < 0.0 {
+            1.2 // High funding + short signal = boost
+        } else if metrics.funding_rate < -0.0001 && imbalance > 0.0 {
+            1.2 // Negative funding + long signal = boost
+        } else {
+            1.0
+        };
+        
+        // VPOC distance score: boost signals near VPOC (high liquidity zone)
+        let vpoc_score = if metrics.vpoc_distance_pct.abs() < 0.005 {
+            1.15 // Within 0.5% of VPOC = boost
+        } else {
+            1.0
+        };
+        
+        // Volatility regime scaling
+        let vol_regime_scale = match metrics.realized_vol_regime.as_str() {
+            "Low" => 1.5,      // Low vol = increase size
+            "Normal" => 1.0,   // Normal vol = baseline
+            "High" => 0.5,     // High vol = reduce size
+            "Extreme" => 0.25, // Extreme vol = minimal size
+            _ => 1.0,
+        };
+        
+        // VPIN penalty (toxic flow detection)
         let vpin_penalty = if vpin > VPIN_SAFE_THRESHOLD {
-            // Linear scale from 0 at SAFE to 1 at TOXIC
             ((vpin - VPIN_SAFE_THRESHOLD) / (VPIN_TOXIC_THRESHOLD - VPIN_SAFE_THRESHOLD))
                 .clamp(0.0, 1.0)
         } else {
             0.0
         };
-
-        let raw_signal = abs_imbalance * (1.0 - vpin_penalty * 0.7);
-        let confidence = (raw_signal / threshold).clamp(0.0, 1.0);
+        
+        // Composite signal: weighted combination of all factors
+        // Weights: imbalance=35%, cvd=20%, funding=15%, vpoc=15%, vol_regime=15%
+        let composite = abs_imbalance * 0.35 
+            * cvd_score * 0.20 
+            * funding_score * 0.15 
+            * vpoc_score * 0.15 
+            * vol_regime_scale * 0.15
+            * (1.0 - vpin_penalty * 0.7);
+        
+        let confidence = (composite / threshold).clamp(0.0, 1.0);
 
         // ── ML Weights Blending ──
         let ml_w = ml_weights.get_weights(symbol_id).unwrap_or(crate::ml_weight_receiver::SymbolWeight {
