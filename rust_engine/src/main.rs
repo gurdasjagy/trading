@@ -43,6 +43,7 @@ mod flat_book;
 mod spsc;
 mod journal;
 mod shared_state;
+mod candle_aggregator;
 
 // Issue 3: Institutional execution modules
 mod execution_state;
@@ -106,6 +107,7 @@ use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascade
 use crate::trend_strength::TrendStrengthIndex;
 use crate::execution_analytics::ExecutionAnalytics;
 use crate::realized_vol::RealizedVolatilityCalculator; // Task 16
+use crate::candle_aggregator::Timeframe;
 // use crate::event_sequencer::{EventSequencer, SequencedEventKind};
 
 // ---------------------------------------------------------------------------
@@ -1023,6 +1025,7 @@ fn strategy_evaluator_loop(
         }
 
         if let Some(snapshot) = book_ring.try_pop() {
+            let symbol_name = registry.get_name(snapshot.symbol_id);
             let signal_start = std::time::Instant::now();
 
             // Periodically refresh regime from shared memory (every 1s)
@@ -1084,14 +1087,12 @@ fn strategy_evaluator_loop(
                 mm_inventory.on_trade(volume, is_buy);
                 
                 // Phase 3: Update Cross-Asset Correlation with price data
-                let symbol_name = registry.get_name(snapshot.symbol_id);
                 correlation_monitor.update_price(symbol_name, trade.recv_ns, price);
             }
 
             // FIX 12: Check funding rate arbitrage opportunities every 1000 snapshots
             funding_check_counter += 1;
             if funding_check_counter % 1000 == 0 {
-                let symbol_name = registry.get_name(snapshot.symbol_id);
                 let mid_price = FixedPrice(snapshot.mid_price).to_f64();
                 
                 // Update funding rate monitor with real funding rate from shared storage
@@ -1279,7 +1280,6 @@ fn strategy_evaluator_loop(
             };
 
             // Evaluate strategy
-            let symbol_name = registry.get_name(snapshot.symbol_id);
             
             // Task 24: Calculate order flow toxicity score before signal generation
             let cvd_divergence_score = 0.0; // Placeholder - would need actual divergence calculation
@@ -1975,7 +1975,8 @@ fn strategy_evaluator_loop(
                     take_profit_fp: FixedPrice::from_f64(take_profit_price).raw(),
                     placement_type: 0, // AtBest
                     post_only: cmd_post_only,
-                    _pad2: [0; 6],
+                    is_close: 0,
+                    _pad2: [0; 5],
                 };
 
                 // ── Market Impact Pre-Trade Check ──
@@ -2170,6 +2171,8 @@ fn execution_router_loop(
         .enable_all()
         .build()
         .expect("Failed to build tokio runtime for execution");
+        
+    let http_client = reqwest::Client::new();
 
     rt.block_on(async {
         let mut last_queue_check = std::time::Instant::now();
@@ -2381,7 +2384,7 @@ fn execution_router_loop(
                     );
                     lifecycle_tracker.register_order(lifecycle_order);
 
-                    match execution_gateway::submit_with_retry(gw.as_ref(), intent).await {
+                    match execution_gateway::submit_with_retry(&**gw, intent).await {
                         Ok(res) => {
                             // Record order-to-ack latency
                             latency_tracker.order_to_ack.record_since(order_start);
@@ -2460,13 +2463,9 @@ fn execution_router_loop(
                             let exec_analytics_clone = exec_analytics;
                             tokio::spawn(async move {
                                 tokio::time::sleep(Duration::from_secs(1)).await;
-                                let mid_after_1s = if let Some(ref gw) = gw_clone {
-                                    match gw.get_ticker(&symbol_name_clone).await {
-                                        Ok(ticker) => ticker.last,
-                                        Err(_) => fill_price, // Fallback to fill price
-                                    }
-                                } else {
-                                    fill_price
+                                let mid_after_1s = match gw_clone.get_ticker(&symbol_name_clone).await {
+                                    Ok(ticker) => ticker.last,
+                                    Err(_) => fill_price, // Fallback to fill price
                                 };
                                 
                                 exec_analytics_clone.lock().record_fill(
@@ -2711,12 +2710,13 @@ fn execution_router_loop(
 
                 // Periodic funding rate fetch (every 30s)
                 if last_health_check.elapsed() > Duration::from_secs(30) {
-                    if let Some(ref gw) = gateway {
+                    if let Some(ref _gw) = gateway {
                         let rates_clone = funding_rates.clone();
                         let symbols_clone: Vec<String> = registry.all_ids().into_iter().map(|id| registry.get_name(id).to_string()).collect();
+                        let client_clone = http_client.clone();
                         tokio::spawn(async move {
                             for symbol in symbols_clone {
-                                if let Some(rate) = funding_rate::fetch_funding_rate(&reqwest::Client::new(), "https://api.gateio.ws", &symbol).await {
+                                if let Some(rate) = funding_rate::fetch_funding_rate(&client_clone, "https://api.gateio.ws", &symbol).await {
                                     rates_clone.write().insert(symbol, rate);
                                 }
                             }
@@ -3290,7 +3290,9 @@ fn main() {
         // Set JOURNAL_DIR environment variable for Python dashboard to read
         let journal_dir_env = std::env::var("JOURNAL_DIR")
             .unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
-        std::env::set_var("JOURNAL_DIR", &journal_dir_env);
+        // SAFETY: Called before any threads read JOURNAL_DIR. The dashboard thread
+        // hasn't started yet at this point in main().
+        unsafe { std::env::set_var("JOURNAL_DIR", &journal_dir_env); }
         let handle = thread::Builder::new()
             .name("dashboard-http".into())
             .spawn(move || {

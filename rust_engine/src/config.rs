@@ -521,7 +521,7 @@ impl Default for EngineConfig {
                 ExchangeConfig {
                     name: "gateio".to_string(),
                     symbols: vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()],
-                    ws_url: "wss://fx-ws.gateio.ws/v4/ws/usdt".to_string(),
+                    ws_url: "wss://ws.gate.com/v4/ws/futures/usdt".to_string(),
                     api_key: None,
                     secret_key: None,
                     passphrase: None,

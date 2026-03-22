@@ -464,7 +464,8 @@ mod tests {
             take_profit_fp: (price as f64 * 1.02) as i64,
             placement_type: 0,
             post_only: 0,
-            _pad2: [0; 6],
+            is_close: 0,
+            _pad2: [0; 5],
         }
     }
 

@@ -222,6 +222,22 @@ class GateIOClient(BaseExchange):
     @with_circuit_breaker(failure_threshold=5)
     @async_retry_decorator(max_retries=3, base_delay=1.0)
     @resolve_symbols
+    async def get_trade_history(self, symbol: str, limit: int = 50) -> List[Any]:
+        """Return recent user trade history for *symbol*."""
+        await self._rate_limiter.acquire()
+        raw = await self._client.fetch_my_trades(symbol, limit=limit)
+        class _TradeDict:
+            def __init__(self, d):
+                self.__dict__.update(d)
+                self.price = float(d.get("price", 0))
+                self.amount = float(d.get("amount", 0))
+                self.side = d.get("side", "")
+                
+        return [_TradeDict(t) for t in raw]
+
+    @with_circuit_breaker(failure_threshold=5)
+    @async_retry_decorator(max_retries=3, base_delay=1.0)
+    @resolve_symbols
     async def get_ticker(self, symbol: str) -> Ticker:
         """Fetch the latest ticker snapshot for *symbol*."""
         # symbol is fully resolved (precious metals + swap) by @resolve_symbols.

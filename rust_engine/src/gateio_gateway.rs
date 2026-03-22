@@ -52,7 +52,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::circuit_breaker::{CircuitBreaker, TripReason};
 use crate::execution_gateway::{
-    ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, Position,
+    ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, PlacementType, Position,
     now_ms, now_us,
 };
 
@@ -60,13 +60,13 @@ use crate::execution_gateway::{
 // Constants
 // ---------------------------------------------------------------------------
 
-const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
+const GATEIO_WS_URL: &str = "wss://ws.gate.com/v4/ws/futures/usdt";
 // Gate.io may migrate testnet WS to wss://ws-testnet.gate.com/v4/ws/futures/usdt
 // but the legacy URL still works as of 2025. Update if connection fails.
 // Gate.io migrated USDT futures testnet WS to ws-testnet.gate.com.
 // The old wss://fx-ws-testnet.gateio.ws/v4/ws/usdt defaults to BTC contracts.
 const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
-const GATEIO_REST_URL: &str = "https://fx-api.gateio.ws/api/v4";
+const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
 const RECONNECT_MAX_MS: u64 = 30_000;
@@ -1710,6 +1710,33 @@ impl GateIoGateway {
 
 #[async_trait]
 impl ExecutionGateway for GateIoGateway {
+    async fn get_ticker(&self, symbol: &str) -> Result<RustTicker, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let url = format!("{}/futures/usdt/tickers?contract={}", self.base_url(), normalized);
+        match self.rest_client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(data) => {
+                        let ticker = if data.is_array() {
+                            data.as_array().and_then(|a| a.first())
+                        } else {
+                            Some(&data)
+                        };
+                        let t = ticker.unwrap_or(&data);
+                        Ok(RustTicker {
+                            last: Self::extract_json_float(&t.to_string(), "last").unwrap_or(0.0),
+                            bid: Self::extract_json_float(&t.to_string(), "highest_bid").unwrap_or(0.0),
+                            ask: Self::extract_json_float(&t.to_string(), "lowest_ask").unwrap_or(0.0),
+                            volume_24h: Self::extract_json_float(&t.to_string(), "volume_24h").unwrap_or(0.0),
+                        })
+                    }
+                    Err(e) => Err(ExchangeError::Unknown { code: "PARSE".into(), message: e.to_string() }),
+                }
+            }
+            _ => Err(ExchangeError::Timeout),
+        }
+    }
+
     /// Submit an order via the persistent WebSocket connection.
     ///
     /// Flow:
@@ -1947,34 +1974,9 @@ impl ExecutionGateway for GateIoGateway {
     /// Gate.io defaults to isolated margin, but cross-margin is safer for
     /// multi-position strategies as it shares margin across all positions.
     async fn set_margin_mode(&self, symbol: &str, mode: &str) -> Result<(), ExchangeError> {
-        let normalized = Self::normalize_symbol(symbol);
-        let path = format!("/futures/usdt/positions/{}/margin_mode", normalized);
-        let body = format!(r#"{{"margin_mode":"{}"}}"#, mode);
-        let timestamp = now_ms() / 1000;
-        let full_path = format!("/api/v4{}", path);
-        let signature = Self::rest_sign("POST", &full_path, "", &body, timestamp, &self.api_secret);
-
-        let url = format!("{}{}", self.base_url(), path);
-        let response = self.rest_client
-            .post(&url)
-            .header("KEY", &self.api_key)
-            .header("SIGN", &signature)
-            .header("Timestamp", timestamp.to_string())
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await
-            .map_err(|_| ExchangeError::Timeout)?;
-
-        let status = response.status().as_u16();
-        if status >= 400 {
-            let body_text = response.text().await.unwrap_or_default();
-            // Non-fatal: margin mode may already be set
-            warn!("[gateio-ws] Margin mode set failed (HTTP {}): {} — continuing", status, body_text);
-            return Ok(());
-        }
-
-        info!("[gateio-ws] Margin mode set to '{}' for {}", mode, normalized);
+        // Gate.io futures default to cross margin. Margin mode is controlled
+        // via the dual_mode setting, not per-position.
+        debug!("[gateio-ws] Margin mode '{}' requested for {} (Gate.io defaults to cross)", mode, symbol);
         Ok(())
     }
 

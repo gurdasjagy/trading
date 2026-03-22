@@ -48,6 +48,7 @@ pub mod ws_order_manager;
 pub mod pre_trade_risk;
 pub mod position_slot_manager;
 pub mod exit_evaluator;
+pub mod candle_aggregator;
 pub mod event_sequencer;
 pub mod dust_tracker;
 pub mod circuit_breaker;

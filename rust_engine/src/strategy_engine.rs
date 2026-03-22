@@ -676,7 +676,7 @@ impl StrategyEngine {
         
         let base_size = BASE_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64;
 
-        let position_size = (base_size * raw_signal * regime_scale * vpin_scale)
+        let position_size = (base_size * (abs_imbalance / threshold).min(3.0) * regime_scale * vpin_scale)
             .max(1.0)  // Minimum 1 contract
             .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
 
@@ -804,8 +804,6 @@ impl StrategyEngine {
 // ---------------------------------------------------------------------------
 // StrategyConfig — retained for backward compatibility with config.rs
 // ---------------------------------------------------------------------------
-
-use serde::{Deserialize, Serialize};
 
 fn sc_default_imbalance() -> f64 { 0.15 }
 fn sc_default_max_spread() -> f64 { 200.0 }
@@ -949,6 +947,12 @@ mod tests {
             ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
+            cvd_divergence_bearish: false,
+            cvd_divergence_bullish: false,
+            funding_rate: 0.0001,
+            vpoc_distance_pct: 1.0,
+            realized_vol_regime: "Normal".to_string(),
+            cascade_active: false,
         };
         let regime = RegimeState::default();
         let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
@@ -977,6 +981,12 @@ mod tests {
             ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
+            cvd_divergence_bearish: false,
+            cvd_divergence_bullish: false,
+            funding_rate: 0.0001,
+            vpoc_distance_pct: 1.0,
+            realized_vol_regime: "Normal".to_string(),
+            cascade_active: false,
         };
         let regime = RegimeState::default();
         let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
@@ -1008,6 +1018,12 @@ mod tests {
             ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
+            cvd_divergence_bearish: false,
+            cvd_divergence_bullish: false,
+            funding_rate: 0.0001,
+            vpoc_distance_pct: 1.0,
+            realized_vol_regime: "Normal".to_string(),
+            cascade_active: false,
         };
         let regime = RegimeState::default();
         let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
@@ -1037,6 +1053,12 @@ mod tests {
             ichimoku_cloud_position: "InCloud".to_string(),
             mm_inventory_pressure: 0.0,
             btc_eth_correlation: 0.0,
+            cvd_divergence_bearish: false,
+            cvd_divergence_bullish: false,
+            funding_rate: 0.0001,
+            vpoc_distance_pct: 1.0,
+            realized_vol_regime: "Normal".to_string(),
+            cascade_active: false,
         };
         let regime = RegimeState::default();
         let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 

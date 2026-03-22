@@ -458,7 +458,8 @@ mod tests {
             take_profit_fp: FixedPrice::from_f64(price * 1.02).0,
             placement_type: 0,
             post_only: 0,
-            _pad2: [0; 6],
+            is_close: 0,
+            _pad2: [0; 5],
         }
     }
 

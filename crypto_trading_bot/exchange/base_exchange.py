@@ -230,6 +230,10 @@ class BaseExchange(ABC):
         """Set the leverage multiplier for *symbol*."""
 
     @abstractmethod
+    async def get_trade_history(self, symbol: str, limit: int = 50) -> List[Any]:
+        """Return recent trade history for *symbol*."""
+
+    @abstractmethod
     async def set_margin_type(self, symbol: str, margin_type: MarginType) -> Dict[str, Any]:
         """Switch between cross and isolated margin for *symbol*."""
 
