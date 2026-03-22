@@ -102,6 +102,11 @@ pub struct DashboardState {
     pub signal_queue_depth: AtomicU64,
     pub signals_processed: AtomicU64,
 
+    // ── Execution analytics (Phase 2 Feature 7) ──
+    pub avg_slippage_bps: AtomicI64,
+    pub avg_impact_bps: AtomicI64,
+    pub use_limit_orders: AtomicU64,
+
     // ── Position data (up to 8 positions, serialized as JSON) ──
     /// JSON-encoded positions (updated periodically by the strategy thread).
     /// Protected by a simple spinlock (AtomicBool).
