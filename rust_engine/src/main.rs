@@ -984,6 +984,8 @@ fn strategy_evaluator_loop(
     // Phase 3 Feature 13: Ichimoku Cloud initialization
     let mut ichimoku_cloud = ichimoku_cloud::IchimokuCloud::new();
     info!("[strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)");
+    // FIX 2: Track last Ichimoku candle timestamp to avoid duplicate updates
+    let mut last_ichimoku_candle_ts: u64 = 0;
     
     // Phase 3 Feature 14: Market Maker Inventory Model initialization
     let mut mm_inventory = market_maker_inventory::MarketMakerInventoryModel::new(1000);
@@ -998,6 +1000,8 @@ fn strategy_evaluator_loop(
     let mut funding_check_counter: u64 = 0;
     // Upgrade 1: Funding rate monitor for arbitrage opportunities
     let mut funding_monitor = funding_rate::FundingRateMonitor::new();
+    // FIX 3: Track funding arb positions for exit logic (symbol_id -> (open_timestamp_ns, entry_price))
+    let mut funding_arb_positions: HashMap<u16, (u64, f64)> = HashMap::new();
     info!("[strategy] 🧮 DustTracker initialized (max_dust=5.0)");
     info!("[strategy] 📊 VPIN calculator initialized (bucket=100k, depth=50)");
     info!("[strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)");
@@ -1036,6 +1040,20 @@ fn strategy_evaluator_loop(
                 info!("[strategy] 🔄 Volume profile reset (daily)");
             }
 
+            // FIX 2: Update Ichimoku cloud with proper 1h candle data (before draining trades)
+            {
+                let candle_agg = strategy.candle_aggregator.lock();
+                if let Some(candle_1h) = candle_agg.get_latest_completed(Timeframe::H1) {
+                    // Only update if this is a new candle (timestamp changed)
+                    if candle_1h.timestamp_ns != last_ichimoku_candle_ts {
+                        ichimoku_cloud.update_candle(candle_1h.high, candle_1h.low, candle_1h.close);
+                        last_ichimoku_candle_ts = candle_1h.timestamp_ns;
+                        debug!("[strategy] 📊 Ichimoku updated with 1h candle: H={:.2} L={:.2} C={:.2}",
+                               candle_1h.high, candle_1h.low, candle_1h.close);
+                    }
+                }
+            }
+
             // Drain trade ring and update VPIN + candles + CVD + Volume Profile + Liquidation Detector + Trade Flow Analyzer + Phase 3 detectors
             while let Some(trade) = trades_ring.try_pop() {
                 let price = FixedPrice(trade.price).to_f64();
@@ -1058,11 +1076,9 @@ fn strategy_evaluator_loop(
                 // Phase 3: Update Fibonacci detector with price history
                 fibonacci_detector.update(trade.recv_ns, price);
                 
-                // Phase 3: Update Ichimoku cloud with candle data (use 1h candles)
-                // For simplicity, we'll update on every trade - in production would batch by timeframe
-                let high = price * 1.001; // Approximate high
-                let low = price * 0.999;  // Approximate low
-                ichimoku_cloud.update_candle(high, low, price);
+                // FIX 2: Update Ichimoku cloud with proper 1h candle data
+                // Only update when a new 1h candle completes (not on every trade)
+                // This is handled separately below after draining the trade ring
                 
                 // Phase 3: Update Market Maker Inventory with trade flow
                 mm_inventory.on_trade(volume, is_buy);
@@ -1081,6 +1097,60 @@ fn strategy_evaluator_loop(
                 // Update funding rate monitor with real funding rate from shared storage
                 let rate = funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001);
                 funding_monitor.update_funding_rate(symbol_name, rate);
+                
+                // FIX 3: Check existing funding arb positions for exit conditions
+                let mut positions_to_close = Vec::new();
+                for (&sym_id, &(open_ts, entry_price)) in funding_arb_positions.iter() {
+                    let time_open_secs = (snapshot.timestamp_ns - open_ts) / 1_000_000_000;
+                    let unrealized_loss_pct = ((mid_price - entry_price) / entry_price).abs();
+                    
+                    // Exit if position open > 8 hours (28800 seconds) OR unrealized loss > 1.5%
+                    if time_open_secs > 28800 || unrealized_loss_pct > 0.015 {
+                        positions_to_close.push(sym_id);
+                        let reason = if time_open_secs > 28800 {
+                            "8h time limit"
+                        } else {
+                            "1.5% loss limit"
+                        };
+                        info!(
+                            "[strategy] 💰 Funding arb exit: {} after {:.1}h, loss={:.2}% — {}",
+                            registry.get_name(sym_id), time_open_secs as f64 / 3600.0,
+                            unrealized_loss_pct * 100.0, reason
+                        );
+                        
+                        // Generate market close order
+                        let close_cmd = OrderCommand {
+                            symbol_id: sym_id,
+                            side: spsc::side::BUY, // Close SHORT = BUY
+                            order_type: spsc::order_cmd_type::MARKET,
+                            leverage: 3,
+                            _pad: [0; 3],
+                            price: FixedPrice::from_f64(mid_price).raw(),
+                            qty: fixed_point::FixedQty::from_f64(100.0).raw(),
+                            order_id: snapshot.sequence.wrapping_add(2000),
+                            signal_ns: snapshot.timestamp_ns,
+                            max_slippage_bps: 50,
+                            ttl_ms: 5000,
+                            stop_loss_fp: 0,
+                            take_profit_fp: 0,
+                            placement_type: 0,
+                            post_only: 0,
+                            is_close: 1,
+                            _pad2: [0; 5],
+                        };
+                        
+                        if exec_ring.try_push(close_cmd) {
+                            info!("[strategy] 💰 Funding arb close order submitted: {}", registry.get_name(sym_id));
+                        } else {
+                            warn!("[strategy] Funding arb close dropped — execution ring full");
+                        }
+                    }
+                }
+                
+                // Remove closed positions from tracking
+                for sym_id in positions_to_close {
+                    funding_arb_positions.remove(&sym_id);
+                }
                 
                 // Check for arbitrage opportunities (funding rate > 0.01%)
                 if let Some(opportunities) = funding_monitor.check_all_opportunities() {
@@ -1129,6 +1199,8 @@ fn strategy_evaluator_loop(
                                 warn!("[strategy] Funding arb dropped — execution ring full");
                                 position_slots.release();
                             } else {
+                                // FIX 3: Track this funding arb position for exit logic
+                                funding_arb_positions.insert(snapshot.symbol_id, (snapshot.timestamp_ns, mid_price));
                                 info!("[strategy] 💰 Funding arb order submitted: {} @ {:.4}", symbol_name, mid_price);
                             }
                         }
@@ -2309,6 +2381,53 @@ fn execution_router_loop(
                                 "[execution] ✅ Order {} filled: size={}, avg_price={:.4}, latency={}μs",
                                 res.order_id, res.filled_size, res.avg_fill_price, res.latency_us
                             );
+                            
+                            // FIX 4 (Task 8): Post-only verification task
+                            // If this was a post-only order, spawn a task to verify it wasn't immediately cancelled
+                            if cmd.post_only == 1 && res.status == "open" {
+                                let gw_clone = gw.clone();
+                                let order_id_clone = res.order_id.clone();
+                                let symbol_clone = symbol_name.to_string();
+                                let sym_id = cmd.symbol_id;
+                                tokio::spawn(async move {
+                                    // Wait 3 seconds for the order to rest on the book
+                                    tokio::time::sleep(Duration::from_secs(3)).await;
+                                    
+                                    // Query order status
+                                    match gw_clone.get_order_status(&order_id_clone, &symbol_clone).await {
+                                        Ok(Some(status)) if status.status == "cancelled" => {
+                                            warn!(
+                                                "[execution] ⚠️ Post-only order {} for {} was cancelled by exchange — releasing position slot",
+                                                order_id_clone, symbol_clone
+                                            );
+                                            // Release the position slot that was acquired for this order
+                                            position_slots.release();
+                                            // Untrack from exit evaluator if it was tracked
+                                            // Note: We can't directly call exit_evaluator.untrack_position here
+                                            // because it's owned by the strategy thread. The next health check
+                                            // will detect the discrepancy and clean up.
+                                        }
+                                        Ok(Some(status)) => {
+                                            debug!(
+                                                "[execution] Post-only order {} status: {}",
+                                                order_id_clone, status.status
+                                            );
+                                        }
+                                        Ok(None) => {
+                                            debug!(
+                                                "[execution] Post-only order {} no longer exists (filled or cancelled)",
+                                                order_id_clone
+                                            );
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                "[execution] Failed to query post-only order {} status: {}",
+                                                order_id_clone, e
+                                            );
+                                        }
+                                    }
+                                });
+                            }
 
                             // FIX 1: Only insert position entries on non-close fills
                             if cmd.is_close == 0 {

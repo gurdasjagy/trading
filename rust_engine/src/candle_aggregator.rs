@@ -533,6 +533,17 @@ impl CandleAggregator {
         }
     }
 
+    /// Get the most recent completed candle for a timeframe (Task 2).
+    /// Returns None if no completed candles exist yet.
+    pub fn get_latest_completed(&self, timeframe: Timeframe) -> Option<&CandleData> {
+        match timeframe {
+            Timeframe::M1 => self.m1.completed.back(),
+            Timeframe::M5 => self.m5.completed.back(),
+            Timeframe::M15 => self.m15.completed.back(),
+            Timeframe::H1 => self.h1.completed.back(),
+        }
+    }
+
     /// Get the current (in-progress) candle for a timeframe.
     pub fn get_current_candle(&self, timeframe: Timeframe) -> &CandleData {
         match timeframe {

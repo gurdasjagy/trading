@@ -135,6 +135,17 @@ pub struct MicrostructureMetrics {
     pub mm_inventory_pressure: f64,
     /// Phase 3 Feature 15: BTC-ETH correlation (-1.0 to 1.0).
     pub btc_eth_correlation: f64,
+    /// FEATURE 1 (Task 9): CVD divergence signals
+    pub cvd_divergence_bearish: bool,
+    pub cvd_divergence_bullish: bool,
+    /// FEATURE 1 (Task 9): Current funding rate for this symbol
+    pub funding_rate: f64,
+    /// FEATURE 1 (Task 9): Distance to VPOC in percentage
+    pub vpoc_distance_pct: f64,
+    /// FEATURE 1 (Task 9): Realized volatility regime (Low, Normal, High, Extreme)
+    pub realized_vol_regime: String,
+    /// FEATURE 1 (Task 9): Liquidation cascade active flag
+    pub cascade_active: bool,
 }
 
 // OrderIntent is imported from crate::execution_gateway — single source of truth.
