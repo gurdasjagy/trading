@@ -473,8 +473,10 @@ pub struct OrderCommand {
     pub placement_type: u8,
     /// Whether this order must be post-only (maker). 0 = no, 1 = yes.
     pub post_only: u8,
+    /// Whether this is a position close order. 0 = no, 1 = yes.
+    pub is_close: u8,
     /// Padding to maintain alignment.
-    pub _pad2: [u8; 6],
+    pub _pad2: [u8; 5],
 }
 
 impl Default for OrderCommand {
@@ -495,7 +497,8 @@ impl Default for OrderCommand {
             take_profit_fp: 0,
             placement_type: 0,
             post_only: 0,
-            _pad2: [0; 6],
+            is_close: 0,
+            _pad2: [0; 5],
         }
     }
 }

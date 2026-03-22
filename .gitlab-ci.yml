@@ -35,11 +35,9 @@ test-python:
 check-rust:
   stage: test-rust
   image: rust:1.78-slim
-  before_script:
-    - cd rust_engine
   script:
-    - cargo check
-    - cargo clippy -- -D warnings
+    - cd rust_engine && cargo check
+    - cd rust_engine && cargo clippy -- -D warnings
   allow_failure: true
 
 # ── Build Docker ──────────────────────────────────────────────────────────
