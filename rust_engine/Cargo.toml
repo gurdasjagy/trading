@@ -43,6 +43,8 @@ flume = "0.11"
 # ===================================================================
 # memmap2: For writing the Zero-Copy IPC bridge (shared memory ring buffers).
 memmap2 = "0.9"
+# libc: For hardware timestamp support (SO_TIMESTAMPING on Linux).
+libc = "0.2"
 
 # ===================================================================
 # 4. Data Precision & Serialization

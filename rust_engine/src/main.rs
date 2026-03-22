@@ -556,6 +556,15 @@ mod funding_rate;    // Upgrade 1: Funding Rate Arbitrage
 mod twap_executor;   // Upgrade 3: TWAP/Iceberg Order Execution
 mod gamma_shm;       // Phase 2 Feature 4: Options-Derived Gamma Exposure
 
+// ── Institutional Features (from update.txt) ──
+mod hw_timestamp;    // Feature 1: Hardware Timestamp Support
+mod tick_store;      // Feature 2: Tick Database with Replay
+mod var_engine;      // Feature 3: Real-Time VaR Engine
+mod options_greeks;  // Feature 4: Options Greeks (Black-Scholes)
+mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
+mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
+mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
+
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
 // ---------------------------------------------------------------------------
@@ -1012,7 +1021,7 @@ fn strategy_evaluator_loop(
     info!("[strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)");
     info!("[strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)");
     info!("[strategy] 📈 VolatilityTrailingStop initialized (ATR-based)");
-    info!("[strategy] 🛡️ AdverseSelectionGuard initialized (spoofing detection)");
+    info!("[strategy] ��️ AdverseSelectionGuard initialized (spoofing detection)");
 
     loop {
         // Early bail-out: if circuit breaker is tripped, skip evaluation.

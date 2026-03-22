@@ -81,6 +81,15 @@ pub mod market_impact;
 // Order lifecycle tracking
 pub mod order_lifecycle;
 
+// ── Institutional Features (from update.txt) ──
+pub mod hw_timestamp;    // Feature 1: Hardware Timestamp Support
+pub mod tick_store;      // Feature 2: Tick Database with Replay
+pub mod var_engine;      // Feature 3: Real-Time VaR Engine
+pub mod options_greeks;  // Feature 4: Options Greeks (Black-Scholes)
+pub mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
+pub mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
+pub mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
+
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;
 mod orderbook;
