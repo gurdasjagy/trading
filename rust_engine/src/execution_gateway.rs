@@ -400,10 +400,15 @@ pub trait ExecutionGateway: Send + Sync {
         -> Result<(), ExchangeError>;
     /// Return the available USDT balance in the futures wallet.
     async fn get_balance(&self) -> Result<f64, ExchangeError>;
-    /// Query the status of a specific order on Gate.io.
+    
+    /// Query the status of a specific order on Gate.io (Task 6).
     /// Returns None if the order no longer exists (filled/cancelled).
+    /// Default implementation returns Ok(None) for gateways that don't support order status queries.
     async fn get_order_status(&self, order_id: &str, symbol: &str)
-        -> Result<Option<OrderResult>, ExchangeError>;
+        -> Result<Option<OrderResult>, ExchangeError> {
+        let _ = (order_id, symbol);
+        Ok(None)
+    }
 
     /// FIX 6: Submit a conditional stop-loss order to the exchange.
     /// Default implementation returns an error (not all gateways support conditional orders).
