@@ -1,0 +1,11 @@
+# Rust build artifacts
+rust_engine/target/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment files
+.env

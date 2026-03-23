@@ -631,16 +631,20 @@ impl StrategyEngine {
             0.0
         };
         
-        // Composite signal: weighted combination of all factors
-        // Weights: imbalance=35%, cvd=20%, funding=15%, vpoc=15%, vol_regime=15%
-        let composite = abs_imbalance * 0.35 
-            * cvd_score * 0.20 
-            * funding_score * 0.15 
-            * vpoc_score * 0.15 
-            * vol_regime_scale * 0.15
-            * (1.0 - vpin_penalty * 0.7);
-        
-        let confidence = (composite / threshold).clamp(0.0, 1.0);
+        // FIXED composite signal scoring — weighted sum (not product).
+        // Multiplying all factors together made composite astronomically small.
+        // Each factor now contributes additively with its designated weight.
+        let imbalance_score    = (abs_imbalance / threshold).min(3.0) * 0.40; // 40% weight
+        let cvd_contribution   = cvd_score * 0.20;                             // 20% weight
+        let funding_contribution = funding_score * 0.15;                       // 15% weight (score is 1.0 or 1.2)
+        let vpoc_contribution  = vpoc_score * 0.10;                            // 10% weight (score is 1.0 or 1.15)
+        let vol_contribution   = (vol_regime_scale / 1.5_f64).min(1.0) * 0.15;    // 15% weight
+
+        let composite = (imbalance_score + cvd_contribution + funding_contribution
+            + vpoc_contribution + vol_contribution)
+            * (1.0 - vpin_penalty * 0.5);
+
+        let confidence = composite.clamp(0.0, 1.0);
 
         // ── ML Weights Blending ──
         let ml_w = ml_weights.get_weights(symbol_id).unwrap_or(crate::ml_weight_receiver::SymbolWeight {
@@ -933,7 +937,7 @@ mod tests {
         let metrics = MicrostructureMetrics {
             mid_price: 50000.0,
             spread_bps: 5.0,
-            imbalance: 0.05, // Below threshold
+            imbalance: 0.01, // Below 3% threshold (IMBALANCE_ENTRY_THRESHOLD = 0.03)
             bid_depth_usdt: 50000.0,
             ask_depth_usdt: 48000.0,
             vpin: 0.2,

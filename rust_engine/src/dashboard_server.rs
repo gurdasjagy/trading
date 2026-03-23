@@ -589,6 +589,55 @@ impl Default for DashboardState {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Manual Trade types
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A manual trade request submitted from the web dashboard.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ManualTradeRequest {
+    /// Symbol in Gate.io format, e.g. "BTC_USDT"
+    pub symbol: String,
+    /// "buy" or "sell"
+    pub side: String,
+    /// Position size in contracts (integer)
+    pub size: i64,
+    /// Leverage (1-125)
+    pub leverage: u8,
+    /// Optional limit price. If None, uses market order.
+    pub price: Option<f64>,
+    /// Stop loss price (required)
+    pub stop_loss: f64,
+    /// Take profit price (required)
+    pub take_profit: f64,
+    /// Exchange to route to: "gateio", "binance", "bybit"
+    pub exchange: Option<String>,
+    /// Optional note/tag for this trade
+    pub note: Option<String>,
+}
+
+/// Response to a manual trade request.
+#[derive(Debug, serde::Serialize)]
+pub struct ManualTradeResponse {
+    pub success: bool,
+    pub message: String,
+    pub order_id: Option<String>,
+}
+
+/// Sent from execution thread to strategy thread after a manual trade fill,
+/// so the strategy thread can register the position in exit_evaluator and
+/// lifecycle_mgr.
+#[derive(Debug, Clone)]
+pub struct ManualPositionTrack {
+    pub symbol_id: u16,
+    pub is_long: bool,
+    pub entry_price: f64,
+    pub size: i64,
+    pub leverage: i32,
+    pub stop_loss: f64,
+    pub take_profit: f64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Shared application state passed to all handlers
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -602,6 +651,10 @@ struct AppState {
     gateio_client: reqwest::Client,
     /// Task 5: Execution analytics (Phase 2 Feature 7).
     exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
+    /// Channel to send manual trade requests to the execution router.
+    manual_trade_tx: Arc<crossbeam_channel::Sender<ManualTradeRequest>>,
+    /// Symbol registry for symbol ID lookup.
+    symbol_registry: Arc<crate::config::SymbolRegistry>,
 }
 
 impl AppState {
@@ -1889,6 +1942,99 @@ fn find_static_dir() -> PathBuf {
 /// - `GET /api/health`        — Health check JSON
 /// - `GET /api/state`         — Full engine state JSON
 /// - `GET /api/balance`       — Account balance JSON
+/// POST /api/manual-trade — Submit a manual trade from the dashboard.
+async fn api_manual_trade(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ManualTradeRequest>,
+) -> Json<ManualTradeResponse> {
+    if req.symbol.is_empty() {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Symbol is required".to_string(),
+            order_id: None,
+        });
+    }
+
+    let side_lower = req.side.to_lowercase();
+    if side_lower != "buy" && side_lower != "sell" {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Side must be 'buy' or 'sell'".to_string(),
+            order_id: None,
+        });
+    }
+
+    if req.size <= 0 {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Size must be positive".to_string(),
+            order_id: None,
+        });
+    }
+
+    if req.stop_loss <= 0.0 || req.take_profit <= 0.0 {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Stop loss and take profit are required".to_string(),
+            order_id: None,
+        });
+    }
+
+    if side_lower == "buy" && req.stop_loss >= req.take_profit {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "For BUY: stop_loss must be below take_profit".to_string(),
+            order_id: None,
+        });
+    }
+    if side_lower == "sell" && req.stop_loss <= req.take_profit {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "For SELL: stop_loss must be above take_profit".to_string(),
+            order_id: None,
+        });
+    }
+
+    let sym_upper = req.symbol.to_uppercase();
+    let sym_id = state.symbol_registry.get_id(&sym_upper);
+    if sym_id == 0 {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: format!("Unknown symbol '{}' — not in trading pairs", req.symbol),
+            order_id: None,
+        });
+    }
+
+    // Capture fields for logging before req is moved into the channel
+    let req_size = req.size;
+    let req_sl = req.stop_loss;
+    let req_tp = req.take_profit;
+
+    match state.manual_trade_tx.try_send(req) {
+        Ok(()) => {
+            info!("[dashboard] Manual trade submitted: {} {} {} contracts SL={} TP={}",
+                side_lower, sym_upper, req_size, req_sl, req_tp);
+            Json(ManualTradeResponse {
+                success: true,
+                message: format!("Manual trade submitted: {} {} {} contracts", side_lower, sym_upper, req_size),
+                order_id: None,
+            })
+        }
+        Err(e) => {
+            Json(ManualTradeResponse {
+                success: false,
+                message: format!("Failed to submit trade: {}", e),
+                order_id: None,
+            })
+        }
+    }
+}
+
+async fn page_manual_trade(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let ctx = state.dashboard.template_context("manual_trade");
+    render_template(&state.templates, "dashboard.html", &ctx)
+}
+
 /// - `GET /api/positions`     — Active positions JSON
 /// - `GET /api/trades`        — Trade history JSON
 /// - `GET /api/orderbook`     — Orderbook BBO JSON
@@ -1907,6 +2053,8 @@ pub fn run_dashboard_server(
     bind_addr: &str,
     state: Arc<DashboardState>,
     exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
+    manual_trade_tx: Arc<crossbeam_channel::Sender<ManualTradeRequest>>,
+    symbol_registry: Arc<crate::config::SymbolRegistry>,
 ) {
     let bind_addr = bind_addr.to_string();
 
@@ -1948,6 +2096,8 @@ pub fn run_dashboard_server(
                     ws_tx,
                     gateio_client,
                     exec_analytics,
+                    manual_trade_tx,
+                    symbol_registry,
                 });
 
                 // ── Static files ──
@@ -2045,6 +2195,8 @@ pub fn run_dashboard_server(
                     .route("/api/bot/resume", axum::routing::post(api_bot_resume))
                     .route("/api/circuit-breaker/reset", axum::routing::post(api_circuit_breaker_reset))
                     .route("/api/v1/emergency-stop", axum::routing::post(api_emergency_stop))
+                    .route("/api/manual-trade", axum::routing::post(api_manual_trade))
+                    .route("/manual-trade", get(page_manual_trade))
                     // WebSocket
                     .route("/ws/live", get(ws_handler))
                     .route("/ws", get(ws_handler))
