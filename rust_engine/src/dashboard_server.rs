@@ -1533,60 +1533,179 @@ struct SorPreviewQuery {
 }
 
 /// GET /api/multi-exchange/sor-preview — Preview Smart Order Router routing.
+///
+/// TASK 7: Updated to use real global book data when available.
+/// Reads from the dashboard's global_book_json to simulate SOR routing.
 async fn api_multi_exchange_sor_preview(
     Query(params): Query<SorPreviewQuery>,
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
-    // Return a preview of how the SOR would split the order
-    // In production this reads from the GlobalBookRegistry
+    // Try to get real global book data from dashboard state
+    let global_book_raw = state.dashboard.global_book_str();
+    let global_book: Option<Value> = serde_json::from_str(&global_book_raw).ok();
+    
+    // Check if we have real data
+    let has_real_data = global_book
+        .as_ref()
+        .and_then(|v| v.get("symbols"))
+        .and_then(|s| s.as_array())
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false);
+    
+    // Normalize symbol (BTC/USDT -> BTC_USDT)
+    let symbol_normalized = params.symbol.replace('/', "_").to_uppercase();
+    
+    // Build slices based on actual book data if available
     let is_split = params.size_usdt >= 5000.0;
-    let slices = if is_split {
-        vec![
-            json!({
+    
+    let (slices, total_cost_bps, routing_reason) = if has_real_data {
+        // Parse exchanges from global book
+        let exchanges_data: Vec<Value> = global_book
+            .as_ref()
+            .and_then(|v| v.get("symbols"))
+            .and_then(|s| s.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|sym| sym.get("exchanges"))
+            .and_then(|e| e.as_array())
+            .cloned()
+            .unwrap_or_default();
+        
+        // Sort exchanges by spread (best first)
+        let mut exchange_costs: Vec<(String, f64, f64)> = exchanges_data.iter()
+            .filter_map(|ex| {
+                let name = ex.get("name")?.as_str()?.to_string();
+                let spread_bps = ex.get("spread_bps")?.as_i64().unwrap_or(10) as f64;
+                let is_stale = ex.get("is_stale")?.as_bool().unwrap_or(true);
+                if is_stale { return None; }
+                
+                // Calculate effective cost: spread/2 + taker fee
+                let taker_fee = match name.as_str() {
+                    "Gate.io" => 5.0,
+                    "Binance" => 4.0,
+                    "Bybit" => 6.0,
+                    _ => 5.0,
+                };
+                let effective_cost = spread_bps / 2.0 + taker_fee;
+                Some((name, effective_cost, spread_bps))
+            })
+            .collect();
+        
+        exchange_costs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        if exchange_costs.is_empty() {
+            // No valid exchanges, fall back to defaults
+            let slices = vec![json!({
                 "exchange": "Gate.io",
-                "size_usdt": params.size_usdt * 0.4,
-                "expected_cost_bps": 5.0,
+                "exchange_id": "gateio",
+                "size_usdt": params.size_usdt,
+                "expected_cost_bps": 6.0,
                 "is_maker": false,
-            }),
-            json!({
+                "reason": "fallback_no_data",
+            })];
+            (slices, 6.0, "Single exchange (no real-time data available)".to_string())
+        } else if is_split && exchange_costs.len() >= 2 {
+            // Multi-venue split
+            let total_venues = exchange_costs.len().min(3);
+            let mut slices = Vec::new();
+            let mut total_weighted_cost = 0.0;
+            
+            for (i, (name, cost, _spread)) in exchange_costs.iter().take(total_venues).enumerate() {
+                let weight = match i {
+                    0 => 0.45, // Best venue gets 45%
+                    1 => 0.35, // Second best gets 35%
+                    _ => 0.20, // Rest get 20%
+                };
+                let slice_size = params.size_usdt * weight;
+                total_weighted_cost += cost * weight;
+                
+                slices.push(json!({
+                    "exchange": name,
+                    "exchange_id": name.to_lowercase().replace(".", ""),
+                    "size_usdt": slice_size,
+                    "expected_cost_bps": cost,
+                    "is_maker": false,
+                    "weight_pct": weight * 100.0,
+                }));
+            }
+            
+            let reason = format!(
+                "Multi-venue split across {} exchanges based on real-time book data",
+                total_venues
+            );
+            (slices, total_weighted_cost, reason)
+        } else {
+            // Single venue - best exchange
+            let (name, cost, _) = &exchange_costs[0];
+            let slices = vec![json!({
+                "exchange": name,
+                "exchange_id": name.to_lowercase().replace(".", ""),
+                "size_usdt": params.size_usdt,
+                "expected_cost_bps": cost,
+                "is_maker": false,
+                "reason": "best_effective_price",
+            })];
+            let reason = format!("Single venue: {} (lowest effective cost)", name);
+            (slices, *cost, reason)
+        }
+    } else {
+        // No real data - use simulated response
+        let slices = if is_split {
+            vec![
+                json!({
+                    "exchange": "Gate.io",
+                    "exchange_id": "gateio",
+                    "size_usdt": params.size_usdt * 0.4,
+                    "expected_cost_bps": 5.0,
+                    "is_maker": false,
+                }),
+                json!({
+                    "exchange": "Binance",
+                    "exchange_id": "binance",
+                    "size_usdt": params.size_usdt * 0.35,
+                    "expected_cost_bps": 4.0,
+                    "is_maker": false,
+                }),
+                json!({
+                    "exchange": "Bybit",
+                    "exchange_id": "bybit",
+                    "size_usdt": params.size_usdt * 0.25,
+                    "expected_cost_bps": 5.5,
+                    "is_maker": false,
+                }),
+            ]
+        } else {
+            vec![json!({
                 "exchange": "Binance",
-                "size_usdt": params.size_usdt * 0.35,
+                "exchange_id": "binance",
+                "size_usdt": params.size_usdt,
                 "expected_cost_bps": 4.0,
                 "is_maker": false,
-            }),
-            json!({
-                "exchange": "Bybit",
-                "size_usdt": params.size_usdt * 0.25,
-                "expected_cost_bps": 5.5,
-                "is_maker": false,
-            }),
-        ]
-    } else {
-        vec![json!({
-            "exchange": "Binance",
-            "size_usdt": params.size_usdt,
-            "expected_cost_bps": 4.0,
-            "is_maker": false,
-        })]
+            })]
+        };
+        let cost = if is_split { 4.6 } else { 4.0 };
+        let reason = if is_split { 
+            "Multi-venue routing (simulated - no live data)".to_string()
+        } else { 
+            "Single venue: Binance (simulated - below $5000 threshold)".to_string()
+        };
+        (slices, cost, reason)
     };
 
-    let avg_cost: f64 = if is_split { 4.6 } else { 4.0 };
-    let single_exchange_cost = 5.0_f64; // Gate.io default
+    let single_exchange_cost = 6.0_f64; // Worst case single exchange
+    let savings = (single_exchange_cost - total_cost_bps).max(0.0);
 
     Json(json!({
         "success": true,
-        "symbol": params.symbol,
+        "symbol": symbol_normalized,
         "side": params.side,
         "total_size_usdt": params.size_usdt,
-        "routing": if is_split { "multi_venue" } else { "single_venue" },
+        "routing": if slices.len() > 1 { "multi_venue" } else { "single_venue" },
         "slices": slices,
-        "estimated_slippage_bps": avg_cost,
-        "estimated_savings_bps": single_exchange_cost - avg_cost,
-        "message": if is_split { 
-            "SOR multi-venue routing - order split across exchanges for optimal execution" 
-        } else { 
-            "SOR single-venue - order below $5000 threshold, routing to best exchange" 
-        },
+        "estimated_slippage_bps": total_cost_bps,
+        "estimated_savings_bps": savings,
+        "routing_reason": routing_reason,
+        "has_real_time_data": has_real_data,
+        "min_split_threshold_usdt": 5000.0,
     }))
 }
 

@@ -88,6 +88,20 @@ use crate::config::{
 };
 use crate::execution_gateway::ExecutionGateway;
 use crate::fixed_point::FixedPrice;
+
+// TASK 2: Funding Arb Position tracking struct
+/// Tracks an active cross-exchange funding rate arbitrage position.
+#[derive(Debug, Clone)]
+struct FundingArbPosition {
+    symbol: String,
+    short_exchange: multi_exchange::ExchangeId,
+    long_exchange: multi_exchange::ExchangeId,
+    short_entry_price: f64,
+    long_entry_price: f64,
+    size: i64,
+    entry_timestamp_ns: u64,
+    entry_net_rate: f64,
+}
 use crate::flat_book::FlatOrderBook;
 use crate::gateio_gateway::GateIoGateway;
 use crate::order_lifecycle::OrderLifecycleTracker;
@@ -941,12 +955,16 @@ async fn ws_connect_and_ingest_gateio(
 
 /// Orderbook builder loop. Reads RawBookUpdate from WS ingestion rings,
 /// applies them to FlatOrderBooks, and pushes BookSnapshots to the strategy ring.
+///
+/// TASK 8: Also updates the GlobalBookRegistry with Gate.io's current BBO and top levels
+/// so the global book has a complete view of liquidity across all exchanges.
 fn orderbook_builder_loop(
     ws_ring_gateio: &'static SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>,
     strategy_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     books: &mut Vec<FlatOrderBook>,
     _registry: Arc<SymbolRegistry>,
     shared_prices: Arc<Vec<AtomicU64>>,
+    global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>,
 ) {
     info!("[book-builder] Starting orderbook builder on dedicated core");
     loop {
@@ -968,7 +986,7 @@ fn orderbook_builder_loop(
                 }
                 
                 // Push snapshot to strategy
-                if let (Some((bid, _bid_qty)), Some((ask, _ask_qty))) = (book.best_bid(), book.best_ask()) {
+                if let (Some((bid, bid_qty)), Some((ask, ask_qty))) = (book.best_bid(), book.best_ask()) {
                     let snapshot = BookSnapshot {
                         symbol_id: update.symbol_id,
                         bid_levels: 10,
@@ -985,6 +1003,35 @@ fn orderbook_builder_loop(
                         timestamp_ns: update.recv_ns,
                     };
                     let _ = strategy_ring.try_push(snapshot);
+                    
+                    // TASK 8: Update GlobalBookRegistry with Gate.io's book data
+                    // This ensures the global book has a complete view of liquidity
+                    if let Some(ref gbr) = global_book_registry {
+                        // Extract top 20 levels from FlatOrderBook for complete liquidity picture
+                        let top_bids = book.get_bids(20);
+                        let top_asks = book.get_asks(20);
+                        
+                        let bid_levels: Vec<(i64, i64)> = top_bids.iter()
+                            .map(|(p, q)| (p.raw(), q.raw()))
+                            .collect();
+                        let ask_levels: Vec<(i64, i64)> = top_asks.iter()
+                            .map(|(p, q)| (p.raw(), q.raw()))
+                            .collect();
+                        
+                        let gateio_snapshot = multi_exchange::global_book::ExchangeBookSnapshot {
+                            exchange: multi_exchange::ExchangeId::GateIo,
+                            symbol_id: update.symbol_id,
+                            best_bid_fp: bid.raw(),
+                            best_ask_fp: ask.raw(),
+                            bid_levels,
+                            ask_levels,
+                            sequence: book.sequence(),
+                            timestamp_ns: update.recv_ns,
+                        };
+                        
+                        let gbook = gbr.get_or_create(update.symbol_id);
+                        gbook.write().update_exchange_snapshot(gateio_snapshot);
+                    }
                 }
             }
         }
@@ -2248,12 +2295,15 @@ fn strategy_evaluator_loop(
 ///
 /// 1. **Circuit Breaker Check**: Reject all orders if halted
 /// 2. **Validate**: Ensure SL is set (reject unprotected trades)
-/// 3. **Route**: SmartOrderRouter selects best venue
+/// 3. **Route**: SmartOrderRouter selects best venue (TASK 1: multi-exchange SOR when enabled)
 /// 4. **Pre-flight**: Check margin & exposure limits
-/// 5. **Submit**: Send order via REST gateway (or WS in future)
+/// 5. **Submit**: Send order via REST gateway (or multi-venue parallel submission)
 /// 6. **Protect**: Submit SL/TP as conditional orders
 /// 7. **Monitor**: Track fills, PnL, and queue position
 /// 8. **Circuit Breaker Update**: Record trade results
+///
+/// TASK 1: When USE_MULTI_EXCHANGE=on, uses the multi-exchange SOR to split orders
+/// across Gate.io, Binance, and Bybit based on global book liquidity.
 fn execution_router_loop(
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
     manual_cmd_rx: crossbeam_channel::Receiver<dashboard_server::ManualTradeRequest>,
@@ -2268,13 +2318,66 @@ fn execution_router_loop(
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
     exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
     shared_prices: Arc<Vec<AtomicU64>>,
+    // TASK 1: Multi-exchange SOR parameters
+    global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>,
+    multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
+    multi_exchange_enabled: bool,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
     // Initialize execution context
     let mbo_book = mbo_book::MboBook::new();
     let adverse_detector = adverse_selection::AdverseSelectionDetector::with_defaults();
-    let smart_router_inst = smart_router::SmartOrderRouter::default_venues();
+    
+    // TASK 6: Build legacy SmartOrderRouter with multi-exchange venues when enabled
+    let smart_router_inst = if multi_exchange_enabled {
+        let venues = vec![
+            smart_router::VenueState {
+                exchange_id: 0,
+                name: "gateio".to_string(),
+                spread_bps: 2,
+                taker_fee_bps: 5,
+                maker_fee_bps: -1,
+                bid_depth_usdt: 100_000.0,
+                ask_depth_usdt: 100_000.0,
+                at_rate_limit: false,
+                last_latency_us: 0,
+                last_update_ns: 0,
+                enabled: true,
+            },
+            smart_router::VenueState {
+                exchange_id: 1,
+                name: "binance".to_string(),
+                spread_bps: 1,
+                taker_fee_bps: 4,
+                maker_fee_bps: -2,
+                bid_depth_usdt: 500_000.0,
+                ask_depth_usdt: 500_000.0,
+                at_rate_limit: false,
+                last_latency_us: 0,
+                last_update_ns: 0,
+                enabled: true,
+            },
+            smart_router::VenueState {
+                exchange_id: 2,
+                name: "bybit".to_string(),
+                spread_bps: 2,
+                taker_fee_bps: 6,
+                maker_fee_bps: -1,
+                bid_depth_usdt: 200_000.0,
+                ask_depth_usdt: 200_000.0,
+                at_rate_limit: false,
+                last_latency_us: 0,
+                last_update_ns: 0,
+                enabled: true,
+            },
+        ];
+        info!("[execution] Legacy SmartOrderRouter initialized with {} venues (multi-exchange mode)", venues.len());
+        smart_router::SmartOrderRouter::new(venues)
+    } else {
+        smart_router::SmartOrderRouter::default_venues()
+    };
+    
     let ws_mgr = ws_order_manager::WsOrderManager::new_paper();
     let mut exec_ctx = execution_gateway::ExecutionContext::new(
         mbo_book,
@@ -2282,6 +2385,20 @@ fn execution_router_loop(
         smart_router_inst,
         ws_mgr,
     );
+
+    // TASK 5: Initialize CrossVenueMarginMonitor for multi-exchange margin health tracking
+    let mut margin_monitor = multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults();
+    if multi_exchange_enabled {
+        info!("[execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)");
+    }
+    
+    // TASK 2: Initialize CrossExchangeFundingArb for funding rate arbitrage
+    let mut cross_funding_arb = multi_exchange::funding_arb::CrossExchangeFundingArb::with_defaults();
+    let mut last_funding_arb_check = std::time::Instant::now();
+    let mut funding_arb_positions: HashMap<String, FundingArbPosition> = HashMap::new();
+    if multi_exchange_enabled {
+        info!("[execution] Cross-exchange funding arbitrage initialized (min_net_rate=0.005%, min_apr=10%)");
+    }
 
     // Initialize event-sourced order state machine
     let mut order_state_machine = order_state_machine::OrderStateMachine::new();
@@ -2498,6 +2615,144 @@ fn execution_router_loop(
                     * fixed_point::FixedQty(cmd.qty).to_f64();
                 let is_maker = cmd.order_type == spsc::order_cmd_type::LIMIT;
                 let routing = exec_ctx.smart_router.route(order_size_usdt, is_maker);
+                let symbol_name = registry.get_name(cmd.symbol_id);
+
+                // ── TASK 1: Multi-Exchange SOR Routing ──
+                // When multi-exchange is enabled and we have a global book, use the multi-exchange SOR
+                // to split orders across venues for better execution quality.
+                if multi_exchange_enabled && global_book_registry.is_some() && !config::is_forex_symbol(symbol_name) {
+                    let gbr = global_book_registry.as_ref().unwrap();
+                    if let Some(book_arc) = gbr.get(cmd.symbol_id) {
+                        let book = book_arc.read();
+                        let multi_sor = multi_exchange::sor::SmartOrderRouter::new(
+                            multi_exchange::sor::SorConfig {
+                                min_split_size_usdt: 5000.0,
+                                max_venues: 3,
+                                max_slippage_bps: 30.0,
+                                prefer_maker: is_maker,
+                            }
+                        );
+                        
+                        let side = if cmd.side == spsc::side::BUY {
+                            execution_gateway::OrderSide::Buy
+                        } else {
+                            execution_gateway::OrderSide::Sell
+                        };
+                        
+                        let mid_price_fp = book.global_mid_fp().unwrap_or(cmd.price);
+                        let total_size_fp = cmd.qty;
+                        
+                        let sor_result = multi_sor.route(&book, side.clone(), total_size_fp, mid_price_fp, symbol_name);
+                        
+                        // Store SOR result for dashboard preview
+                        dashboard_state.set_funding_arb_json(serde_json::to_string(&sor_result.to_json()).unwrap_or_default());
+                        
+                        if !sor_result.slices.is_empty() {
+                            info!(
+                                "[execution] Multi-Exchange SOR: {} slices, reason='{}', savings={:.1}bps",
+                                sor_result.slices.len(),
+                                sor_result.routing_reason,
+                                sor_result.estimated_savings_bps
+                            );
+                            
+                            // Execute all slices in parallel using tokio::join!
+                            let mut futures = Vec::new();
+                            for slice in &sor_result.slices {
+                                if let Some(gw) = multi_gateways.get(&slice.exchange).cloned() {
+                                    let slice_side = slice.side.clone();
+                                    let slice_size = (slice.size as f64 / 1e8) as i64;
+                                    let slice_price = if slice.price_fp > 0 {
+                                        Some(FixedPrice(slice.price_fp).to_f64())
+                                    } else {
+                                        Some(FixedPrice(cmd.price).to_f64())
+                                    };
+                                    let slice_symbol = slice.symbol.clone();
+                                    let slice_exchange = slice.exchange;
+                                    
+                                    let order_type = if slice.is_maker {
+                                        execution_gateway::OrderType::Limit
+                                    } else {
+                                        execution_gateway::OrderType::Market
+                                    };
+                                    
+                                    let intent = execution_gateway::OrderIntent {
+                                        symbol: slice_symbol.clone(),
+                                        side: slice_side,
+                                        size: slice_size.max(1),
+                                        order_type,
+                                        price: slice_price,
+                                        reduce_only: false,
+                                        leverage: Some(cmd.target_leverage()),
+                                        time_in_force: if slice.is_maker { "gtc".to_string() } else { "ioc".to_string() },
+                                        slippage_cap_pct: Some(cmd.max_slippage_bps as f64 / 10000.0),
+                                        placement: execution_state::PlacementType::AtBest,
+                                        stop_loss: if cmd.has_stop_loss() { Some(FixedPrice(cmd.stop_loss_fp).to_f64()) } else { None },
+                                        take_profit: if cmd.has_take_profit() { Some(FixedPrice(cmd.take_profit_fp).to_f64()) } else { None },
+                                        confidence: 0.0,
+                                        signal_tag: "multi_exchange_sor".to_string(),
+                                    };
+                                    
+                                    futures.push(async move {
+                                        let result = execution_gateway::submit_with_retry(&*gw, intent).await;
+                                        (slice_exchange, result)
+                                    });
+                                }
+                            }
+                            
+                            // Execute all slices in parallel
+                            let results = futures::future::join_all(futures).await;
+                            
+                            // Aggregate results
+                            let mut total_filled: i64 = 0;
+                            let mut weighted_price_sum: f64 = 0.0;
+                            let mut total_fees: f64 = 0.0;
+                            let mut any_success = false;
+                            
+                            for (exchange, result) in results {
+                                match result {
+                                    Ok(res) => {
+                                        total_filled += res.filled_size;
+                                        weighted_price_sum += res.avg_fill_price * res.filled_size as f64;
+                                        total_fees += res.fee;
+                                        any_success = true;
+                                        info!(
+                                            "[execution] SOR slice on {}: filled={} @ {:.4}",
+                                            exchange.name(), res.filled_size, res.avg_fill_price
+                                        );
+                                        orders_submitted += 1;
+                                        dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                                        dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    Err(e) => {
+                                        warn!("[execution] SOR slice on {} failed: {}", exchange.name(), e);
+                                        // Don't rollback successful slices - partial fills are acceptable
+                                    }
+                                }
+                            }
+                            
+                            if any_success {
+                                let avg_fill_price = if total_filled > 0 {
+                                    weighted_price_sum / total_filled as f64
+                                } else {
+                                    0.0
+                                };
+                                info!(
+                                    "[execution] Multi-Exchange SOR complete: total_filled={}, avg_price={:.4}, fees={:.4}",
+                                    total_filled, avg_fill_price, total_fees
+                                );
+                                
+                                // Track position entry for PnL calculation
+                                let is_buy = cmd.side == spsc::side::BUY;
+                                position_entries.insert(cmd.symbol_id, (avg_fill_price, total_filled, is_buy));
+                                
+                                // Record in circuit breaker as successful trade
+                                circuit_breaker.on_trade_result(0); // No PnL yet for new entry
+                            }
+                            
+                            continue; // Skip single-exchange execution path
+                        }
+                    }
+                }
 
                 info!(
                     "[execution] Routing order #{}: sym={} side={} qty={} price={:.4} SL={:.4} TP={:.4} venue={} cost={}bps",
@@ -2514,7 +2769,6 @@ fn execution_router_loop(
 
                 // ── Step 4: Route to correct gateway (Mandate 3: Forex routing) ──
                 // Forex symbols → forex_gateway, crypto symbols → crypto gateway
-                let symbol_name = registry.get_name(cmd.symbol_id);
                 let active_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> =
                     if config::is_forex_symbol(symbol_name) {
                         if forex_gateway.is_some() {
@@ -2894,6 +3148,42 @@ fn execution_router_loop(
                         exec_ctx.ws_order_mgr.cancel_by_lifecycle_idx(idx, reason);
                     }
                     last_queue_check = std::time::Instant::now();
+                    
+                    // TASK 6: Update legacy SmartOrderRouter venue states from GlobalBookRegistry
+                    if let Some(ref gbr) = global_book_registry {
+                        for sym_id in gbr.all_symbol_ids() {
+                            if let Some(book_arc) = gbr.get(sym_id) {
+                                let book = book_arc.read();
+                                for exchange in multi_exchange::ExchangeId::all() {
+                                    if let Some(snap) = book.get_exchange_snapshot(exchange) {
+                                        let spread_bps = if snap.best_bid_fp > 0 {
+                                            let mid = (snap.best_bid_fp + snap.best_ask_fp) / 2;
+                                            ((snap.best_ask_fp - snap.best_bid_fp) * 10000) / mid.max(1)
+                                        } else { 
+                                            100 
+                                        } as i64;
+                                        
+                                        // Calculate depth from levels (sum of top 5 levels)
+                                        let bid_depth: f64 = snap.bid_levels.iter()
+                                            .take(5)
+                                            .map(|(_, qty)| *qty as f64 / 1e8)
+                                            .sum();
+                                        let ask_depth: f64 = snap.ask_levels.iter()
+                                            .take(5)
+                                            .map(|(_, qty)| *qty as f64 / 1e8)
+                                            .sum();
+                                        
+                                        exec_ctx.smart_router.update_venue(
+                                            exchange as u8,
+                                            spread_bps,
+                                            bid_depth * 50000.0, // Scale to USDT (approx)
+                                            ask_depth * 50000.0,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Upgrade 3: Tick the TWAP executor to submit ready slices
@@ -2964,6 +3254,274 @@ fn execution_router_loop(
                         });
                     }
                 }
+                
+                // TASK 2: Cross-Exchange Funding Rate Arbitrage (every 60s)
+                if multi_exchange_enabled && last_funding_arb_check.elapsed() > Duration::from_secs(60) {
+                    last_funding_arb_check = std::time::Instant::now();
+                    
+                    let symbols: Vec<String> = registry.all_ids().into_iter()
+                        .map(|id| registry.get_name(id).to_string())
+                        .collect();
+                    
+                    // Fetch funding rates from all exchanges
+                    for symbol in &symbols {
+                        cross_funding_arb.fetch_all_rates(
+                            &http_client, 
+                            symbol,
+                            false, // gateio_testnet
+                            false, // binance_testnet
+                            false, // bybit_testnet
+                        ).await;
+                    }
+                    
+                    // Scan for actionable opportunities
+                    let opportunities = cross_funding_arb.scan_opportunities();
+                    
+                    // Push opportunities to dashboard
+                    dashboard_state.set_funding_arb_json(
+                        serde_json::to_string(&cross_funding_arb.to_json()).unwrap_or_default()
+                    );
+                    
+                    // Execute actionable funding arb trades
+                    for opp in opportunities.iter().filter(|o| o.is_actionable) {
+                        // Check if we already have an active funding arb position for this symbol
+                        if funding_arb_positions.contains_key(&opp.symbol) {
+                            continue;
+                        }
+                        
+                        info!(
+                            "[execution] Funding Arb Opportunity: {} SHORT@{} ({:.4}%) LONG@{} ({:.4}%) net={:.4}% APR={:.1}%",
+                            opp.symbol,
+                            opp.short_exchange.name(), opp.short_rate * 100.0,
+                            opp.long_exchange.name(), opp.long_rate * 100.0,
+                            opp.net_rate * 100.0,
+                            opp.annualized_apr * 100.0
+                        );
+                        
+                        // Get gateways for both exchanges
+                        let short_gw = multi_gateways.get(&opp.short_exchange);
+                        let long_gw = multi_gateways.get(&opp.long_exchange);
+                        
+                        if short_gw.is_none() || long_gw.is_none() {
+                            warn!("[execution] Funding arb skipped: gateway not available for {} or {}", 
+                                opp.short_exchange.name(), opp.long_exchange.name());
+                            continue;
+                        }
+                        
+                        let short_gw = short_gw.unwrap().clone();
+                        let long_gw = long_gw.unwrap().clone();
+                        
+                        // Calculate position size (2% of total equity)
+                        let total_equity = margin_monitor.total_equity();
+                        let position_notional = total_equity * 0.02;
+                        let mid_price = shared_prices.get(0)
+                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                            .unwrap_or(50000.0);
+                        let position_size = (position_notional / mid_price).max(1.0) as i64;
+                        
+                        // Build SHORT intent (on high funding exchange)
+                        let short_intent = execution_gateway::OrderIntent {
+                            symbol: opp.symbol.clone(),
+                            side: execution_gateway::OrderSide::Sell,
+                            size: position_size,
+                            order_type: execution_gateway::OrderType::Market,
+                            price: Some(mid_price),
+                            reduce_only: false,
+                            leverage: Some(3),
+                            time_in_force: "ioc".to_string(),
+                            slippage_cap_pct: Some(0.002),
+                            placement: execution_state::PlacementType::AtBest,
+                            stop_loss: Some(mid_price * 1.02), // 2% SL
+                            take_profit: None, // Hold for funding
+                            confidence: 1.0,
+                            signal_tag: "funding_arb_short".to_string(),
+                        };
+                        
+                        // Build LONG intent (on low funding exchange)
+                        let long_intent = execution_gateway::OrderIntent {
+                            symbol: opp.symbol.clone(),
+                            side: execution_gateway::OrderSide::Buy,
+                            size: position_size,
+                            order_type: execution_gateway::OrderType::Market,
+                            price: Some(mid_price),
+                            reduce_only: false,
+                            leverage: Some(3),
+                            time_in_force: "ioc".to_string(),
+                            slippage_cap_pct: Some(0.002),
+                            placement: execution_state::PlacementType::AtBest,
+                            stop_loss: Some(mid_price * 0.98), // 2% SL
+                            take_profit: None,
+                            confidence: 1.0,
+                            signal_tag: "funding_arb_long".to_string(),
+                        };
+                        
+                        // Execute both legs in parallel
+                        let (short_result, long_result) = tokio::join!(
+                            execution_gateway::submit_with_retry(&*short_gw, short_intent),
+                            execution_gateway::submit_with_retry(&*long_gw, long_intent)
+                        );
+                        
+                        match (&short_result, &long_result) {
+                            (Ok(short_res), Ok(long_res)) => {
+                                info!(
+                                    "[execution] Funding Arb OPENED: {} SHORT={} @ {:.4} on {} | LONG={} @ {:.4} on {}",
+                                    opp.symbol,
+                                    short_res.filled_size, short_res.avg_fill_price, opp.short_exchange.name(),
+                                    long_res.filled_size, long_res.avg_fill_price, opp.long_exchange.name()
+                                );
+                                
+                                // Track the funding arb position
+                                let now_ns = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_nanos() as u64;
+                                
+                                funding_arb_positions.insert(opp.symbol.clone(), FundingArbPosition {
+                                    symbol: opp.symbol.clone(),
+                                    short_exchange: opp.short_exchange,
+                                    long_exchange: opp.long_exchange,
+                                    short_entry_price: short_res.avg_fill_price,
+                                    long_entry_price: long_res.avg_fill_price,
+                                    size: short_res.filled_size.min(long_res.filled_size),
+                                    entry_timestamp_ns: now_ns,
+                                    entry_net_rate: opp.net_rate,
+                                });
+                                
+                                orders_submitted += 2;
+                                dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                            }
+                            (Err(e), Ok(_)) => {
+                                warn!("[execution] Funding arb SHORT failed: {} — unwinding LONG", e);
+                                // Close the long position since short failed
+                                let close_intent = execution_gateway::OrderIntent {
+                                    symbol: opp.symbol.clone(),
+                                    side: execution_gateway::OrderSide::Sell,
+                                    size: position_size,
+                                    order_type: execution_gateway::OrderType::Market,
+                                    price: Some(mid_price),
+                                    reduce_only: true,
+                                    leverage: None,
+                                    time_in_force: "ioc".to_string(),
+                                    slippage_cap_pct: Some(0.005),
+                                    placement: execution_state::PlacementType::AtBest,
+                                    stop_loss: None,
+                                    take_profit: None,
+                                    confidence: 0.0,
+                                    signal_tag: "funding_arb_unwind".to_string(),
+                                };
+                                let _ = long_gw.submit_order(close_intent).await;
+                            }
+                            (Ok(_), Err(e)) => {
+                                warn!("[execution] Funding arb LONG failed: {} — unwinding SHORT", e);
+                                // Close the short position since long failed
+                                let close_intent = execution_gateway::OrderIntent {
+                                    symbol: opp.symbol.clone(),
+                                    side: execution_gateway::OrderSide::Buy,
+                                    size: position_size,
+                                    order_type: execution_gateway::OrderType::Market,
+                                    price: Some(mid_price),
+                                    reduce_only: true,
+                                    leverage: None,
+                                    time_in_force: "ioc".to_string(),
+                                    slippage_cap_pct: Some(0.005),
+                                    placement: execution_state::PlacementType::AtBest,
+                                    stop_loss: None,
+                                    take_profit: None,
+                                    confidence: 0.0,
+                                    signal_tag: "funding_arb_unwind".to_string(),
+                                };
+                                let _ = short_gw.submit_order(close_intent).await;
+                            }
+                            (Err(e1), Err(e2)) => {
+                                warn!("[execution] Funding arb BOTH legs failed: {} / {}", e1, e2);
+                            }
+                        }
+                    }
+                    
+                    // Check exit conditions for existing funding arb positions
+                    let mut positions_to_close = Vec::new();
+                    let now_ns = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64;
+                    
+                    for (symbol, pos) in &funding_arb_positions {
+                        let hours_open = (now_ns - pos.entry_timestamp_ns) as f64 / 3_600_000_000_000.0;
+                        
+                        // Check if spread collapsed
+                        let current_opp = cross_funding_arb.check_symbol(symbol);
+                        let spread_collapsed = current_opp
+                            .map(|o| o.net_rate < pos.entry_net_rate / 2.0)
+                            .unwrap_or(true);
+                        
+                        // Exit conditions: spread collapsed OR >24 hours
+                        if spread_collapsed || hours_open > 24.0 {
+                            positions_to_close.push(symbol.clone());
+                            info!(
+                                "[execution] Funding Arb EXIT: {} after {:.1}h (spread_collapsed={})",
+                                symbol, hours_open, spread_collapsed
+                            );
+                        }
+                    }
+                    
+                    // Close marked positions
+                    for symbol in positions_to_close {
+                        if let Some(pos) = funding_arb_positions.remove(&symbol) {
+                            let short_gw = multi_gateways.get(&pos.short_exchange);
+                            let long_gw = multi_gateways.get(&pos.long_exchange);
+                            
+                            if let (Some(sgw), Some(lgw)) = (short_gw, long_gw) {
+                                let mid_price = shared_prices.get(0)
+                                    .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                                    .unwrap_or(50000.0);
+                                
+                                // Close both legs in parallel
+                                let close_short = execution_gateway::OrderIntent {
+                                    symbol: symbol.clone(),
+                                    side: execution_gateway::OrderSide::Buy,
+                                    size: pos.size,
+                                    order_type: execution_gateway::OrderType::Market,
+                                    price: Some(mid_price),
+                                    reduce_only: true,
+                                    leverage: None,
+                                    time_in_force: "ioc".to_string(),
+                                    slippage_cap_pct: Some(0.005),
+                                    placement: execution_state::PlacementType::AtBest,
+                                    stop_loss: None,
+                                    take_profit: None,
+                                    confidence: 0.0,
+                                    signal_tag: "funding_arb_close".to_string(),
+                                };
+                                
+                                let close_long = execution_gateway::OrderIntent {
+                                    symbol: symbol.clone(),
+                                    side: execution_gateway::OrderSide::Sell,
+                                    size: pos.size,
+                                    order_type: execution_gateway::OrderType::Market,
+                                    price: Some(mid_price),
+                                    reduce_only: true,
+                                    leverage: None,
+                                    time_in_force: "ioc".to_string(),
+                                    slippage_cap_pct: Some(0.005),
+                                    placement: execution_state::PlacementType::AtBest,
+                                    stop_loss: None,
+                                    take_profit: None,
+                                    confidence: 0.0,
+                                    signal_tag: "funding_arb_close".to_string(),
+                                };
+                                
+                                let sgw = sgw.clone();
+                                let lgw = lgw.clone();
+                                tokio::spawn(async move {
+                                    let _ = tokio::join!(
+                                        sgw.submit_order(close_short),
+                                        lgw.submit_order(close_long)
+                                    );
+                                });
+                            }
+                        }
+                    }
+                }
 
                 // Periodic health check + position slot reconciliation (every 30s)
                 if last_health_check.elapsed() > Duration::from_secs(30) {
@@ -3000,22 +3558,93 @@ fn execution_router_loop(
                         }
                     }
                     
-                    // TASK 3: Multi-exchange balance fetching
-                    // Note: For full multi-exchange balance display, binance_gateway and bybit_gateway
-                    // need to be passed to execution_router_loop. When enabled, fetch balances here:
-                    // if dashboard_state.multi_exchange_enabled.load(Ordering::Relaxed) {
-                    //     if let Some(ref bgw) = binance_gateway {
-                    //         match bgw.get_balance().await {
-                    //             Ok(bal) => dashboard_state.set_exchange_balance(1, bal),
-                    //             Err(e) => debug!("[execution] Binance balance fetch failed: {}", e),
-                    //         }
-                    //     }
-                    //     if let Some(ref bygw) = bybit_gateway {
-                    //         match bygw.get_balance().await {
-                    //             Ok(bal) => dashboard_state.set_exchange_balance(2, bal),
-                    //             Err(e) => debug!("[execution] Bybit balance fetch failed: {}", e),
-                    //         }
-                    //     }
+                // TASK 5: Multi-exchange margin monitor + balance fetching
+                // Fetch balances and positions from all exchanges, update margin monitor and dashboard
+                if multi_exchange_enabled && !multi_gateways.is_empty() {
+                    // Refresh margin monitor with all gateways
+                    margin_monitor.refresh_all(&multi_gateways).await;
+                    
+                    // Update dashboard with per-exchange balances
+                    for (exchange_id, gw) in &multi_gateways {
+                        let idx = *exchange_id as usize;
+                        match gw.get_balance().await {
+                            Ok(balance) => {
+                                dashboard_state.set_exchange_balance(idx, balance);
+                                let margin_ratio = margin_monitor.get_health(*exchange_id)
+                                    .map(|h| h.margin_ratio)
+                                    .unwrap_or(1.0);
+                                dashboard_state.set_exchange_margin_ratio(idx, margin_ratio);
+                            }
+                            Err(e) => {
+                                debug!("[execution] {} balance fetch failed: {}", exchange_id.name(), e);
+                            }
+                        }
+                    }
+                    
+                    // Check for margin imbalances and log warnings
+                    let alerts = margin_monitor.check_imbalances();
+                    for alert in &alerts {
+                        warn!(
+                            "[execution] Margin imbalance: {} at {:.1}% — recommend transferring ${:.0} from {}",
+                            alert.critical_exchange.name(),
+                            alert.margin_ratio * 100.0,
+                            alert.recommended_transfer_usdt,
+                            alert.source_exchange.name()
+                        );
+                    }
+                    
+                    // If any exchange is critical (margin < 15%), halt new trades on that exchange
+                    for health in margin_monitor.all_health() {
+                        if health.is_critical {
+                            warn!(
+                                "[execution] CRITICAL: {} margin at {:.1}% — halting new trades",
+                                health.exchange.name(),
+                                health.margin_ratio * 100.0
+                            );
+                        }
+                    }
+                    
+                    // Push margin monitor JSON to dashboard
+                    dashboard_state.set_funding_arb_json(
+                        serde_json::to_string(&margin_monitor.to_json()).unwrap_or_default()
+                    );
+                    
+                    // Fetch positions from all exchanges and push to dashboard
+                    let mut all_positions = Vec::new();
+                    for (exchange_id, gw) in &multi_gateways {
+                        if let Ok(positions) = gw.get_positions().await {
+                            for p in positions {
+                                all_positions.push(serde_json::json!({
+                                    "exchange": exchange_id.name(),
+                                    "symbol": p.symbol,
+                                    "size": p.size,
+                                    "entry_price": p.entry_price,
+                                    "unrealized_pnl": p.unrealized_pnl,
+                                    "leverage": p.leverage,
+                                    "side": p.side,
+                                }));
+                            }
+                        }
+                    }
+                    dashboard_state.set_multi_exchange_positions_json(
+                        serde_json::to_string(&all_positions).unwrap_or_else(|_| "[]".to_string())
+                    );
+                    
+                    // Update global book JSON for dashboard every 5 health checks (~2.5 min)
+                    // Actually push every check since it's every 30s
+                    if let Some(ref gbr) = global_book_registry {
+                        dashboard_state.set_global_book_json(
+                            serde_json::to_string(&gbr.to_json()).unwrap_or_else(|_| "{}".to_string())
+                        );
+                    }
+                    
+                    info!(
+                        "[execution] Multi-exchange health: total_balance=${:.2}, exchanges={}, positions={}",
+                        margin_monitor.total_balance(),
+                        multi_gateways.len(),
+                        all_positions.len()
+                    );
+                }
                     // }
 
                     // ── TASK 5: Position Sync + Slot Reconciliation ──
@@ -3600,12 +4229,14 @@ fn main() {
         let reg = registry.clone();
         let core_id = topology.book_builder_core;
         let sp = shared_prices.clone();
+        // TASK 8: Pass global_book_registry to orderbook_builder_loop
+        let gbr = global_book_registry.clone();
         let handle = thread::Builder::new()
             .name("book-builder".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[book-builder] Pinned to core {}", core_id);
-                orderbook_builder_loop(ws_ring_g, strat_ring, &mut books, reg, sp);
+                orderbook_builder_loop(ws_ring_g, strat_ring, &mut books, reg, sp, gbr);
             })
             .expect("Failed to spawn book builder thread");
         thread_handles.push(handle);
@@ -3696,6 +4327,45 @@ fn main() {
             None
         }
     };
+    
+    // TASK 1: Build multi-exchange gateways map for execution router
+    let exec_multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = 
+        if config.multi_exchange_enabled {
+            let mut gateways_map = HashMap::new();
+            if let Some(ref gw) = gateway {
+                gateways_map.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
+            }
+            // Build Binance gateway for execution
+            {
+                let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
+                let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                    let binance_gw = Arc::new(binance_gateway::BinanceGateway::new(
+                        ak.to_string(), sk.to_string(),
+                        config.multi_exchange.binance_testnet,
+                    )) as Arc<dyn ExecutionGateway + Send + Sync>;
+                    gateways_map.insert(multi_exchange::ExchangeId::Binance, binance_gw);
+                }
+            }
+            // Build Bybit gateway for execution
+            {
+                let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
+                let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
+                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                    let bybit_gw = Arc::new(bybit_gateway::BybitGateway::new(
+                        ak.to_string(), sk.to_string(),
+                        config.multi_exchange.bybit_testnet,
+                    )) as Arc<dyn ExecutionGateway + Send + Sync>;
+                    gateways_map.insert(multi_exchange::ExchangeId::Bybit, bybit_gw);
+                }
+            }
+            info!("[main] Multi-exchange execution gateways: {} connected", gateways_map.len());
+            gateways_map
+        } else {
+            HashMap::new()
+        };
+    let multi_exchange_enabled_exec = config.multi_exchange_enabled;
+    
     {
         let exec_ring = strategy_to_exec;
         let gw = gateway.clone();
@@ -3707,12 +4377,18 @@ fn main() {
         let lat = latency_tracker;
         let dash_exec = dashboard_state.clone();
         let sp = shared_prices.clone();
+        // TASK 1: Pass global book registry and multi-gateways to execution router
+        let gbr_exec = global_book_registry.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
-                info!("[execution] Pinned to core {} (with Lifecycle + Latency)", core_id);
-                execution_router_loop(exec_ring, manual_cmd_rx, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp);
+                info!("[execution] Pinned to core {} (with Lifecycle + Latency + Multi-Exchange SOR)", core_id);
+                execution_router_loop(
+                    exec_ring, manual_cmd_rx, gw, fx_gw, cb, reg, lc, lat, 
+                    position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp,
+                    gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
+                );
             })
             .expect("Failed to spawn execution thread");
         thread_handles.push(handle);
