@@ -1,0 +1,357 @@
+Note : You must add proper working code according to the prompt with full planning and real working code . Take your proper time to understand the current code completely.
+
+PROMPT: Complete All Missing Multi-Exchange Institutional Features
+CODEBASE CONTEXT
+You are working on a Rust institutional crypto trading bot at rust_engine/src/. The multi-exchange module lives at rust_engine/src/multi_exchange/. The bot connects to Gate.io (primary), Binance, and Bybit simultaneously when USE_MULTI_EXCHANGE=on.
+What already exists and works:
+
+global_book.rs: Consolidated Global Order Book with fee+latency adjustment, merge logic, cross-exchange spread detection. COMPLETE.
+ws_ingestion_multi.rs: Binance and Bybit WebSocket L2 orderbook ingestion into GlobalBookRegistry. COMPLETE.
+multi_exchange/sor.rs: Smart Order Router with global book sweeping, multi-venue splitting, single-venue fallback. COMPLETE but DISCONNECTED from execution.
+multi_exchange/funding_arb.rs: Cross-exchange funding rate fetching (Gate.io, Binance, Bybit REST APIs), opportunity scanning, net rate/APR calculation. COMPLETE but DISCONNECTED from execution.
+multi_exchange/margin_monitor.rs: Margin health tracking, imbalance detection, delta neutrality calculation, refresh_all() method. COMPLETE but DISCONNECTED from execution.
+binance_gateway.rs: Full ExecutionGateway impl (submit_order, cancel, get_position, get_balance, set_leverage). COMPLETE.
+bybit_gateway.rs: Full ExecutionGateway impl. COMPLETE.
+smart_router.rs: Legacy single-exchange cost-model router (used in execution_router_loop). COMPLETE but only has Gate.io venue.
+dashboard_server.rs: Multi-exchange API endpoints exist (/api/multi-exchange/*) but return empty/stub data. PARTIAL.
+
+What is MISSING (your tasks):
+
+TASK 1: Wire SOR Into the Execution Router (Parallel Multi-Exchange Order Execution)
+Problem: The execution_router_loop() in main.rs currently uses the legacy smart_router::SmartOrderRouter (single-venue Gate.io only). The multi-exchange multi_exchange::sor::SmartOrderRouter exists with full global-book sweeping logic but is never called. Orders always go to Gate.io regardless of USE_MULTI_EXCHANGE setting.
+What to implement:
+In main.rs, the execution_router_loop() function needs to:
+
+Accept the GlobalBookRegistry, the multi-exchange sor::SmartOrderRouter, and a HashMap<ExchangeId, Arc<dyn ExecutionGateway>> of all exchange gateways.
+
+When USE_MULTI_EXCHANGE=on and an OrderCommand arrives from the strategy ring:
+
+Read the GlobalOrderBook for this symbol from the GlobalBookRegistry
+Call multi_exchange::sor::SmartOrderRouter::route() with the global book, side, size, mid_price, and symbol
+The SorResult contains Vec<OrderSlice> with per-exchange allocations
+For each OrderSlice, build an OrderIntent and submit it to the corresponding exchange gateway in parallel using tokio::join! or futures::future::join_all
+Aggregate all OrderResults: sum filled_size, compute weighted avg_fill_price, sum fees
+If any slice fails, log the failure but don't roll back successful slices (partial fills are acceptable)
+
+
+The SorResult should also be pushed to dashboard_state for the SOR preview endpoint.
+
+
+Key code locations:
+
+main.rs line ~850: execution_router_loop() function signature. Add parameters: global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>, multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>, multi_sor: Option<multi_exchange::sor::SmartOrderRouter>
+main.rs line ~1050: Inside the if let Some(cmd) = exec_ring.try_pop() block, after Step 3 (SmartOrderRouter), add a branch: if global_book_registry.is_some() and multi-exchange is enabled, use the multi-exchange SOR instead of the legacy single-venue router
+main.rs line ~1350: Where execution_router_loop is spawned, pass the GlobalBookRegistry (currently stored as global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>) and the multi_gateways HashMap
+
+Parallel execution pattern:
+
+
+Insert at cursor
+// For each slice from SOR, spawn concurrent submissions
+let mut futures = Vec::new();
+for slice in &sor_result.slices {
+    let gw = multi_gateways.get(&slice.exchange).cloned();
+    if let Some(gw) = gw {
+        let intent = build_intent_from_slice(slice, &cmd);
+        futures.push(async move {
+            (slice.exchange, gw.submit_order(intent).await)
+        });
+    }
+}
+let results = futures::future::join_all(futures).await;
+
+
+TASK 2: Wire Cross-Exchange Funding Rate Arbitrage Into the Execution Loop
+Problem: multi_exchange::funding_arb::CrossExchangeFundingArb has complete logic for fetching rates from all 3 exchanges and scanning for opportunities, but it's never instantiated or called. The existing funding_rate::FundingRateMonitor in strategy_evaluator_loop only checks Gate.io single-exchange funding.
+What to implement:
+
+In main.rs, instantiate CrossExchangeFundingArb when USE_MULTI_EXCHANGE=on.
+
+In the execution_router_loop(), add a periodic task (every 60 seconds) that:
+
+Calls cross_funding_arb.fetch_all_rates() for each configured symbol
+Calls cross_funding_arb.scan_opportunities()
+For each actionable opportunity:
+Open a SHORT position on opp.short_exchange (the exchange with high funding rate, where shorts receive payment)
+Simultaneously open a LONG position of equal size on opp.long_exchange
+Both positions must be submitted in parallel via tokio::join!
+Track the pair as a "funding arb position" with entry timestamp, entry prices, and exchange IDs
+
+
+Push the opportunities JSON to dashboard_state.set_funding_arb_json()
+
+
+Add exit logic for funding arb positions:
+
+Exit when: net funding rate spread drops below min_net_rate / 2 (spread collapsed), OR position has been open > 24 hours, OR unrealized loss on either leg exceeds 2%
+Exit means: close BOTH legs simultaneously (market orders on both exchanges)
+Track realized PnL from funding payments collected
+
+
+The funding arb positions must be delta-neutral: if one leg partially fills, immediately cancel the other leg or adjust size to match.
+
+
+Key data flow:
+
+
+Insert at cursor
+Every 60s: fetch_all_rates() -> scan_opportunities() -> filter actionable
+  -> for each: submit SHORT on exchange_A + LONG on exchange_B (parallel)
+  -> track in funding_arb_positions HashMap
+Every tick: check exit conditions on tracked positions
+  -> if exit: close both legs simultaneously
+
+
+TASK 3: Implement Cross-Exchange Market Making (Hedged Maker Strategy)
+Problem: This strategy is completely missing. The concept: place passive limit orders (maker) on a wide-spread exchange (e.g., Gate.io or Bybit), and the instant they fill, fire an aggressive market order (taker) on a liquid exchange (Binance) to hedge.
+What to implement:
+Create a new file rust_engine/src/multi_exchange/cross_exchange_mm.rs:
+
+CrossExchangeMarketMaker struct with:
+
+maker_exchange: ExchangeId (where we post passive orders)
+hedge_exchange: ExchangeId (where we hedge fills immediately)
+active_maker_orders: HashMap<String, MakerOrder> tracking resting orders
+hedge_positions: Vec<HedgePosition> tracking hedged pairs
+
+
+Strategy logic:
+
+Read the GlobalOrderBook to find the exchange with the widest spread (this is the maker venue)
+Place a passive BUY limit order at best_bid + 1 tick on the maker venue
+Place a passive SELL limit order at best_ask - 1 tick on the maker venue
+When a fill notification arrives (via WebSocket private stream or polling):
+If BUY filled: immediately submit SELL market order on hedge exchange
+If SELL filled: immediately submit BUY market order on hedge exchange
+
+
+Profit = maker spread captured minus hedge taker fee minus maker rebate earned
+
+
+Fill detection: Since the current architecture uses REST polling (not private WS), implement a fast polling loop (every 500ms) that checks order status on the maker exchange. When a fill is detected, the hedge must fire within 100ms.
+
+Risk controls:
+
+Maximum inventory: 3 contracts per symbol (if hedge fails, don't accumulate naked inventory)
+If hedge fails after 3 retries, close the maker position at market on the maker exchange
+Pause market making if spread narrows below 3 bps (not profitable after fees)
+Pause if GlobalOrderBook.is_exchange_stale() returns true for either venue
+
+
+Register in multi_exchange/mod.rs:
+
+
+Insert at cursor
+pub mod cross_exchange_mm;
+pub use cross_exchange_mm::CrossExchangeMarketMaker;
+
+
+Wire into main.rs: Spawn as a dedicated tokio task when USE_MULTI_EXCHANGE=on. It needs access to the GlobalBookRegistry and the multi-exchange gateways HashMap.
+
+
+
+TASK 4: Implement Statistical Arbitrage (Cross-Exchange Basis Trading)
+Problem: Completely missing. The concept: when the price spread between the same perpetual on two exchanges deviates beyond 2 standard deviations from the historical mean, short the overpriced instrument and buy the underpriced one, betting on mean reversion.
+What to implement:
+Create a new file rust_engine/src/multi_exchange/stat_arb.rs:
+
+StatArbEngine struct with:
+
+spread_history: HashMap<(ExchangeId, ExchangeId, String), VecDeque<f64>> - rolling window of mid-price spreads between exchange pairs per symbol
+window_size: usize (default 1000 samples, ~16 minutes at 1 sample/sec)
+entry_threshold_sigma: f64 (default 2.0 standard deviations)
+exit_threshold_sigma: f64 (default 0.5 standard deviations - close when spread reverts to within 0.5 sigma)
+active_arb_positions: Vec<StatArbPosition>
+
+
+On every global book merge (called from the book builder or a dedicated thread):
+
+For each symbol, compute the mid-price spread between every exchange pair: spread = mid_A - mid_B
+Push to spread_history
+Compute rolling mean and standard deviation
+If |spread - mean| > entry_threshold_sigma * std_dev AND no active position exists:
+If spread > mean + 2*sigma: SHORT on exchange_A (overpriced), LONG on exchange_B (underpriced)
+If spread < mean - 2*sigma: LONG on exchange_A (underpriced), SHORT on exchange_B (overpriced)
+Submit both legs simultaneously via tokio::join!
+
+
+
+
+Exit logic:
+
+When spread reverts to within exit_threshold_sigma * std_dev of the mean: close both legs
+Hard stop: if spread moves to 4 sigma against the position, close both legs (stop loss)
+Time stop: close after 4 hours if spread hasn't reverted
+
+
+Position sizing: Use 2% of total equity per stat arb trade, split equally between the two legs.
+
+Register and wire same as Task 3.
+
+
+
+TASK 5: Wire Margin Monitor Into Execution Loop + Dashboard
+Problem: CrossVenueMarginMonitor has a complete refresh_all() method that accepts a HashMap<ExchangeId, Arc<dyn ExecutionGateway>> and fetches balances, but it's never called. Dashboard shows 0 for all exchange balances.
+What to implement:
+
+In main.rs, instantiate CrossVenueMarginMonitor when USE_MULTI_EXCHANGE=on.
+
+In execution_router_loop(), every 30 seconds (inside the existing health check block):
+
+Call margin_monitor.refresh_all(&multi_gateways).await
+Push results to dashboard: dashboard_state.set_exchange_balance(idx, balance) for each exchange
+Call margin_monitor.check_imbalances() and if any alerts exist:
+Log them at WARN level
+Push to dashboard_state.set_funding_arb_json() (or create a new margin_alerts_json field)
+If any exchange is critical (margin_ratio < 15%), halt new trades on that exchange
+
+
+
+
+Also fetch positions from all exchanges and push to dashboard_state.set_multi_exchange_positions_json():
+
+
+Insert at cursor
+let mut all_positions = Vec::new();
+for (exchange_id, gw) in &multi_gateways {
+    if let Ok(positions) = gw.get_positions().await {
+        for p in positions {
+            all_positions.push(json!({
+                "exchange": exchange_id.name(),
+                "symbol": p.symbol,
+                "size": p.size,
+                "entry_price": p.entry_price,
+                "unrealized_pnl": p.unrealized_pnl,
+                "leverage": p.leverage,
+                "side": p.side,
+            }));
+        }
+    }
+}
+dashboard_state.set_multi_exchange_positions_json(serde_json::to_string(&all_positions).unwrap_or("[]".into()));
+
+
+Push the GlobalBookRegistry.to_json() to dashboard_state.set_global_book_json() every 5 seconds so the dashboard /api/multi-exchange/global-book endpoint returns real data.
+
+
+
+TASK 6: Connect the Legacy SmartOrderRouter to Multi-Exchange Venues
+Problem: The smart_router.rs (legacy, used in ExecutionContext) only has a single Gate.io venue. When multi-exchange is on, it should include Binance and Bybit venues so even the legacy routing path considers all exchanges.
+What to implement:
+In main.rs, when building the ExecutionContext inside execution_router_loop():
+
+
+Insert at cursor
+let smart_router_inst = if config_multi_exchange_enabled {
+    let mut venues = vec![
+        smart_router::VenueState { exchange_id: 0, name: "gateio".into(), spread_bps: 2, taker_fee_bps: 5, maker_fee_bps: -1, bid_depth_usdt: 100_000.0, ask_depth_usdt: 100_000.0, ..Default::default() },
+        smart_router::VenueState { exchange_id: 1, name: "binance".into(), spread_bps: 1, taker_fee_bps: 4, maker_fee_bps: -2, bid_depth_usdt: 500_000.0, ask_depth_usdt: 500_000.0, ..Default::default() },
+        smart_router::VenueState { exchange_id: 2, name: "bybit".into(), spread_bps: 2, taker_fee_bps: 6, maker_fee_bps: -1, bid_depth_usdt: 200_000.0, ask_depth_usdt: 200_000.0, ..Default::default() },
+    ];
+    smart_router::SmartOrderRouter::new(venues)
+} else {
+    smart_router::SmartOrderRouter::default_venues()
+};
+
+Also, periodically update the legacy venue states from the GlobalBookRegistry data (every 1 second in the idle loop):
+
+
+Insert at cursor
+if let Some(ref gbr) = global_book_registry {
+    for sym_id in gbr.all_symbol_ids() {
+        if let Some(book) = gbr.get(sym_id) {
+            let book = book.read();
+            for exchange in multi_exchange::ExchangeId::all() {
+                if let Some(snap) = book.get_exchange_snapshot(exchange) {
+                    let spread = if snap.best_bid_fp > 0 {
+                        let mid = (snap.best_bid_fp + snap.best_ask_fp) / 2;
+                        ((snap.best_ask_fp - snap.best_bid_fp) * 10000) / mid.max(1)
+                    } else { 100 };
+                    exec_ctx.smart_router.update_venue(
+                        exchange as u8,
+                        spread,
+                        /* bid_depth */ 100_000.0, // TODO: compute from levels
+                        /* ask_depth */ 100_000.0,
+                    );
+                }
+            }
+        }
+    }
+}
+
+
+TASK 7: Fix Dashboard SOR Preview to Use Real Global Book Data
+Problem: The /api/multi-exchange/sor-preview endpoint in dashboard_server.rs returns hardcoded mock data. It should read from the actual GlobalBookRegistry.
+What to implement:
+
+Add global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> to the AppState struct in dashboard_server.rs.
+
+Pass it through from main.rs when spawning the dashboard server.
+
+In api_multi_exchange_sor_preview(), use the real SOR:
+
+
+Insert at cursor
+if let Some(ref gbr) = state.global_book_registry {
+    let sym_id = state.symbol_registry.get_id(&normalize_gateio_symbol(&params.symbol));
+    if let Some(book_arc) = gbr.get(sym_id) {
+        let book = book_arc.read();
+        let sor = multi_exchange::sor::SmartOrderRouter::new(multi_exchange::sor::SorConfig::default());
+        let side = if params.side == "buy" { OrderSide::Buy } else { OrderSide::Sell };
+        let mid = book.global_mid_fp().unwrap_or(0);
+        let size_fp = (params.size_usdt * 1e8) as i64; // approximate
+        let result = sor.route(&book, side, size_fp, mid, &params.symbol);
+        return Json(result.to_json());
+    }
+}
+
+
+
+
+TASK 8: Add Gate.io Book Data to GlobalBookRegistry
+Problem: The GlobalBookRegistry only receives data from Binance and Bybit WS ingestion threads. Gate.io's orderbook data flows through the separate ws_ingestion_loop_gateio -> FlatOrderBook pipeline and never reaches the GlobalBookRegistry. This means the global book is missing Gate.io's liquidity.
+What to implement:
+In main.rs, in the orderbook_builder_loop() function, after applying a delta to the FlatOrderBook and before pushing the BookSnapshot to the strategy ring, also update the GlobalBookRegistry with Gate.io's current BBO:
+
+Pass global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> to orderbook_builder_loop().
+
+After book.apply_delta_tracked(...), extract the current best bid/ask and push to the global book:
+
+
+Insert at cursor
+if let Some(ref gbr) = global_book_registry {
+    if let (Some((bid, bid_qty)), Some((ask, ask_qty))) = (book.best_bid(), book.best_ask()) {
+        let snapshot = multi_exchange::global_book::ExchangeBookSnapshot {
+            exchange: multi_exchange::ExchangeId::GateIo,
+            symbol_id: update.symbol_id,
+            best_bid_fp: bid.raw(),
+            best_ask_fp: ask.raw(),
+            bid_levels: vec![(bid.raw(), bid_qty.raw())],
+            ask_levels: vec![(ask.raw(), ask_qty.raw())],
+            sequence: update.sequence,
+            timestamp_ns: update.recv_ns,
+        };
+        let gbook = gbr.get_or_create(update.symbol_id);
+        gbook.write().update_exchange_snapshot(snapshot);
+    }
+}
+
+For a more complete picture, extract the top 20 levels from the FlatOrderBook instead of just BBO. The FlatOrderBook has methods to iterate levels.
+
+
+
+SUMMARY OF NEW FILES TO CREATE
+
+rust_engine/src/multi_exchange/cross_exchange_mm.rs (Task 3)
+rust_engine/src/multi_exchange/stat_arb.rs (Task 4)
+
+SUMMARY OF FILES TO MODIFY
+
+rust_engine/src/main.rs (Tasks 1, 2, 5, 6, 8) - execution_router_loop signature, multi-exchange wiring, margin monitor, Gate.io global book feed
+rust_engine/src/multi_exchange/mod.rs (Tasks 3, 4) - register new modules
+rust_engine/src/dashboard_server.rs (Task 7) - real SOR preview, pass GlobalBookRegistry
+rust_engine/src/smart_router.rs (Task 6) - add Default impl for VenueState
+
+PRIORITY ORDER
+Task 8 (Gate.io into GlobalBook) > Task 1 (SOR wiring) > Task 5 (Margin monitor + dashboard data) > Task 2 (Funding arb execution) > Task 7 (Dashboard SOR preview) > Task 6 (Legacy router venues) > Task 3 (Cross-exchange MM) > Task 4 (Stat arb)
+Task 8 must come first because without Gate.io data in the GlobalBook, the SOR and all cross-exchange strategies have an incomplete view of liquidity.
