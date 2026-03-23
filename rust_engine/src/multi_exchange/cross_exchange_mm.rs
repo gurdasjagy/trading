@@ -274,7 +274,7 @@ impl CrossExchangeMarketMaker {
                 leverage: None,
                 time_in_force: "poc".to_string(),
                 slippage_cap_pct: None,
-                placement: PlacementType::PassiveJoin,
+                placement: PlacementType::AtBest,
                 stop_loss: None,
                 take_profit: None,
                 confidence: 0.0,
@@ -295,7 +295,7 @@ impl CrossExchangeMarketMaker {
                 leverage: None,
                 time_in_force: "poc".to_string(),
                 slippage_cap_pct: None,
-                placement: PlacementType::PassiveJoin,
+                placement: PlacementType::AtBest,
                 stop_loss: None,
                 take_profit: None,
                 confidence: 0.0,
@@ -343,18 +343,22 @@ impl CrossExchangeMarketMaker {
         fill_size: i64,
         fill_price: f64,
     ) -> Option<OrderIntent> {
+        // Snapshot order for hedge generation without holding mutable borrow.
+        let (inventory_change, hedge) = {
+            let order_view = self.active_maker_orders.get(order_id)?;
+            let inventory_change = match order_view.side {
+                OrderSide::Buy => fill_size,
+                OrderSide::Sell => -fill_size,
+            };
+            let hedge = self.generate_hedge_order(order_view, fill_size);
+            (inventory_change, hedge)
+        };
+
         let order = self.active_maker_orders.get_mut(order_id)?;
         order.filled_size += fill_size;
         
         // Update inventory
-        let inventory_change = match order.side {
-            OrderSide::Buy => fill_size,
-            OrderSide::Sell => -fill_size,
-        };
         *self.inventory.entry(order.symbol.clone()).or_insert(0) += inventory_change;
-
-        // Generate hedge order
-        let hedge = self.generate_hedge_order(order, fill_size);
 
         // Update status
         if order.filled_size >= order.original_size {
