@@ -229,14 +229,14 @@ pub async fn run_binance_ws_ingestion(
 
 /// Spawn a Bybit v5 WebSocket ingestion task.
 ///
-/// Subscribes to `orderbook.20.{SYMBOL}` for each configured symbol.
+/// Subscribes to `orderbook.50.{SYMBOL}` for each configured symbol.
 /// Parses the Bybit v5 orderbook format:
-///   { "topic": "orderbook.20.BTCUSDT", "type": "snapshot"|"delta",
+///   { "topic": "orderbook.50.BTCUSDT", "type": "snapshot"|"delta",
 ///     "data": { "b": [["price", "qty"], ...], "a": [...] } }
 /// Updates the GlobalBookRegistry with ExchangeBookSnapshot on each message.
 ///
 /// Bybit v5 uses a subscription message after connection:
-///   { "op": "subscribe", "args": ["orderbook.20.BTCUSDT", ...] }
+///   { "op": "subscribe", "args": ["orderbook.50.BTCUSDT", ...] }
 ///
 /// Implements automatic reconnection with exponential backoff.
 pub async fn run_bybit_ws_ingestion(
@@ -262,7 +262,7 @@ pub async fn run_bybit_ws_ingestion(
                     .map(|s| {
                         // "BTC_USDT" -> "BTCUSDT"
                         let bybit_sym = s.replace('_', "").to_uppercase();
-                        format!("orderbook.20.{}", bybit_sym)
+                        format!("orderbook.50.{}", bybit_sym)
                     })
                     .collect();
 

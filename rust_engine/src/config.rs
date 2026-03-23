@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+use serde::{de::{self, Deserializer}, Deserialize, Serialize};
 
 use crate::flat_book::FlatBookConfig;
 use crate::orderbook::RustOrderBook;
@@ -326,6 +326,38 @@ fn default_imbalance_threshold() -> f64 { 0.03 }
 fn default_vpin_bucket_size() -> f64 { 100_000.0 }
 fn default_trailing_stop_atr_multiplier() -> f64 { 2.0 }
 fn default_max_leverage_pair() -> i32 { 20 }
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PairProfilesToml {
+    Map(HashMap<String, PairProfile>),
+    Seq(Vec<PairProfile>),
+}
+
+fn deserialize_pair_profiles<'de, D>(deserializer: D) -> Result<HashMap<String, PairProfile>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let input = Option::<PairProfilesToml>::deserialize(deserializer)?;
+    let Some(input) = input else {
+        return Ok(HashMap::new());
+    };
+
+    match input {
+        PairProfilesToml::Map(map) => Ok(map),
+        PairProfilesToml::Seq(list) => {
+            let mut map = HashMap::new();
+            for profile in list {
+                let key = profile.symbol.clone();
+                if map.contains_key(&key) {
+                    return Err(de::Error::custom(format!("duplicate pair_profiles symbol '{}'", key)));
+                }
+                map.insert(key, profile);
+            }
+            Ok(map)
+        }
+    }
+}
 
 fn default_tick_size() -> f64 { 0.1 }
 fn default_max_levels() -> usize { 10_000 }
@@ -918,7 +950,7 @@ pub struct EngineConfig {
     #[serde(default)]
     pub shared_mem: SharedMemConfig,
     /// Task 8: Per-symbol pair profiles (Phase 2 Feature 8).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_pair_profiles")]
     pub pair_profiles: HashMap<String, PairProfile>,
     // === Institutional Features Configuration ===
     /// Feature 1: Hardware Timestamps
@@ -1086,4 +1118,43 @@ pub fn build_flat_book_configs(config: &EngineConfig, registry: &SymbolRegistry)
     }
     
     configs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct PairProfileWrapper {
+        #[serde(default, deserialize_with = "deserialize_pair_profiles")]
+        pair_profiles: HashMap<String, PairProfile>,
+    }
+
+    #[test]
+    fn deserializes_pair_profiles_from_array_of_tables() {
+        let toml_str = r#"
+            [[pair_profiles]]
+            symbol = "BTC_USDT"
+            imbalance_threshold = 0.05
+            vpin_bucket_size = 500000.0
+            trailing_stop_atr_multiplier = 3.0
+            max_leverage = 20
+
+            [[pair_profiles]]
+            symbol = "ETH_USDT"
+            imbalance_threshold = 0.03
+            vpin_bucket_size = 200000.0
+            trailing_stop_atr_multiplier = 2.0
+            max_leverage = 25
+        "#;
+
+        let wrapper: PairProfileWrapper = toml::from_str(toml_str).expect("toml should parse");
+        assert_eq!(wrapper.pair_profiles.len(), 2);
+        assert!(wrapper.pair_profiles.contains_key("BTC_USDT"));
+        assert!(wrapper.pair_profiles.contains_key("ETH_USDT"));
+        assert_eq!(
+            wrapper.pair_profiles["BTC_USDT"].imbalance_threshold,
+            0.05
+        );
+    }
 }
