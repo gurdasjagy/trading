@@ -1,0 +1,921 @@
+CODING AGENT TASK: Fix & Upgrade Rust Trading Engine
+OVERVIEW OF THE CODEBASE
+This is a crypto trading bot with two main components:
+
+crypto_trading_bot/ — Python side: AI analysis, regime detection, ML training, dashboard templates. Config lives at crypto_trading_bot/.env.example (copy to .env for use).
+rust_engine/ — Rust side: The SOLE trading master. Handles WS ingestion → orderbook → strategy → execution. Python is only a cold-path helper (writes regime weights to /dev/shm). Rust does NOT depend on Python for trade signals.
+
+Key files to understand:
+
+rust_engine/src/main.rs — Engine entry point, all thread spawning, config loading
+rust_engine/src/config.rs — All config structs including MultiExchangeConfig
+rust_engine/src/binance_gateway.rs — Binance REST execution gateway
+rust_engine/src/bybit_gateway.rs — Bybit REST execution gateway
+rust_engine/src/multi_exchange/ws_ingestion_multi.rs — Binance + Bybit WS ingestion
+rust_engine/src/strategy_engine.rs — Rust-native strategy (VPIN + orderbook imbalance). Rust generates its own signals. Python does NOT send signals.
+rust_engine/src/dashboard_server.rs — Axum HTTP server for the web dashboard
+
+
+TASK 1: FIX BINANCE API ENDPOINTS (TESTNET + LIVE)
+Problem
+The Binance gateway uses some outdated or incorrect endpoint URLs. The correct current endpoints are:
+Binance USDT-M Futures (Live):
+
+REST base: https://fapi.binance.com
+WebSocket streams: wss://fstream.binance.com/stream
+
+Binance USDT-M Futures (Testnet/Demo):
+
+REST base: https://testnet.binancefuture.com
+WebSocket streams: wss://stream.binancefuture.com/stream
+
+Binance Futures Testnet signup: https://testnet.binancefuture.com/
+What to fix in rust_engine/src/binance_gateway.rs
+The constants at the top are already correct:
+
+Copy to clipboard
+Insert at cursor
+const BINANCE_FUTURES_BASE_URL: &str = "https://fapi.binance.com";
+const BINANCE_FUTURES_TESTNET_URL: &str = "https://testnet.binancefuture.com";
+
+These are correct. Do NOT change them.
+However, verify the base_url() method correctly switches based on self.testnet:
+
+Copy to clipboard
+Insert at cursor
+fn base_url(&self) -> &str {
+    if self.testnet {
+        BINANCE_FUTURES_TESTNET_URL  // "https://testnet.binancefuture.com"
+    } else {
+        BINANCE_FUTURES_BASE_URL     // "https://fapi.binance.com"
+    }
+}
+
+This is already correct. Confirm it is exactly like this.
+What to fix in rust_engine/src/multi_exchange/ws_ingestion_multi.rs
+The WS URL constants at the top are:
+
+Copy to clipboard
+Insert at cursor
+const BINANCE_WS_LIVE: &str = "wss://fstream.binance.com/stream";
+const BINANCE_WS_TESTNET: &str = "wss://stream.binancefuture.com/stream";
+
+These are correct. Do NOT change them.
+Verify the run_binance_ws_ingestion function uses:
+
+Copy to clipboard
+Insert at cursor
+let ws_url = if config.testnet { BINANCE_WS_TESTNET } else { BINANCE_WS_LIVE };
+
+This is already correct. Confirm it is exactly like this.
+
+TASK 2: FIX BYBIT API ENDPOINTS (TESTNET + LIVE)
+Problem
+The Bybit gateway needs to use the correct v5 API endpoints.
+Bybit v5 Unified (Live):
+
+REST base: https://api.bybit.com
+WebSocket (linear perpetuals): wss://stream.bybit.com/v5/public/linear
+
+Bybit v5 Unified (Testnet/Demo):
+
+REST base: https://api-testnet.bybit.com
+WebSocket (linear perpetuals): wss://stream-testnet.bybit.com/v5/public/linear
+
+Bybit Testnet signup: https://testnet.bybit.com/
+What to fix in rust_engine/src/bybit_gateway.rs
+The constant at the top is:
+
+Copy to clipboard
+Insert at cursor
+const BYBIT_BASE_URL: &str = "https://api.bybit.com";
+
+The base_url() method is:
+
+Copy to clipboard
+Insert at cursor
+fn base_url(&self) -> &str {
+    if self.testnet {
+        "https://api-testnet.bybit.com"
+    } else {
+        BYBIT_BASE_URL
+    }
+}
+
+These are correct. Confirm they are exactly like this.
+What to fix in rust_engine/src/multi_exchange/ws_ingestion_multi.rs
+The WS URL constants are:
+
+Copy to clipboard
+Insert at cursor
+const BYBIT_WS_LIVE: &str = "wss://stream.bybit.com/v5/public/linear";
+const BYBIT_WS_TESTNET: &str = "wss://stream-testnet.bybit.com/v5/public/linear";
+
+These are correct. Confirm they are exactly like this.
+Verify the run_bybit_ws_ingestion function uses:
+
+Copy to clipboard
+Insert at cursor
+let ws_url = if config.testnet { BYBIT_WS_TESTNET } else { BYBIT_WS_LIVE };
+
+This is already correct. Confirm it is exactly like this.
+
+TASK 3: FIX TESTNET/LIVE KEY ROUTING IN main.rs
+Problem
+When USE_MULTI_EXCHANGE=on and BINANCE_TESTNET=true, the engine must use BINANCE_API_KEY and BINANCE_SECRET_KEY from .env as testnet keys and connect to testnet endpoints. When BINANCE_TESTNET=false, those same keys are treated as live keys and connect to live endpoints.
+Same logic for Bybit: BYBIT_TESTNET=true → use BYBIT_API_KEY/BYBIT_SECRET_KEY as testnet keys on testnet endpoints. BYBIT_TESTNET=false → live keys on live endpoints.
+Current behavior in main.rs apply_env_overrides()
+The current code in apply_env_overrides() already reads:
+
+Copy to clipboard
+Insert at cursor
+cfg.multi_exchange.binance_api_key = std::env::var("BINANCE_API_KEY")
+    .ok().map(|s| s.trim().to_string());
+cfg.multi_exchange.binance_secret_key = std::env::var("BINANCE_SECRET_KEY")
+    .ok().map(|s| s.trim().to_string());
+cfg.multi_exchange.binance_testnet = std::env::var("BINANCE_TESTNET")
+    .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+    .unwrap_or(false);
+
+cfg.multi_exchange.bybit_api_key = std::env::var("BYBIT_API_KEY")
+    .ok().map(|s| s.trim().to_string());
+cfg.multi_exchange.bybit_secret_key = std::env::var("BYBIT_SECRET_KEY")
+    .ok().map(|s| s.trim().to_string());
+cfg.multi_exchange.bybit_testnet = std::env::var("BYBIT_TESTNET")
+    .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+    .unwrap_or(false);
+
+This is correct. The same BINANCE_API_KEY is used for both testnet and live — the testnet boolean flag tells the gateway which URL to use. The gateway constructors already handle this:
+
+BinanceGateway::new(api_key, secret_key, testnet) — if testnet=true, uses https://testnet.binancefuture.com; if false, uses https://fapi.binance.com
+BybitGateway::new(api_key, secret_key, testnet) — if testnet=true, uses https://api-testnet.bybit.com; if false, uses https://api.bybit.com
+
+Add diagnostic logging after the credential loading block in apply_env_overrides(). After the Binance block, add:
+
+Copy to clipboard
+Insert at cursor
+eprintln!("[config] Binance: testnet={}, endpoint={}, has_key={}",
+    cfg.multi_exchange.binance_testnet,
+    if cfg.multi_exchange.binance_testnet { "https://testnet.binancefuture.com" } else { "https://fapi.binance.com" },
+    cfg.multi_exchange.binance_api_key.is_some()
+);
+eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}",
+    cfg.multi_exchange.bybit_testnet,
+    if cfg.multi_exchange.bybit_testnet { "https://api-testnet.bybit.com" } else { "https://api.bybit.com" },
+    cfg.multi_exchange.bybit_api_key.is_some()
+);
+
+Also add WS URL logging in main() where the Binance/Bybit WS configs are built (around line where binance_cfg is constructed):
+
+Copy to clipboard
+Insert at cursor
+// In the multi-exchange initialization block in main():
+let binance_ws_url = if config.multi_exchange.binance_testnet {
+    "wss://stream.binancefuture.com/stream"
+} else {
+    "wss://fstream.binance.com/stream"
+};
+eprintln!("[config] Binance WS URL: {}", binance_ws_url);
+
+let bybit_ws_url = if config.multi_exchange.bybit_testnet {
+    "wss://stream-testnet.bybit.com/v5/public/linear"
+} else {
+    "wss://stream.bybit.com/v5/public/linear"
+};
+eprintln!("[config] Bybit WS URL: {}", bybit_ws_url);
+
+Then use these variables when building binance_cfg.ws_url and bybit_cfg.ws_url instead of the inline ternary expressions.
+
+TASK 4: FIX WHY NO TRADES ARE OPENING (CRITICAL BUG)
+Root Cause Analysis
+The strategy engine in rust_engine/src/strategy_engine.rs has these thresholds:
+
+Copy to clipboard
+Insert at cursor
+const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.03;  // 3% depth skew needed
+const VPIN_TOXIC_THRESHOLD: f64 = 0.65;
+const MIN_SPREAD_BPS: f64 = 1.0;
+const MAX_SPREAD_BPS: f64 = 200.0;
+const MIN_DEPTH_USD: f64 = 1000.0;
+
+The evaluate() function also has a 15-minute EMA confluence filter that rejects signals when the 15m candle aggregator is not ready or when EMA conditions aren't met:
+
+Copy to clipboard
+Insert at cursor
+if candle_agg.is_ready(Timeframe::M15) {
+    if let Some(candle_15m) = candle_agg.get_candle(Timeframe::M15) {
+        // ... rejects long if EMA20 <= EMA50 || RSI <= 40
+        // ... rejects short if EMA20 >= EMA50 || RSI >= 60
+    }
+}
+
+The candle aggregator needs real trade data to warm up. Until enough 15m candles are built (requires ~15+ minutes of trade data), is_ready(Timeframe::M15) returns false and the filter is skipped — which is fine. But the composite signal scoring is very conservative:
+
+Copy to clipboard
+Insert at cursor
+let composite = abs_imbalance * 0.35 
+    * cvd_score * 0.20 
+    * funding_score * 0.15 
+    * vpoc_score * 0.15 
+    * vol_regime_scale * 0.15
+    * (1.0 - vpin_penalty * 0.7);
+
+let confidence = (composite / threshold).clamp(0.0, 1.0);
+
+BUG: The composite formula multiplies all factors together but uses wrong weights. The factors cvd_score, funding_score, vpoc_score, vol_regime_scale are multiplied as if they are weights but they are actually multiplied together, making the composite extremely small. For example:
+
+abs_imbalance = 0.10 (10% imbalance, strong signal)
+cvd_score = 1.0, funding_score = 1.0, vpoc_score = 1.0, vol_regime_scale = 1.0
+composite = 0.10 * 0.35 * 1.0 * 0.20 * 1.0 * 0.15 * 1.0 * 0.15 * 1.0 * 0.15 * 1.0
+composite = 0.10 * 0.35 * 0.20 * 0.15 * 0.15 * 0.15 = 0.0000236
+confidence = 0.0000236 / 0.03 = 0.000787 — way below any threshold!
+
+Fix the composite formula in rust_engine/src/strategy_engine.rs in the evaluate() function. Replace the broken composite calculation with a proper weighted sum:
+
+Copy to clipboard
+Insert at cursor
+// FIXED composite signal scoring
+// Each factor contributes additively with its weight
+let imbalance_score = (abs_imbalance / threshold).min(3.0) * 0.40;  // 40% weight
+let cvd_contribution = cvd_score * 0.20;                              // 20% weight  
+let funding_contribution = (funding_score - 1.0 + 1.0) * 0.15;      // 15% weight (funding_score is 1.0 or 1.2)
+let vpoc_contribution = (vpoc_score - 1.0 + 1.0) * 0.10;            // 10% weight
+let vol_contribution = vol_regime_scale.min(1.5) / 1.5 * 0.15;      // 15% weight
+
+let composite = (imbalance_score + cvd_contribution + funding_contribution + vpoc_contribution + vol_contribution)
+    * (1.0 - vpin_penalty * 0.5);
+
+let confidence = composite.clamp(0.0, 1.0);
+
+Also, the ml_w.confidence_floor check:
+
+Copy to clipboard
+Insert at cursor
+if confidence < ml_w.confidence_floor as f64 {
+    return None;
+}
+
+When no ML weights file exists, confidence_floor defaults to 0.0, so this is fine. But verify MlWeightReader::get_weights() returns confidence_floor: 0.0 when the SHM file doesn't exist.
+Also fix the position sizing — the current formula:
+
+Copy to clipboard
+Insert at cursor
+let position_size = (base_size * (abs_imbalance / threshold).min(3.0) * regime_scale * vpin_scale)
+    .max(1.0)
+    .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
+
+regime_scale = regime.momentum_weight() * (ml_w.volatility_weight as f64).max(0.5)
+When no regime SHM file exists, regime.momentum_weight() returns the default. Check rust_engine/src/regime.rs — the RegimeState::default() must return momentum_weight() > 0. If it returns 0.0, no trades will ever open. Fix RegimeState::default() to return momentum_weight() = 1.0 (full size when no regime data available).
+Open rust_engine/src/regime.rs and find the momentum_weight() method and RegimeState::default(). Make sure:
+
+Copy to clipboard
+Insert at cursor
+impl Default for RegimeState {
+    fn default() -> Self {
+        // When no regime data is available, use neutral/full weights
+        // so the engine can still trade
+        Self {
+            // ... whatever fields exist, set momentum_weight to 1.0
+        }
+    }
+}
+
+And momentum_weight() should return 1.0 for the default state.
+
+TASK 5: CONFIRM RUST IS INDEPENDENT OF PYTHON FOR SIGNALS
+The architecture is already correct — Rust generates its own signals via strategy_engine.rs using VPIN + orderbook imbalance. Python only writes regime weights to /dev/shm/regime_weights.
+When USE_AI=off in .env: Python's AI analysis is disabled. The Rust engine continues to trade using its own microstructure strategy. The regime weights SHM file may not be updated, but RegimeState::default() (after Task 4 fix) returns momentum_weight=1.0 so Rust trades at full size.
+Verify this is working by checking rust_engine/src/ml_weight_receiver.rs. The MlWeightReader::get_weights() method must return a valid default when the SHM file doesn't exist:
+
+Copy to clipboard
+Insert at cursor
+// When SHM file doesn't exist, return default weights that allow trading
+pub fn get_weights(&self, symbol_id: u16) -> Option<SymbolWeight> {
+    // If file doesn't exist or can't be read, return None
+    // The strategy_engine handles None by using default weights
+}
+
+In strategy_engine.rs evaluate(), the ML weights fallback is:
+
+Copy to clipboard
+Insert at cursor
+let ml_w = ml_weights.get_weights(symbol_id).unwrap_or(crate::ml_weight_receiver::SymbolWeight {
+    symbol_id,
+    _pad: 0,
+    momentum_weight: 1.0,
+    mean_reversion_weight: 0.0,
+    volatility_weight: 1.0,
+    confidence_floor: 0.0,
+    max_position_scale: 1.0,
+});
+
+This is correct. Confirm this fallback exists exactly like this.
+
+TASK 6: ADD MANUAL TRADE FEATURE TO WEB DASHBOARD
+This is the most complex task. We need to add a "Manual Trade" feature to the dashboard that:
+
+Shows a form in the web UI to open a trade manually
+Sends the trade request to the Rust engine via a new API endpoint
+The Rust engine processes it through the SAME pipeline as automated trades (pre-trade risk, position slots, SL/TP, exit evaluator, lifecycle manager, etc.)
+
+Step 6A: Add a ManualTradeCommand channel in main.rs
+In main.rs, add a new shared channel for manual trade commands. Add this near the top of main() after the dashboard state is created:
+
+Copy to clipboard
+Insert at cursor
+// Manual trade command channel (dashboard -> execution router)
+use tokio::sync::mpsc;
+let (manual_trade_tx, manual_trade_rx) = mpsc::channel::<ManualTradeRequest>(32);
+let manual_trade_tx = Arc::new(manual_trade_tx);
+
+Add the ManualTradeRequest struct to dashboard_server.rs (or a new file manual_trade.rs):
+
+Copy to clipboard
+Insert at cursor
+/// A manual trade request submitted from the web dashboard.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ManualTradeRequest {
+    /// Symbol in Gate.io format, e.g. "BTC_USDT"
+    pub symbol: String,
+    /// "buy" or "sell"
+    pub side: String,
+    /// Position size in contracts (integer)
+    pub size: i64,
+    /// Leverage (1-125)
+    pub leverage: u8,
+    /// Optional limit price. If None, uses market order.
+    pub price: Option<f64>,
+    /// Stop loss price (required)
+    pub stop_loss: f64,
+    /// Take profit price (required)
+    pub take_profit: f64,
+    /// Exchange to route to: "gateio", "binance", "bybit"
+    /// Defaults to "gateio" if not specified
+    pub exchange: Option<String>,
+    /// Optional note/tag for this trade
+    pub note: Option<String>,
+}
+
+/// Response to a manual trade request
+#[derive(Debug, serde::Serialize)]
+pub struct ManualTradeResponse {
+    pub success: bool,
+    pub message: String,
+    pub order_id: Option<String>,
+}
+
+Step 6B: Pass the channel to DashboardState and AppState
+In dashboard_server.rs, update AppState to include the manual trade sender:
+
+Copy to clipboard
+Insert at cursor
+struct AppState {
+    dashboard: Arc<DashboardState>,
+    templates: tera::Tera,
+    ws_tx: broadcast::Sender<String>,
+    gateio_client: reqwest::Client,
+    exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
+    /// Channel to send manual trade requests to the execution router
+    manual_trade_tx: Arc<tokio::sync::mpsc::Sender<ManualTradeRequest>>,
+    /// Symbol registry for symbol ID lookup
+    symbol_registry: Arc<crate::config::SymbolRegistry>,
+}
+
+Update run_dashboard_server() signature to accept these new parameters:
+
+Copy to clipboard
+Insert at cursor
+pub fn run_dashboard_server(
+    bind_addr: &str,
+    state: Arc<DashboardState>,
+    exec_analytics: Arc<parking_lot::Mutex<crate::execution_analytics::ExecutionAnalytics>>,
+    manual_trade_tx: Arc<tokio::sync::mpsc::Sender<ManualTradeRequest>>,
+    symbol_registry: Arc<crate::config::SymbolRegistry>,
+)
+
+Update the call in main.rs to pass these new parameters.
+Step 6C: Add the POST /api/manual-trade endpoint
+In dashboard_server.rs, add this handler:
+
+Copy to clipboard
+Insert at cursor
+/// POST /api/manual-trade — Submit a manual trade from the dashboard.
+///
+/// The trade is validated and then injected into the execution pipeline
+/// exactly like an automated trade: pre-trade risk, position slots,
+/// SL/TP conditional orders, exit evaluator tracking, etc.
+async fn api_manual_trade(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ManualTradeRequest>,
+) -> Json<ManualTradeResponse> {
+    // Basic validation
+    if req.symbol.is_empty() {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Symbol is required".to_string(),
+            order_id: None,
+        });
+    }
+    
+    let side_lower = req.side.to_lowercase();
+    if side_lower != "buy" && side_lower != "sell" {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Side must be 'buy' or 'sell'".to_string(),
+            order_id: None,
+        });
+    }
+    
+    if req.size <= 0 {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Size must be positive".to_string(),
+            order_id: None,
+        });
+    }
+    
+    if req.stop_loss <= 0.0 || req.take_profit <= 0.0 {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "Stop loss and take profit are required".to_string(),
+            order_id: None,
+        });
+    }
+    
+    // Validate SL/TP direction
+    if side_lower == "buy" && req.stop_loss >= req.take_profit {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "For BUY: stop_loss must be below take_profit".to_string(),
+            order_id: None,
+        });
+    }
+    if side_lower == "sell" && req.stop_loss <= req.take_profit {
+        return Json(ManualTradeResponse {
+            success: false,
+            message: "For SELL: stop_loss must be above take_profit".to_string(),
+            order_id: None,
+        });
+    }
+    
+    // Send to execution pipeline
+    match state.manual_trade_tx.send(req.clone()).await {
+        Ok(()) => {
+            info!("[dashboard] Manual trade submitted: {} {} {} contracts SL={} TP={}",
+                req.side, req.symbol, req.size, req.stop_loss, req.take_profit);
+            Json(ManualTradeResponse {
+                success: true,
+                message: format!("Manual trade submitted: {} {} {} contracts", req.side, req.symbol, req.size),
+                order_id: None, // Will be filled when execution confirms
+            })
+        }
+        Err(e) => {
+            Json(ManualTradeResponse {
+                success: false,
+                message: format!("Failed to submit trade: {}", e),
+                order_id: None,
+            })
+        }
+    }
+}
+
+Register this route in the router inside run_dashboard_server():
+
+Copy to clipboard
+Insert at cursor
+.route("/api/manual-trade", axum::routing::post(api_manual_trade))
+
+Step 6D: Process manual trades in the execution router
+In main.rs, update execution_router_loop() to accept the manual trade receiver:
+
+Copy to clipboard
+Insert at cursor
+fn execution_router_loop(
+    exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
+    manual_trade_rx: tokio::sync::mpsc::Receiver<ManualTradeRequest>,  // NEW
+    gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
+    // ... rest of existing params unchanged
+)
+
+Inside the rt.block_on(async { ... }) loop, add handling for manual trades. The manual trade receiver needs to be checked alongside the SPSC ring. Since manual_trade_rx is an async channel and the execution loop is already async (inside rt.block_on), add this at the top of the main loop:
+
+Copy to clipboard
+Insert at cursor
+// Check for manual trade requests (non-blocking)
+if let Ok(manual_req) = manual_trade_rx.try_recv() {
+    // Convert ManualTradeRequest to OrderCommand and inject into pipeline
+    let symbol_name = manual_req.symbol.replace('/', "_").to_uppercase();
+    let sym_id = registry.get_id(&symbol_name);
+    
+    if sym_id == 0 {
+        warn!("[execution] Manual trade rejected: unknown symbol '{}'", symbol_name);
+    } else {
+        let is_buy = manual_req.side.to_lowercase() == "buy";
+        let price = manual_req.price.unwrap_or(0.0); // 0.0 = market order
+        
+        let cmd = OrderCommand {
+            symbol_id: sym_id,
+            side: if is_buy { spsc::side::BUY } else { spsc::side::SELL },
+            order_type: if manual_req.price.is_some() { 
+                spsc::order_cmd_type::LIMIT 
+            } else { 
+                spsc::order_cmd_type::MARKET 
+            },
+            leverage: manual_req.leverage.clamp(1, 125),
+            _pad: [0; 3],
+            price: FixedPrice::from_f64(price).raw(),
+            qty: fixed_point::FixedQty::from_f64(manual_req.size as f64).raw(),
+            order_id: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            signal_ns: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64,
+            max_slippage_bps: 100,
+            ttl_ms: 30000,  // 30 second TTL for manual trades
+            stop_loss_fp: FixedPrice::from_f64(manual_req.stop_loss).raw(),
+            take_profit_fp: FixedPrice::from_f64(manual_req.take_profit).raw(),
+            placement_type: 0,
+            post_only: 0,
+            is_close: 0,
+            _pad2: [0; 5],
+        };
+        
+        // Validate the command
+        if let Err(reason) = cmd.validate() {
+            warn!("[execution] Manual trade validation failed: {}", reason);
+        } else {
+            // Acquire position slot
+            if !position_slots.try_acquire() {
+                warn!("[execution] Manual trade rejected: position slots full ({}/{})",
+                    position_slots.active_positions(), position_slots.max_slots());
+            } else {
+                // Pre-trade risk check
+                if let Err(rejection) = pre_trade_risk.check(&cmd) {
+                    warn!("[execution] Manual trade rejected by risk: {:?}", rejection);
+                    position_slots.release();
+                } else {
+                    // Push directly to execution (bypass strategy SPSC, go straight to gateway)
+                    // We process it inline here since we're already in the execution loop
+                    info!("[execution] 🖐 Manual trade: {} {} {} contracts @ {:?} SL={:.4} TP={:.4}",
+                        if is_buy { "BUY" } else { "SELL" },
+                        symbol_name, manual_req.size,
+                        manual_req.price,
+                        manual_req.stop_loss, manual_req.take_profit
+                    );
+                    
+                    // Process through the same gateway submission logic
+                    // (copy the same gateway submission block from the automated trade path)
+                    // ... [see below for the full inline processing]
+                }
+            }
+        }
+    }
+}
+
+For the inline processing of manual trades, after the position slot acquisition and risk check, execute the same gateway submission code that exists for automated trades. The key steps are:
+
+Check circuit breaker
+Check margin (get_balance)
+Build OrderIntent from the OrderCommand
+Call execution_gateway::submit_with_retry(&**gw, intent).await
+On success: track in exit_evaluator, lifecycle_mgr, submit SL/TP conditional orders, update dashboard state
+On failure: release position slot, log error
+
+Important: The manual trade must go through exit_evaluator.track_position() and lifecycle_mgr.track_position() so the engine monitors it for SL/TP hits and manages it like any automated trade.
+Since exit_evaluator and lifecycle_mgr live in the strategy thread (not execution thread), we need a different approach. Use a second SPSC ring or a shared Arc<Mutex<>> for manual trade tracking. The simplest approach:
+Add a new Arc<parking_lot::Mutex<exit_evaluator::ExitEvaluator>> and Arc<parking_lot::Mutex<position_lifecycle::PositionLifecycleManager>> that are shared between the strategy thread and execution thread. But this is complex.
+Simpler approach: Push the manual trade OrderCommand into the existing strategy_to_exec SPSC ring from the execution thread itself (after validation). But the execution thread is the consumer of that ring, not the producer.
+Best approach: Add a new Arc<crossbeam_channel::Sender<OrderCommand>> for manual trades that the execution thread reads from. In main.rs:
+
+Copy to clipboard
+Insert at cursor
+// In main(), after creating strategy_to_exec SPSC:
+let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<OrderCommand>(32);
+let manual_cmd_tx = Arc::new(manual_cmd_tx);
+
+The api_manual_trade handler converts the ManualTradeRequest to an OrderCommand (using the symbol registry) and sends it via manual_cmd_tx. The execution router reads from manual_cmd_rx using try_recv() in its idle loop.
+For SL/TP and exit tracking of manual trades: The execution router already handles SL/TP submission after any fill (automated or manual). The exit_evaluator and lifecycle_mgr are in the strategy thread. To track manual trades there, add a new Arc<crossbeam_channel::Sender<ManualPositionTrack>> that the execution thread sends to after a successful fill, and the strategy thread reads from in its loop.
+
+Copy to clipboard
+Insert at cursor
+pub struct ManualPositionTrack {
+    pub symbol_id: u16,
+    pub is_long: bool,
+    pub entry_price: f64,
+    pub size: i64,
+    pub leverage: i32,
+    pub stop_loss: f64,
+    pub take_profit: f64,
+}
+
+In the strategy evaluator loop, add at the top of the main loop:
+
+Copy to clipboard
+Insert at cursor
+// Check for manual position tracking requests from execution thread
+while let Ok(track) = manual_position_rx.try_recv() {
+    exit_evaluator.track_position(
+        track.symbol_id,
+        track.is_long,
+        track.entry_price,
+        track.stop_loss,
+        track.take_profit,
+        track.size,
+        300_000_000_000, // 5 minute TTL for manual trades (they have explicit SL/TP)
+    );
+    lifecycle_mgr.track_position(
+        track.symbol_id,
+        track.is_long,
+        track.entry_price,
+        track.size,
+        track.leverage,
+    );
+    position_slots.try_acquire(); // Slot was already acquired by execution thread
+    info!("[strategy] 🖐 Manual position tracked: sym={} is_long={} entry={:.4} SL={:.4} TP={:.4}",
+        registry.get_name(track.symbol_id),
+        track.is_long, track.entry_price, track.stop_loss, track.take_profit
+    );
+}
+
+Step 6E: Add the Manual Trade UI to the dashboard
+In crypto_trading_bot/templates/dashboard.html (or create a new template manual_trade.html), add a manual trade panel. Find the existing dashboard template and add a new card/section. The UI should have:
+
+Copy to clipboard
+Insert at cursor
+<!-- Manual Trade Panel -->
+<div class="card mt-3" id="manual-trade-panel">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">🖐 Manual Trade</h5>
+    <button class="btn btn-sm btn-outline-secondary" type="button" 
+            data-bs-toggle="collapse" data-bs-target="#manualTradeForm">
+      Toggle
+    </button>
+  </div>
+  <div class="collapse" id="manualTradeForm">
+    <div class="card-body">
+      <form id="manualTradeFormEl">
+        <div class="row g-2">
+          <div class="col-md-3">
+            <label class="form-label">Symbol</label>
+            <select class="form-select" id="mt-symbol" name="symbol">
+              {% for pair in trading_pairs_raw %}
+              <option value="{{ pair }}">{{ pair | replace(from="_", to="/") }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Side</label>
+            <select class="form-select" id="mt-side" name="side">
+              <option value="buy">BUY (Long)</option>
+              <option value="sell">SELL (Short)</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Size (contracts)</label>
+            <input type="number" class="form-control" id="mt-size" name="size" 
+                   value="1" min="1" step="1">
+          </div>
+          <div class="col-md-1">
+            <label class="form-label">Leverage</label>
+            <input type="number" class="form-control" id="mt-leverage" name="leverage" 
+                   value="5" min="1" max="125">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Price (blank=market)</label>
+            <input type="number" class="form-control" id="mt-price" name="price" 
+                   placeholder="Market" step="0.01">
+          </div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-md-3">
+            <label class="form-label text-danger">Stop Loss Price *</label>
+            <input type="number" class="form-control border-danger" id="mt-sl" 
+                   name="stop_loss" placeholder="Required" step="0.01" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-success">Take Profit Price *</label>
+            <input type="number" class="form-control border-success" id="mt-tp" 
+                   name="take_profit" placeholder="Required" step="0.01" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Exchange</label>
+            <select class="form-select" id="mt-exchange" name="exchange">
+              <option value="gateio">Gate.io</option>
+              {% if use_multi_exchange %}
+              <option value="binance">Binance</option>
+              <option value="bybit">Bybit</option>
+              {% endif %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Note (optional)</label>
+            <input type="text" class="form-control" id="mt-note" name="note" 
+                   placeholder="Trade note...">
+          </div>
+        </div>
+        <div class="row mt-2">
+          <div class="col-12">
+            <div id="mt-preview" class="alert alert-info d-none"></div>
+            <button type="button" class="btn btn-warning me-2" onclick="previewManualTrade()">
+              Preview
+            </button>
+            <button type="submit" class="btn btn-danger" id="mt-submit-btn">
+              🚀 Submit Trade
+            </button>
+            <span id="mt-status" class="ms-3"></span>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function previewManualTrade() {
+    const symbol = document.getElementById('mt-symbol').value;
+    const side = document.getElementById('mt-side').value;
+    const size = document.getElementById('mt-size').value;
+    const leverage = document.getElementById('mt-leverage').value;
+    const price = document.getElementById('mt-price').value;
+    const sl = document.getElementById('mt-sl').value;
+    const tp = document.getElementById('mt-tp').value;
+    
+    if (!sl || !tp) {
+        alert('Stop Loss and Take Profit are required!');
+        return;
+    }
+    
+    const priceStr = price ? `@ ${price}` : '@ MARKET';
+    const rr = sl && tp && price ? 
+        Math.abs((parseFloat(tp) - parseFloat(price)) / (parseFloat(price) - parseFloat(sl))).toFixed(2) : 
+        'N/A';
+    
+    const preview = document.getElementById('mt-preview');
+    preview.className = `alert ${side === 'buy' ? 'alert-success' : 'alert-danger'}`;
+    preview.innerHTML = `
+        <strong>${side.toUpperCase()} ${symbol}</strong> — ${size} contracts ${priceStr}<br>
+        Leverage: ${leverage}x | SL: ${sl} | TP: ${tp} | R:R = 1:${rr}<br>
+        <small class="text-muted">This trade will be managed by the engine (auto SL/TP, trailing stop, risk management)</small>
+    `;
+    preview.classList.remove('d-none');
+}
+
+document.getElementById('manualTradeFormEl').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const submitBtn = document.getElementById('mt-submit-btn');
+    const statusEl = document.getElementById('mt-status');
+    
+    submitBtn.disabled = true;
+    statusEl.textContent = 'Submitting...';
+    
+    const priceVal = document.getElementById('mt-price').value;
+    const payload = {
+        symbol: document.getElementById('mt-symbol').value,
+        side: document.getElementById('mt-side').value,
+        size: parseInt(document.getElementById('mt-size').value),
+        leverage: parseInt(document.getElementById('mt-leverage').value),
+        price: priceVal ? parseFloat(priceVal) : null,
+        stop_loss: parseFloat(document.getElementById('mt-sl').value),
+        take_profit: parseFloat(document.getElementById('mt-tp').value),
+        exchange: document.getElementById('mt-exchange').value,
+        note: document.getElementById('mt-note').value || null,
+    };
+    
+    try {
+        const resp = await fetch('/api/manual-trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        
+        if (data.success) {
+            statusEl.innerHTML = `<span class="text-success">✅ ${data.message}</span>`;
+            // Reset form
+            document.getElementById('mt-price').value = '';
+            document.getElementById('mt-sl').value = '';
+            document.getElementById('mt-tp').value = '';
+            document.getElementById('mt-note').value = '';
+            document.getElementById('mt-preview').classList.add('d-none');
+        } else {
+            statusEl.innerHTML = `<span class="text-danger">❌ ${data.message}</span>`;
+        }
+    } catch (err) {
+        statusEl.innerHTML = `<span class="text-danger">❌ Network error: ${err.message}</span>`;
+    } finally {
+        submitBtn.disabled = false;
+    }
+});
+</script>
+
+Also add a route for a dedicated manual trade page:
+
+Copy to clipboard
+Insert at cursor
+.route("/manual-trade", get(page_manual_trade))
+
+And handler:
+
+Copy to clipboard
+Insert at cursor
+async fn page_manual_trade(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let ctx = state.dashboard.template_context("manual_trade");
+    render_template(&state.templates, "dashboard.html", &ctx)
+}
+
+
+TASK 7: WIRE EVERYTHING TOGETHER IN main.rs
+After all the above changes, update main() to:
+
+Create the manual trade channels:
+
+
+Copy to clipboard
+Insert at cursor
+let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<crate::spsc::OrderCommand>(32);
+let manual_cmd_tx_arc = Arc::new(manual_cmd_tx);
+
+let (manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<crate::dashboard_server::ManualPositionTrack>(32);
+let manual_pos_tx_arc = Arc::new(manual_pos_tx);
+
+
+Pass manual_cmd_rx to execution_router_loop() (as a new parameter)
+Pass manual_pos_rx to strategy_evaluator_loop() (as a new parameter)
+Pass manual_cmd_tx_arc and registry.clone() to run_dashboard_server()
+
+Update the function signatures accordingly.
+
+TASK 8: ADD crossbeam-channel DEPENDENCY
+In rust_engine/Cargo.toml, add:
+
+Copy to clipboard
+Insert at cursor
+crossbeam-channel = "0.5"
+
+
+TASK 9: VERIFY .env.example COMMENTS ARE ACCURATE
+In crypto_trading_bot/.env.example, the multi-exchange section already has correct documentation. Verify the table comments match the actual endpoints:
+
+Copy to clipboard
+Insert at cursor
+# TRADING_MODE  | BINANCE_TESTNET | Binance REST/WS Endpoint
+# --------------|-----------------|------------------------------------------
+# live/paper    | false           | fapi.binance.com / fstream.binance.com
+# testnet       | true            | testnet.binancefuture.com / stream.binancefuture.com
+#
+# TRADING_MODE  | BYBIT_TESTNET   | Bybit REST/WS Endpoint
+# --------------|-----------------|------------------------------------------
+# live/paper    | false           | api.bybit.com / stream.bybit.com
+# testnet       | true            | api-testnet.bybit.com / stream-testnet.bybit.com
+
+These are already correct. Do not change them.
+
+TASK 10: FIX regime.rs DEFAULT STATE
+Open rust_engine/src/regime.rs. Find RegimeState and its Default implementation and momentum_weight() method.
+The momentum_weight() must return a non-zero value when no regime data is available. If the current default returns 0.0, change it to 1.0:
+
+Copy to clipboard
+Insert at cursor
+impl Default for RegimeState {
+    fn default() -> Self {
+        // Default: neutral regime, full position sizing allowed
+        // This is used when no regime SHM data is available (e.g., Python not running)
+        Self {
+            // Set all weights to neutral/full values
+            // The exact fields depend on the struct definition
+            // Key requirement: momentum_weight() must return 1.0
+        }
+    }
+}
+
+impl RegimeState {
+    pub fn momentum_weight(&self) -> f64 {
+        // Must return 1.0 for default state
+        // Check the actual implementation and fix if it returns 0.0
+    }
+}
+
+
+SUMMARY OF ALL FILES TO MODIFY
+
+rust_engine/src/binance_gateway.rs — Verify endpoints are correct (they are, just confirm)
+rust_engine/src/bybit_gateway.rs — Verify endpoints are correct (they are, just confirm)
+rust_engine/src/multi_exchange/ws_ingestion_multi.rs — Verify WS URLs are correct (they are, just confirm)
+rust_engine/src/main.rs — Add diagnostic logging, manual trade channels, wire everything
+rust_engine/src/strategy_engine.rs — Fix composite signal formula (CRITICAL for trades to open)
+rust_engine/src/regime.rs — Fix default momentum_weight() to return 1.0
+rust_engine/src/dashboard_server.rs — Add ManualTradeRequest, ManualTradeResponse, ManualPositionTrack structs, api_manual_trade handler, update AppState and run_dashboard_server() signature
+rust_engine/Cargo.toml — Add crossbeam-channel = "0.5"
+crypto_trading_bot/templates/dashboard.html — Add manual trade UI panel
+
+PRIORITY ORDER
+
+Task 4 + Task 10 (Fix strategy signal formula + regime default) — MOST CRITICAL, this is why no trades open
+Task 6 (Manual trade feature) — High priority for testing
+Tasks 1-3 (Endpoint verification + logging) — Medium priority
+Task 5 (Confirm Python independence) — Verification only
+
