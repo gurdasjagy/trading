@@ -497,7 +497,7 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             cfg.multi_exchange.binance_api_key.is_some());
         eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}",
             cfg.multi_exchange.bybit_testnet,
-            if cfg.multi_exchange.bybit_testnet { "https://api-testnet.bybit.com" } else { "https://api.bybit.com" },
+            if cfg.multi_exchange.bybit_testnet { "https://api-demo.bybit.com" } else { "https://api.bybit.com" },
             cfg.multi_exchange.bybit_api_key.is_some());
     } else {
         eprintln!("[config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)");
@@ -1410,9 +1410,9 @@ fn strategy_evaluator_loop(
             let cvd_divergence_score = 0.0; // Placeholder - would need actual divergence calculation
             let toxicity = trade_flow_analyzer.calculate_toxicity_score(metrics.vpin, cvd_divergence_score);
             
-            // Halt trading if toxicity > 0.7
+            // TASK 2d FIX: Halt trading if toxicity > 0.7 with info-level logging
             if toxicity > 0.7 {
-                debug!("[strategy] 🚫 Order flow toxicity {:.2} > 0.7 — halting signal generation", toxicity);
+                info!("[strategy] Order flow toxicity {:.2} > 0.7 - halting signal generation for this tick", toxicity);
                 continue;
             }
 
@@ -2350,16 +2350,117 @@ fn execution_router_loop(
         loop {
             // Check for manual trade requests from dashboard
             while let Ok(manual_req) = manual_cmd_rx.try_recv() {
-                let sym_upper = manual_req.symbol.to_uppercase();
+                let sym_upper = manual_req.symbol.replace('/', "_").to_uppercase();
                 let sym_id = registry.get_id(&sym_upper);
                 if sym_id == 0 {
                     warn!("[execution] Manual trade rejected: unknown symbol '{}'", sym_upper);
                     continue;
                 }
-                info!("[execution] 🖐 Manual trade received: {} {} {} contracts SL={:.4} TP={:.4}",
-                    manual_req.side, sym_upper, manual_req.size, manual_req.stop_loss, manual_req.take_profit);
-                // TODO: Full inline execution (gateway call) can be added here.
-                // For now, log the receipt so strategy can monitor it.
+                
+                info!("[execution] Manual trade received: {} {} {} contracts lev={}x SL={:.4} TP={:.4}",
+                    manual_req.side, sym_upper, manual_req.size, manual_req.leverage,
+                    manual_req.stop_loss, manual_req.take_profit);
+                
+                let is_buy = manual_req.side.to_lowercase() == "buy";
+                
+                // Route to the appropriate gateway (default: Gate.io)
+                // Note: binance_gateway and bybit_gateway would need to be passed to this function
+                // for multi-exchange support. For now, use the primary gateway.
+                let target_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> = match manual_req.exchange.as_deref() {
+                    Some("binance") => {
+                        warn!("[execution] Manual trade: Binance gateway not yet wired to execution router");
+                        gateway.as_ref() // Fallback to Gate.io
+                    },
+                    Some("bybit") => {
+                        warn!("[execution] Manual trade: Bybit gateway not yet wired to execution router");
+                        gateway.as_ref() // Fallback to Gate.io
+                    },
+                    _ => gateway.as_ref(), // Default to Gate.io
+                };
+                
+                if let Some(gw) = target_gw {
+                    // Step 1: Set leverage
+                    if let Err(e) = gw.set_leverage(&sym_upper, manual_req.leverage as i32).await {
+                        warn!("[execution] Manual trade: failed to set leverage: {}", e);
+                    }
+                    
+                    // Step 2: Set margin mode to cross
+                    if let Err(e) = gw.set_margin_mode(&sym_upper, "cross").await {
+                        warn!("[execution] Manual trade: failed to set margin mode: {}", e);
+                    }
+                    
+                    // Step 3: Build and submit the order
+                    let side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
+                    let order_type = if manual_req.price.is_some() {
+                        execution_gateway::OrderType::Limit
+                    } else {
+                        execution_gateway::OrderType::Market
+                    };
+                    let tif = if manual_req.price.is_some() { "gtc" } else { "ioc" };
+                    
+                    let intent = execution_gateway::OrderIntent {
+                        symbol: sym_upper.clone(),
+                        side: side.clone(),
+                        size: manual_req.size,
+                        order_type,
+                        price: manual_req.price,
+                        reduce_only: false,
+                        leverage: Some(manual_req.leverage as i32),
+                        time_in_force: tif.to_string(),
+                        slippage_cap_pct: Some(0.005),
+                        placement: execution_state::PlacementType::AtBest,
+                        stop_loss: Some(manual_req.stop_loss),
+                        take_profit: Some(manual_req.take_profit),
+                        confidence: 1.0,
+                        signal_tag: "manual_dashboard".to_string(),
+                    };
+                    
+                    match execution_gateway::submit_with_retry(&**gw, intent).await {
+                        Ok(res) => {
+                            info!("[execution] Manual trade filled: {} {} {} @ {:.4} (order_id={})",
+                                manual_req.side, sym_upper, res.filled_size, res.avg_fill_price, res.order_id);
+                            
+                            orders_submitted += 1;
+                            dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                            dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
+                            
+                            // Track position entry for PnL calculation
+                            position_entries.insert(sym_id, (res.avg_fill_price, res.filled_size, is_buy));
+                            
+                            // Submit SL/TP conditional orders
+                            let parent_side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
+                            let gw_clone = gw.clone();
+                            let sym_clone = sym_upper.clone();
+                            let sl = manual_req.stop_loss;
+                            let tp = manual_req.take_profit;
+                            let filled = res.filled_size;
+                            tokio::spawn(async move {
+                                if sl > 0.0 {
+                                    match gw_clone.submit_conditional_sl(&sym_clone, &parent_side, filled, sl).await {
+                                        Ok(()) => info!("[execution] Manual trade SL placed: {} @ {:.4}", sym_clone, sl),
+                                        Err(e) => warn!("[execution] Manual trade SL failed: {}", e),
+                                    }
+                                }
+                                if tp > 0.0 {
+                                    match gw_clone.submit_conditional_tp(&sym_clone, &parent_side, filled, tp).await {
+                                        Ok(()) => info!("[execution] Manual trade TP placed: {} @ {:.4}", sym_clone, tp),
+                                        Err(e) => warn!("[execution] Manual trade TP failed: {}", e),
+                                    }
+                                }
+                            });
+                            
+                            // Acquire a position slot
+                            if !position_slots.try_acquire() {
+                                warn!("[execution] Manual trade: position slots full");
+                            }
+                        }
+                        Err(e) => {
+                            warn!("[execution] Manual trade failed: {}", e);
+                        }
+                    }
+                } else {
+                    warn!("[execution] Manual trade: no gateway available for exchange {:?}", manual_req.exchange);
+                }
             }
 
             // ── Step 0: Check circuit breaker ──
@@ -2888,6 +2989,8 @@ fn execution_router_loop(
                             Ok(balance) => {
                                 dashboard_state.balance_fp.store((balance * 1e8) as i64, Ordering::Relaxed);
                                 dashboard_state.equity_fp.store((balance * 1e8) as i64, Ordering::Relaxed);
+                                // TASK 3: Also update multi-exchange balance for Gate.io (index 0)
+                                dashboard_state.set_exchange_balance(0, balance);
                             }
                             Err(e) => {
                                 // Only log once per 60s to reduce noise
@@ -2896,29 +2999,74 @@ fn execution_router_loop(
                             }
                         }
                     }
+                    
+                    // TASK 3: Multi-exchange balance fetching
+                    // Note: For full multi-exchange balance display, binance_gateway and bybit_gateway
+                    // need to be passed to execution_router_loop. When enabled, fetch balances here:
+                    // if dashboard_state.multi_exchange_enabled.load(Ordering::Relaxed) {
+                    //     if let Some(ref bgw) = binance_gateway {
+                    //         match bgw.get_balance().await {
+                    //             Ok(bal) => dashboard_state.set_exchange_balance(1, bal),
+                    //             Err(e) => debug!("[execution] Binance balance fetch failed: {}", e),
+                    //         }
+                    //     }
+                    //     if let Some(ref bygw) = bybit_gateway {
+                    //         match bygw.get_balance().await {
+                    //             Ok(bal) => dashboard_state.set_exchange_balance(2, bal),
+                    //             Err(e) => debug!("[execution] Bybit balance fetch failed: {}", e),
+                    //         }
+                    //     }
+                    // }
 
-                    // ── Slot Reconciliation: Query Gate.io for actual positions ──
-                    // If we have slots claimed but no actual exchange positions,
-                    // release the orphaned slots to prevent permanent exhaustion.
-                    if active_slots > 0 {
-                        if let Some(ref gw) = gateway {
-                            match gw.get_positions().await {
-                                Ok(positions) => {
-                                    let actual = positions.len() as u32;
-                                    if actual < active_slots {
-                                        let leaked = active_slots - actual;
-                                        for _ in 0..leaked {
-                                            position_slots.release();
-                                        }
-                                        warn!(
-                                            "[execution] Slot reconciliation: released {} orphaned slots (exchange={}, slots={})",
-                                            leaked, actual, active_slots
-                                        );
+                    // ── TASK 5: Position Sync + Slot Reconciliation ──
+                    // Query exchange for actual positions and update dashboard
+                    if let Some(ref gw) = gateway {
+                        match gw.get_positions().await {
+                            Ok(positions) => {
+                                // TASK 5a: Update dashboard with real position data
+                                let positions_json = serde_json::to_string(&positions).unwrap_or_else(|_| "[]".to_string());
+                                dashboard_state.set_positions_json(positions_json);
+                                
+                                // Slot reconciliation: release orphaned slots
+                                let actual = positions.len() as u32;
+                                if active_slots > 0 && actual < active_slots {
+                                    let leaked = active_slots - actual;
+                                    for _ in 0..leaked {
+                                        position_slots.release();
                                     }
+                                    warn!(
+                                        "[execution] Slot reconciliation: released {} orphaned slots (exchange={}, slots={})",
+                                        leaked, actual, active_slots
+                                    );
                                 }
-                                Err(e) => {
-                                    warn!("[execution] Slot reconciliation skipped — position query failed: {}", e);
+                                
+                                // TASK 5b: Multi-exchange positions sync
+                                // When multi-exchange is enabled, aggregate positions from all exchanges
+                                if dashboard_state.multi_exchange_enabled.load(Ordering::Relaxed) {
+                                    let mut all_positions = Vec::new();
+                                    
+                                    // Add Gate.io positions (tagged with exchange name)
+                                    for p in &positions {
+                                        all_positions.push(serde_json::json!({
+                                            "exchange": "gateio",
+                                            "symbol": p.symbol,
+                                            "size": p.size,
+                                            "entry_price": p.entry_price,
+                                            "unrealized_pnl": p.unrealized_pnl,
+                                            "leverage": p.leverage,
+                                            "side": p.side,
+                                        }));
+                                    }
+                                    
+                                    // Note: binance_gateway and bybit_gateway positions would be added here
+                                    // when those gateways are passed to the execution router
+                                    
+                                    let json = serde_json::to_string(&all_positions).unwrap_or_else(|_| "[]".to_string());
+                                    dashboard_state.set_multi_exchange_positions_json(json);
                                 }
+                            }
+                            Err(e) => {
+                                warn!("[execution] Position sync failed: {}", e);
                             }
                         }
                     }
