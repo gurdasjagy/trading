@@ -612,3 +612,76 @@ pub fn now_us() -> i64 {
         .unwrap_or_default()
         .as_micros() as i64
 }
+
+// ---------------------------------------------------------------------------
+// Bybit v5 Request Signing
+// ---------------------------------------------------------------------------
+
+/// Sign a Bybit v5 request using HMAC-SHA256.
+///
+/// Signature input: "{timestamp}{api_key}{recv_window}{payload}"
+pub fn sign_bybit_request(
+    timestamp: i64,
+    api_key: &str,
+    recv_window: i64,
+    payload: &str,
+    secret: &[u8],
+) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let sign_input = format!("{}{}{}{}", timestamp, api_key, recv_window, payload);
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret)
+        .expect("HMAC can take key of any size");
+    mac.update(sign_input.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+/// Classify Bybit v5 error responses into ExchangeError.
+pub fn classify_bybit_error(body: &serde_json::Value) -> ExchangeError {
+    let ret_code = body.get("retCode").and_then(|v| v.as_i64()).unwrap_or(0);
+    let ret_msg = body.get("retMsg").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+
+    match ret_code {
+        0 => ExchangeError::Unknown { code: "OK".to_string(), message: "Success".to_string() },
+        10001 => ExchangeError::Unknown { code: ret_code.to_string(), message: "Parameter error".to_string() },
+        10002 => ExchangeError::RateLimited { retry_after_ms: 1000 },
+        10003 => ExchangeError::Unknown { code: "INVALID_API_KEY".to_string(), message: ret_msg.to_string() },
+        10004 | 10005 => ExchangeError::Unknown { code: "SIGNATURE_ERROR".to_string(), message: ret_msg.to_string() },
+        10006 => ExchangeError::RateLimited { retry_after_ms: 1000 },
+        10010 => ExchangeError::Unknown { code: "IP_NOT_WHITELISTED".to_string(), message: ret_msg.to_string() },
+        10016 => ExchangeError::InternalServerError,
+        10017 => ExchangeError::Timeout,
+        110001 => ExchangeError::MinimumOrderSize { min_size: 1 },
+        110003 => ExchangeError::Unknown { code: "ORDER_NOT_EXIST".to_string(), message: ret_msg.to_string() },
+        110004 => ExchangeError::InsufficientBalance,
+        110007 => ExchangeError::InvalidPrice,
+        110008 => ExchangeError::OrderNotFound,
+        110012 => ExchangeError::InsufficientBalance,
+        110017 => ExchangeError::Unknown { code: "REDUCE_ONLY_VIOLATION".to_string(), message: ret_msg.to_string() },
+        110018 => ExchangeError::PositionNotFound,
+        110043 => ExchangeError::Unknown { code: "POST_ONLY_REJECTED".to_string(), message: ret_msg.to_string() },
+        110044 => ExchangeError::MinimumOrderSize { min_size: 1 },
+        _ => ExchangeError::Unknown { code: ret_code.to_string(), message: ret_msg.to_string() },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bybit Rate Limiter Extension
+// ---------------------------------------------------------------------------
+
+impl AdaptiveRateLimiter {
+    /// Update rate limiter state from Bybit response.
+    pub fn update_from_bybit_response(&self, body: &serde_json::Value) {
+        // Bybit returns rate limit info in response headers, not body
+        // For now, just check for rate limit errors
+        let ret_code = body.get("retCode").and_then(|v| v.as_i64()).unwrap_or(0);
+        if ret_code == 10002 || ret_code == 10006 {
+            // Rate limited - increase backoff
+            let current = self.backoff_multiplier.load(std::sync::atomic::Ordering::Relaxed);
+            let new_backoff = (current * 150 / 100).min(500);
+            self.backoff_multiplier.store(new_backoff, std::sync::atomic::Ordering::Relaxed);
+            warn!("Bybit rate limited, backoff increased to {:.2}x", new_backoff as f64 / 100.0);
+        }
+    }
+}

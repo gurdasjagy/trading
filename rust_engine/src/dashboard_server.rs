@@ -115,6 +115,20 @@ pub struct DashboardState {
     trades_json: std::sync::RwLock<String>,
     /// JSON-encoded orderbook BBO (best bid/offer) for active symbols.
     orderbook_json: std::sync::RwLock<String>,
+
+    // ── Multi-Exchange State ──────────────────────────────────────────────────
+    /// Whether multi-exchange mode is active.
+    pub multi_exchange_enabled: AtomicBool,
+    /// Per-exchange balance (Gate.io=0, Binance=1, Bybit=2) in USDT x 1e8.
+    pub exchange_balances: [AtomicI64; 3],
+    /// Per-exchange margin ratio x 10000 (e.g. 7500 = 75.00%).
+    pub exchange_margin_ratios: [AtomicI64; 3],
+    /// JSON-encoded multi-exchange positions (includes exchange field per position).
+    multi_exchange_positions_json: std::sync::RwLock<String>,
+    /// JSON-encoded funding rate arbitrage opportunities.
+    funding_arb_json: std::sync::RwLock<String>,
+    /// JSON-encoded global book snapshot (best bid/ask per exchange per symbol).
+    global_book_json: std::sync::RwLock<String>,
 }
 
 impl DashboardState {
@@ -152,6 +166,13 @@ impl DashboardState {
             positions_json: std::sync::RwLock::new("[]".to_string()),
             trades_json: std::sync::RwLock::new("[]".to_string()),
             orderbook_json: std::sync::RwLock::new("{}".to_string()),
+            // Multi-Exchange State
+            multi_exchange_enabled: AtomicBool::new(false),
+            exchange_balances: [AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0)],
+            exchange_margin_ratios: [AtomicI64::new(10000), AtomicI64::new(10000), AtomicI64::new(10000)],
+            multi_exchange_positions_json: std::sync::RwLock::new("[]".to_string()),
+            funding_arb_json: std::sync::RwLock::new("[]".to_string()),
+            global_book_json: std::sync::RwLock::new("{}".to_string()),
         }
     }
 

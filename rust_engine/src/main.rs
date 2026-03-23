@@ -69,6 +69,11 @@ mod event_bus;
 mod bridge_ipc;
 mod risk_calculator;
 
+// Multi-Exchange Feature (USE_MULTI_EXCHANGE=on)
+mod multi_exchange;
+mod binance_gateway;
+mod bybit_gateway;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -414,6 +419,87 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         .unwrap_or_else(|_| cfg.zmq_config_bind.clone());
     if let Ok(path) = std::env::var("REGIME_FILE_PATH") {
         cfg.regime_file_path = path;
+    }
+
+    // ── Multi-Exchange Toggle ──────────────────────────────────────────────────
+    let use_multi = std::env::var("USE_MULTI_EXCHANGE")
+        .map(|v| matches!(v.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
+        .unwrap_or(false);
+    cfg.multi_exchange_enabled = use_multi;
+    cfg.multi_exchange.enabled = use_multi;
+
+    if use_multi {
+        // Binance credentials
+        cfg.multi_exchange.binance_api_key = std::env::var("BINANCE_API_KEY")
+            .ok().map(|s| s.trim().to_string());
+        cfg.multi_exchange.binance_secret_key = std::env::var("BINANCE_SECRET_KEY")
+            .ok().map(|s| s.trim().to_string());
+        cfg.multi_exchange.binance_testnet = std::env::var("BINANCE_TESTNET")
+            .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+            .unwrap_or(false);
+
+        // Bybit credentials
+        cfg.multi_exchange.bybit_api_key = std::env::var("BYBIT_API_KEY")
+            .ok().map(|s| s.trim().to_string());
+        cfg.multi_exchange.bybit_secret_key = std::env::var("BYBIT_SECRET_KEY")
+            .ok().map(|s| s.trim().to_string());
+        cfg.multi_exchange.bybit_testnet = std::env::var("BYBIT_TESTNET")
+            .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+            .unwrap_or(false);
+
+        // Override max open positions to 5 when multi-exchange is on
+        cfg.risk.max_open_positions = cfg.multi_exchange.max_open_positions as usize;
+        
+        // SOR configuration
+        if let Ok(min_split) = std::env::var("SOR_MIN_SPLIT_SIZE_USDT") {
+            if let Ok(val) = min_split.parse::<f64>() {
+                cfg.multi_exchange.sor.min_split_size_usdt = val;
+            }
+        }
+        if let Ok(max_venues) = std::env::var("SOR_MAX_VENUES") {
+            if let Ok(val) = max_venues.parse::<usize>() {
+                cfg.multi_exchange.sor.max_venues = val.clamp(1, 3);
+            }
+        }
+        if let Ok(max_slip) = std::env::var("SOR_MAX_SLIPPAGE_BPS") {
+            if let Ok(val) = max_slip.parse::<f64>() {
+                cfg.multi_exchange.sor.max_slippage_bps = val;
+            }
+        }
+
+        // Funding arb configuration
+        if let Ok(min_rate) = std::env::var("FUNDING_ARB_MIN_NET_RATE") {
+            if let Ok(val) = min_rate.parse::<f64>() {
+                cfg.multi_exchange.funding_arb.min_net_rate = val;
+            }
+        }
+        if let Ok(min_apr) = std::env::var("FUNDING_ARB_MIN_APR") {
+            if let Ok(val) = min_apr.parse::<f64>() {
+                cfg.multi_exchange.funding_arb.min_annualized_apr = val / 100.0; // Convert percentage
+            }
+        }
+
+        // Margin monitor configuration
+        if let Ok(min_ratio) = std::env::var("MARGIN_MONITOR_MIN_RATIO") {
+            if let Ok(val) = min_ratio.parse::<f64>() {
+                cfg.multi_exchange.margin_monitor.min_margin_ratio = val;
+            }
+        }
+        if let Ok(crit_ratio) = std::env::var("MARGIN_MONITOR_CRITICAL_RATIO") {
+            if let Ok(val) = crit_ratio.parse::<f64>() {
+                cfg.multi_exchange.margin_monitor.critical_margin_ratio = val;
+            }
+        }
+
+        eprintln!("[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}", cfg.risk.max_open_positions);
+        eprintln!("[config] Binance: testnet={}, has_key={}", 
+            cfg.multi_exchange.binance_testnet,
+            cfg.multi_exchange.binance_api_key.is_some());
+        eprintln!("[config] Bybit: testnet={}, has_key={}", 
+            cfg.multi_exchange.bybit_testnet,
+            cfg.multi_exchange.bybit_api_key.is_some());
+    } else {
+        eprintln!("[config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)");
     }
 }
 
@@ -3178,7 +3264,143 @@ fn main() {
         thread_handles.push(handle);
     }
 
-
+    // ── Multi-Exchange Initialization (gated by USE_MULTI_EXCHANGE) ──────────────
+    let global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> = if config.multi_exchange_enabled {
+        info!("Multi-Exchange mode ENABLED - initializing Binance + Bybit");
+        
+        // Build global book registry
+        let registry_me = Arc::new(multi_exchange::GlobalBookRegistry::new());
+        
+        // Build Binance gateway
+        let binance_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
+            let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
+            let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+            if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                info!("Binance: live execution gateway initialised (testnet={})", config.multi_exchange.binance_testnet);
+                Some(Arc::new(binance_gateway::BinanceGateway::new(
+                    ak.to_string(), sk.to_string(),
+                    config.multi_exchange.binance_testnet,
+                )) as Arc<dyn ExecutionGateway + Send + Sync>)
+            } else {
+                info!("Binance: no valid credentials - signal-only mode");
+                None
+            }
+        };
+        
+        // Build Bybit gateway
+        let bybit_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
+            let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
+            let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
+            if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                info!("Bybit: live execution gateway initialised (testnet={})", config.multi_exchange.bybit_testnet);
+                Some(Arc::new(bybit_gateway::BybitGateway::new(
+                    ak.to_string(), sk.to_string(),
+                    config.multi_exchange.bybit_testnet,
+                )) as Arc<dyn ExecutionGateway + Send + Sync>)
+            } else {
+                info!("Bybit: no valid credentials - signal-only mode");
+                None
+            }
+        };
+        
+        // Store gateways for later use (e.g., margin monitor)
+        let mut multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = HashMap::new();
+        if let Some(ref gw) = gateway {
+            multi_gateways.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
+        }
+        if let Some(gw) = binance_gateway {
+            multi_gateways.insert(multi_exchange::ExchangeId::Binance, gw);
+        }
+        if let Some(gw) = bybit_gateway {
+            multi_gateways.insert(multi_exchange::ExchangeId::Bybit, gw);
+        }
+        
+        info!("Multi-exchange gateways initialized: {} connected", multi_gateways.len());
+        
+        // Spawn Binance WS ingestion thread
+        {
+            let reg = registry_me.clone();
+            let sym_reg = registry.clone();
+            let binance_cfg = crate::config::ExchangeConfig {
+                name: "binance".to_string(),
+                symbols: config.symbols.clone(),
+                ws_url: if config.multi_exchange.binance_testnet {
+                    "wss://stream.binancefuture.com/stream".to_string()
+                } else {
+                    "wss://fstream.binance.com/stream".to_string()
+                },
+                api_key: config.multi_exchange.binance_api_key.clone(),
+                secret_key: config.multi_exchange.binance_secret_key.clone(),
+                passphrase: None,
+                testnet: config.multi_exchange.binance_testnet,
+                rest_url: None,
+                max_leverage: 125,
+                enabled: true,
+            };
+            let core_id = topology.ws_binance_core;
+            let handle = thread::Builder::new()
+                .name("ws-binance".into())
+                .spawn(move || {
+                    let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
+                    info!("[ws-binance] Pinned to core {}", core_id);
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to build tokio runtime for ws-binance");
+                    rt.block_on(multi_exchange::ws_ingestion_multi::run_binance_ws_ingestion(
+                        binance_cfg, reg, sym_reg,
+                    ));
+                })
+                .expect("Failed to spawn Binance WS thread");
+            thread_handles.push(handle);
+        }
+        
+        // Spawn Bybit WS ingestion thread
+        {
+            let reg = registry_me.clone();
+            let sym_reg = registry.clone();
+            let bybit_cfg = crate::config::ExchangeConfig {
+                name: "bybit".to_string(),
+                symbols: config.symbols.clone(),
+                ws_url: if config.multi_exchange.bybit_testnet {
+                    "wss://stream-testnet.bybit.com/v5/public/linear".to_string()
+                } else {
+                    "wss://stream.bybit.com/v5/public/linear".to_string()
+                },
+                api_key: config.multi_exchange.bybit_api_key.clone(),
+                secret_key: config.multi_exchange.bybit_secret_key.clone(),
+                passphrase: None,
+                testnet: config.multi_exchange.bybit_testnet,
+                rest_url: None,
+                max_leverage: 100,
+                enabled: true,
+            };
+            let core_id = topology.ws_bybit_core;
+            let handle = thread::Builder::new()
+                .name("ws-bybit".into())
+                .spawn(move || {
+                    let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
+                    info!("[ws-bybit] Pinned to core {}", core_id);
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to build tokio runtime for ws-bybit");
+                    rt.block_on(multi_exchange::ws_ingestion_multi::run_bybit_ws_ingestion(
+                        bybit_cfg, reg, sym_reg,
+                    ));
+                })
+                .expect("Failed to spawn Bybit WS thread");
+            thread_handles.push(handle);
+        }
+        
+        Some(registry_me)
+    } else {
+        info!("Multi-Exchange mode DISABLED - Gate.io only");
+        None
+    };
+    
+    // Store multi-exchange enabled flag in dashboard state
+    dashboard_state.set_multi_exchange_enabled(config.multi_exchange_enabled);
 
     // ── Core 4: Orderbook Builder ──
     {
