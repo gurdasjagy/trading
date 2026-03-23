@@ -356,7 +356,9 @@ impl AdaptiveThreshold {
 
     /// Get the current adaptive threshold.
     ///
-    /// Computes: `max(min_threshold, mean + std_multiplier * std_dev)`
+    /// Computes: `max(min_threshold, min(max_threshold, mean + std_multiplier * std_dev))`
+    /// TASK 2c FIX: Added max cap of 10% to prevent threshold from becoming unreachable
+    /// on liquid pairs like BTC/USDT where imbalance rarely exceeds 3-5%.
     #[inline]
     pub fn get_threshold(&self) -> f64 {
         if self.imbalance_history.is_empty() {
@@ -369,7 +371,8 @@ impl AdaptiveThreshold {
         let std_dev = variance.max(0.0).sqrt();
 
         let threshold = mean + self.std_multiplier * std_dev;
-        threshold.max(self.min_threshold)
+        // Cap at 10% to prevent threshold from becoming unreachable on liquid pairs
+        threshold.max(self.min_threshold).min(0.10)
     }
 
     /// Check if the calculator is warmed up.
@@ -549,12 +552,17 @@ impl StrategyEngine {
                     ema20, ema50, rsi
                 );
             }
+        } else {
+            // TASK 2a FIX: Log that confluence is not ready so user knows why no trades during warmup
+            debug!("[strategy] 15m candle data not ready yet - skipping confluence filter (warmup period)");
         }
         drop(candle_agg); // Release lock before continuing
 
         // ── Task 7: Cascade active gating ──
         // Skip signal generation during liquidation cascades
         if metrics.cascade_active {
+            // TASK 2b FIX: Log when cascade blocks signals
+            info!("[strategy] Signal blocked: liquidation cascade active");
             return None;
         }
 

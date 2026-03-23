@@ -52,7 +52,9 @@ impl BybitGateway {
 
     fn base_url(&self) -> &str {
         if self.testnet {
-            "https://api-testnet.bybit.com"
+            // Demo trading uses mainnet infrastructure with simulated funds
+            // API keys must be generated from the "Demo Trading" module inside mainnet Bybit account
+            "https://api-demo.bybit.com"
         } else {
             BYBIT_BASE_URL
         }

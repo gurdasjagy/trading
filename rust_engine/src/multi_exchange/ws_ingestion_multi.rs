@@ -32,7 +32,10 @@ const BINANCE_WS_TESTNET: &str = "wss://stream.binancefuture.com/stream";
 // Bybit WebSocket URLs
 // ---------------------------------------------------------------------------
 const BYBIT_WS_LIVE: &str = "wss://stream.bybit.com/v5/public/linear";
-const BYBIT_WS_TESTNET: &str = "wss://stream-testnet.bybit.com/v5/public/linear";
+// Demo trading uses live public streams for market data.
+// Private streams (orders, positions) use wss://stream-demo.bybit.com
+// Since this module only subscribes to public orderbook data, it uses the live public endpoint.
+const BYBIT_WS_TESTNET: &str = "wss://stream.bybit.com/v5/public/linear";
 
 // ---------------------------------------------------------------------------
 // Binance WebSocket Ingestion
