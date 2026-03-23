@@ -482,7 +482,6 @@ fn days_to_ymd(days: i64) -> (i32, u32, u32) {
 mod tests {
     use super::*;
     use std::fs;
-    use tempfile::tempdir;
     
     #[test]
     fn test_stored_tick_size() {
@@ -491,12 +490,18 @@ mod tests {
     
     #[test]
     fn test_tick_write_read() {
-        let dir = tempdir().unwrap();
-        let base_path = dir.path().to_str().unwrap();
+        // Use a unique temp directory to avoid tempfile dependency
+        let base_path = std::env::temp_dir()
+            .join(format!("tick_store_test_{}", std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()));
+        let base_path = base_path.to_str().unwrap().to_string();
+        fs::create_dir_all(&base_path).unwrap();
         
         // Write some ticks
         {
-            let mut writer = TickWriter::new(base_path, "BTC_USDT", "2024-01-15").unwrap();
+            let mut writer = TickWriter::new(&base_path, "BTC_USDT", "2024-01-15").unwrap();
             
             for i in 0..100 {
                 let tick = StoredTick::new(
@@ -513,7 +518,10 @@ mod tests {
         }
         
         // Read them back
-        let reader = TickReader::open(base_path, "BTC_USDT", "2024-01-15").unwrap();
+        let reader = TickReader::open(&base_path, "BTC_USDT", "2024-01-15").unwrap();
         assert_eq!(reader.len(), 100);
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&base_path);
     }
 }

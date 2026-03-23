@@ -1125,7 +1125,7 @@ fn strategy_evaluator_loop(
                 track.stop_loss,
                 track.take_profit,
                 track.size,
-                300_000_000_000u64, // 5 minute TTL
+                300_000_000_000u64, // 5 minutes TTL in nanoseconds
             );
             lifecycle_mgr.track_position(
                 track.symbol_id,
@@ -3473,6 +3473,9 @@ fn main() {
     // Manual trade channels: dashboard -> execution (command), execution -> strategy (position tracking)
     let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<dashboard_server::ManualTradeRequest>(32);
     let manual_cmd_tx_arc = Arc::new(manual_cmd_tx);
+    // TODO: When the execution loop processes a manual trade fill, it sends the fill details
+    // here so the strategy thread can register the position in exit_evaluator / lifecycle_mgr.
+    // For now the sender is unused because the full gateway-call path is not yet wired.
     let (_manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
 
     {

@@ -2005,13 +2005,18 @@ async fn api_manual_trade(
         });
     }
 
-    match state.manual_trade_tx.try_send(req.clone()) {
+    // Capture fields for logging before req is moved into the channel
+    let req_size = req.size;
+    let req_sl = req.stop_loss;
+    let req_tp = req.take_profit;
+
+    match state.manual_trade_tx.try_send(req) {
         Ok(()) => {
             info!("[dashboard] Manual trade submitted: {} {} {} contracts SL={} TP={}",
-                req.side, req.symbol, req.size, req.stop_loss, req.take_profit);
+                side_lower, sym_upper, req_size, req_sl, req_tp);
             Json(ManualTradeResponse {
                 success: true,
-                message: format!("Manual trade submitted: {} {} {} contracts", req.side, req.symbol, req.size),
+                message: format!("Manual trade submitted: {} {} {} contracts", side_lower, sym_upper, req_size),
                 order_id: None,
             })
         }

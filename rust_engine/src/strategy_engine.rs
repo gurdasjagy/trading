@@ -937,7 +937,7 @@ mod tests {
         let metrics = MicrostructureMetrics {
             mid_price: 50000.0,
             spread_bps: 5.0,
-            imbalance: 0.05, // Below threshold
+            imbalance: 0.01, // Below 3% threshold (IMBALANCE_ENTRY_THRESHOLD = 0.03)
             bid_depth_usdt: 50000.0,
             ask_depth_usdt: 48000.0,
             vpin: 0.2,

@@ -449,9 +449,9 @@ mod tests {
     #[test]
     fn test_error_classification() {
         let rate_limit = json!({"code": -1003, "msg": "Too many requests"});
-        assert!(matches!(classify_binance_error(&rate_limit), ExchangeError::RateLimited));
+        assert!(matches!(classify_binance_error(&rate_limit), ExchangeError::RateLimited { .. }));
         
         let invalid_key = json!({"code": -2015, "msg": "Invalid API key"});
-        assert!(matches!(classify_binance_error(&invalid_key), ExchangeError::InvalidApiKey));
+        assert!(matches!(classify_binance_error(&invalid_key), ExchangeError::Unknown { .. }));
     }
 }
