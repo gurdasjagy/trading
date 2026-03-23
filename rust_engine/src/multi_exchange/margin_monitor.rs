@@ -289,12 +289,13 @@ impl CrossVenueMarginMonitor {
                         balance,  // Total equity (simplified)
                         0.0,      // Unrealized PnL (would need position query)
                     );
+                    let margin_ratio = health.margin_ratio;
                     self.update_health(health);
                     info!(
                         "[margin] {} balance: ${:.2} (margin: {:.1}%)",
                         exchange.name(),
                         balance,
-                        health.margin_ratio * 100.0
+                        margin_ratio * 100.0
                     );
                 }
                 Err(e) => {

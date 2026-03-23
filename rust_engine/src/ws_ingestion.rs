@@ -452,7 +452,12 @@ impl WsIngestion {
         drop(book_ref);
 
         let regime = RegimeState::default();
-        if let Some(intent) = self.strategy.evaluate(&metrics, &regime, book_key) {
+        // Create a static MlWeightReader for ws_ingestion context
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = {
+            static ML_WEIGHTS: std::sync::OnceLock<crate::ml_weight_receiver::MlWeightReader> = std::sync::OnceLock::new();
+            ML_WEIGHTS.get_or_init(|| crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights"))
+        };
+        if let Some(intent) = self.strategy.evaluate(&metrics, &regime, book_key, ml_weights, 0) {
             let emit_ts = now_micros();
             let latency_us = (emit_ts - recv_ts_us).max(0) as u64;
 
@@ -550,6 +555,22 @@ fn compute_microstructure(book: &RustOrderBook) -> MicrostructureMetrics {
         ask_depth_usdt: ask_depth,
         vpin: 0.0,
         last_trade_is_buy: None,
+        cvd_5m: 0.0,
+        cvd_15m: 0.0,
+        cvd_1h: 0.0,
+        gamma_flip_btc: None,
+        gamma_flip_eth: None,
+        wyckoff_phase: "Unknown".to_string(),
+        fib_nearest_level: 0.0,
+        ichimoku_cloud_position: "Unknown".to_string(),
+        mm_inventory_pressure: 0.0,
+        btc_eth_correlation: 0.0,
+        cvd_divergence_bearish: false,
+        cvd_divergence_bullish: false,
+        funding_rate: 0.0,
+        vpoc_distance_pct: 1.0,
+        realized_vol_regime: "Normal".to_string(),
+        cascade_active: false,
     }
 }
 

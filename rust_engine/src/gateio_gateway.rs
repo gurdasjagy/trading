@@ -52,9 +52,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::circuit_breaker::{CircuitBreaker, TripReason};
 use crate::execution_gateway::{
-    ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, PlacementType, Position,
+    ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, RustTicker, Position,
     now_ms, now_us,
 };
+use crate::execution_state::PlacementType;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2025,6 +2026,76 @@ impl ExecutionGateway for GateIoGateway {
         Ok(positions)
     }
 
+    async fn get_order_status(&self, order_id: &str, symbol: &str)
+        -> Result<Option<OrderResult>, ExchangeError>
+    {
+        let normalized = Self::normalize_symbol(symbol);
+        let path = format!("/futures/usdt/orders/{}", order_id);
+        let query = format!("contract={}", normalized);
+        match self.rest_get(&path, &query).await {
+            Ok(response) => {
+                let status = response.get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let filled_size = response.get("size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    - response.get("left")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                let avg_fill_price = response.get("fill_price")
+                    .and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| response.get("fill_price").and_then(|v| v.as_f64()))
+                    .unwrap_or(0.0);
+                Ok(Some(OrderResult {
+                    order_id: order_id.to_string(),
+                    status,
+                    filled_size,
+                    avg_fill_price,
+                    fee: 0.0,
+                    latency_us: 0,
+                    exchange_timestamp: now_ms(),
+                    rejection_reason: None,
+                }))
+            }
+            Err(ExchangeError::Unknown { ref code, .. }) if code == "ORDER_NOT_FOUND" => {
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// FIX 6: Submit a conditional stop-loss order to Gate.io via price_trigger API.
+    async fn submit_conditional_sl(
+        &self,
+        symbol: &str,
+        parent_side: &OrderSide,
+        filled_size: i64,
+        sl_price: f64,
+    ) -> Result<(), ExchangeError> {
+        self.submit_sl_tp_orders(symbol, parent_side, filled_size, Some(sl_price), None).await;
+        Ok(())
+    }
+
+    /// FIX 6: Submit a conditional take-profit order to Gate.io via price_trigger API.
+    async fn submit_conditional_tp(
+        &self,
+        symbol: &str,
+        parent_side: &OrderSide,
+        filled_size: i64,
+        tp_price: f64,
+    ) -> Result<(), ExchangeError> {
+        self.submit_sl_tp_orders(symbol, parent_side, filled_size, None, Some(tp_price)).await;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-trait methods on GateIoGateway
+// ---------------------------------------------------------------------------
+
+impl GateIoGateway {
     /// Monitor liquidation prices for all open positions.
     ///
     /// Queries `/futures/usdt/positions` REST endpoint, extracts `liq_price`,
@@ -2184,69 +2255,6 @@ impl ExecutionGateway for GateIoGateway {
         Ok(())
     }
 
-    async fn get_order_status(&self, order_id: &str, symbol: &str)
-        -> Result<Option<OrderResult>, ExchangeError>
-    {
-        let normalized = Self::normalize_symbol(symbol);
-        let path = format!("/futures/usdt/orders/{}", order_id);
-        let query = format!("contract={}", normalized);
-        match self.rest_get(&path, &query).await {
-            Ok(response) => {
-                let status = response.get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let filled_size = response.get("size")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-                    - response.get("left")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                let avg_fill_price = response.get("fill_price")
-                    .and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
-                    .or_else(|| response.get("fill_price").and_then(|v| v.as_f64()))
-                    .unwrap_or(0.0);
-                Ok(Some(OrderResult {
-                    order_id: order_id.to_string(),
-                    status,
-                    filled_size,
-                    avg_fill_price,
-                    fee: 0.0,
-                    latency_us: 0,
-                    exchange_timestamp: now_ms(),
-                    rejection_reason: None,
-                }))
-            }
-            Err(ExchangeError::Unknown { ref code, .. }) if code == "ORDER_NOT_FOUND" => {
-                Ok(None)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// FIX 6: Submit a conditional stop-loss order to Gate.io via price_trigger API.
-    async fn submit_conditional_sl(
-        &self,
-        symbol: &str,
-        parent_side: &OrderSide,
-        filled_size: i64,
-        sl_price: f64,
-    ) -> Result<(), ExchangeError> {
-        self.submit_sl_tp_orders(symbol, parent_side, filled_size, Some(sl_price), None).await;
-        Ok(())
-    }
-
-    /// FIX 6: Submit a conditional take-profit order to Gate.io via price_trigger API.
-    async fn submit_conditional_tp(
-        &self,
-        symbol: &str,
-        parent_side: &OrderSide,
-        filled_size: i64,
-        tp_price: f64,
-    ) -> Result<(), ExchangeError> {
-        self.submit_sl_tp_orders(symbol, parent_side, filled_size, None, Some(tp_price)).await;
-        Ok(())
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

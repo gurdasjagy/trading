@@ -329,7 +329,7 @@ impl PreTradeRiskEngine {
         // VaR_99% ≈ 2.33 * σ * sqrt(10) * notional
         // For a $1000 position with 2% daily vol: VaR ≈ $147
         let daily_vol = 0.02; // 2% daily volatility assumption
-        let horizon_days = 10.0;
+        let horizon_days: f64 = 10.0;
         let confidence_z = 2.33; // 99% confidence (z-score)
         let notional_usd = notional_fp as f64 / 1e8;
         let var_99 = confidence_z * daily_vol * horizon_days.sqrt() * notional_usd;

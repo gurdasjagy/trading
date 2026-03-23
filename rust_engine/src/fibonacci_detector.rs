@@ -78,23 +78,25 @@ impl FibonacciDetector {
 
     fn detect_swings(&mut self) {
         // Detect swing highs and lows in 1h window
-        self.detect_swing_in_window(&self.price_history_1h.iter().cloned().collect::<Vec<_>>(), &mut self.swing_points_1h);
+        let history_1h: Vec<_> = self.price_history_1h.iter().cloned().collect();
+        Self::detect_swing_in_window_static(&history_1h, &mut self.swing_points_1h, self.lookback_period);
         
         // Detect swing highs and lows in 4h window
         if self.price_history_4h.len() >= self.lookback_period * 2 + 1 {
-            self.detect_swing_in_window(&self.price_history_4h.iter().cloned().collect::<Vec<_>>(), &mut self.swing_points_4h);
+            let history_4h: Vec<_> = self.price_history_4h.iter().cloned().collect();
+            Self::detect_swing_in_window_static(&history_4h, &mut self.swing_points_4h, self.lookback_period);
         }
     }
 
-    fn detect_swing_in_window(&self, history: &[(u64, f64)], swing_points: &mut VecDeque<SwingPoint>) {
-        if history.len() < self.lookback_period * 2 + 1 {
+    fn detect_swing_in_window_static(history: &[(u64, f64)], swing_points: &mut VecDeque<SwingPoint>, lookback_period: usize) {
+        if history.len() < lookback_period * 2 + 1 {
             return;
         }
 
         let len = history.len();
-        let idx = len - self.lookback_period - 1;
+        let idx = len - lookback_period - 1;
         
-        if idx < self.lookback_period || idx + self.lookback_period >= len {
+        if idx < lookback_period || idx + lookback_period >= len {
             return;
         }
 
@@ -102,7 +104,7 @@ impl FibonacciDetector {
         
         // Check if it's a swing high
         let mut is_swing_high = true;
-        for i in (idx - self.lookback_period)..=(idx + self.lookback_period) {
+        for i in (idx - lookback_period)..=(idx + lookback_period) {
             if i != idx && history[i].1 >= price {
                 is_swing_high = false;
                 break;
@@ -111,7 +113,7 @@ impl FibonacciDetector {
 
         // Check if it's a swing low
         let mut is_swing_low = true;
-        for i in (idx - self.lookback_period)..=(idx + self.lookback_period) {
+        for i in (idx - lookback_period)..=(idx + lookback_period) {
             if i != idx && history[i].1 <= price {
                 is_swing_low = false;
                 break;

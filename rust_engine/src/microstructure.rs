@@ -963,7 +963,6 @@ impl MicrostructureEngine {
     pub fn is_trade_flow_ready(&self) -> bool {
         self.trade_flow_analyzer.is_ready()
     }
-}
 
     fn compute_edge_score(
         &self,

@@ -48,6 +48,7 @@ pub mod portfolio_receiver;
 pub mod exec_confirm_broadcast;
 pub mod regime_adapter;
 pub mod signal_adapter;
+pub mod health_monitor;
 
 /// Magic number for bridge SHM headers: "RUSTBRDG" in little-endian.
 pub const BRIDGE_MAGIC: u64 = 0x5255_5354_4252_4447;

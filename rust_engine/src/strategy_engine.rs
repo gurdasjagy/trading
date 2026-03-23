@@ -44,6 +44,7 @@
 
 use std::collections::{VecDeque, HashMap};
 
+use serde::{Serialize, Deserialize};
 use tracing::{debug, info};
 
 use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
