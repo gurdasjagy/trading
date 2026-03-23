@@ -105,6 +105,12 @@ pub struct ThreadTopology {
     /// Core ID for Gate.io WS ingestion thread.
     #[serde(default = "default_ws_gateio_core")]
     pub ws_gateio_core: usize,
+    /// Core ID for Binance WS ingestion thread (multi-exchange mode only).
+    #[serde(default = "default_ws_binance_core")]
+    pub ws_binance_core: usize,
+    /// Core ID for Bybit WS ingestion thread (multi-exchange mode only).
+    #[serde(default = "default_ws_bybit_core")]
+    pub ws_bybit_core: usize,
 
     /// Core ID for orderbook builder thread.
     #[serde(default = "default_book_builder_core")]
@@ -124,6 +130,8 @@ pub struct ThreadTopology {
 }
 
 fn default_ws_gateio_core() -> usize { 2 }
+fn default_ws_binance_core() -> usize { 12 }
+fn default_ws_bybit_core() -> usize { 13 }
 fn default_book_builder_core() -> usize { 4 }
 fn default_strategy_core() -> usize { 5 }
 fn default_execution_core() -> usize { 6 }
@@ -137,7 +145,8 @@ impl ThreadTopology {
     ///   - 1-2 cores:  Minimal — WS + book on core 0, strategy + exec + telemetry on core 1
     ///   - 3-4 cores:  Constrained — core 0 reserved for OS, spread across 1-3
     ///   - 5-8 cores:  Standard — dedicated cores for each component
-    ///   - 9+ cores:   High-performance — original 32-core layout with micro cores
+    ///   - 9-13 cores: Extended — adds micro cores
+    ///   - 14+ cores:  Multi-exchange — dedicated cores for Binance/Bybit WS
     pub fn auto_detect() -> Self {
         let cpu_count = core_affinity::get_core_ids()
             .map(|ids| ids.len())
@@ -147,6 +156,8 @@ impl ThreadTopology {
             1 => {
                 Self {
                     ws_gateio_core: 0,
+                    ws_binance_core: 0,
+                    ws_bybit_core: 0,
                     book_builder_core: 0,
                     strategy_core: 0,
                     execution_core: 0,
@@ -157,6 +168,8 @@ impl ThreadTopology {
             2 => {
                 Self {
                     ws_gateio_core: 1,
+                    ws_binance_core: 1,
+                    ws_bybit_core: 1,
                     book_builder_core: 1,
                     strategy_core: 1,
                     execution_core: 1,
@@ -167,6 +180,8 @@ impl ThreadTopology {
             3 => {
                 Self {
                     ws_gateio_core: 1,
+                    ws_binance_core: 1,
+                    ws_bybit_core: 1,
                     book_builder_core: 1,
                     strategy_core: 2,
                     execution_core: 2,
@@ -177,6 +192,8 @@ impl ThreadTopology {
             4 => {
                 Self {
                     ws_gateio_core: 1,
+                    ws_binance_core: 1,
+                    ws_bybit_core: 1,
                     book_builder_core: 1,
                     strategy_core: 2,
                     execution_core: 2,
@@ -188,6 +205,8 @@ impl ThreadTopology {
                 let last = cpu_count - 1;
                 Self {
                     ws_gateio_core: 1,
+                    ws_binance_core: 1,  // Share with Gate.io
+                    ws_bybit_core: 1,    // Share with Gate.io
                     book_builder_core: 2.min(last),
                     strategy_core: 3.min(last),
                     execution_core: 4.min(last),
@@ -195,9 +214,24 @@ impl ThreadTopology {
                     microstructure_cores: if cpu_count >= 7 { vec![6.min(last)] } else { vec![] },
                 }
             }
-            _ => {
+            9..=13 => {
                 Self {
                     ws_gateio_core: 2,
+                    ws_binance_core: 2,  // Share with Gate.io
+                    ws_bybit_core: 2,    // Share with Gate.io
+                    book_builder_core: 3,
+                    strategy_core: 4,
+                    execution_core: 5,
+                    telemetry_core: 6,
+                    microstructure_cores: vec![7, 8, 9, 10],
+                }
+            }
+            _ => {
+                // 14+ cores: dedicated cores for multi-exchange WS ingestion
+                Self {
+                    ws_gateio_core: 2,
+                    ws_binance_core: 12,
+                    ws_bybit_core: 13,
                     book_builder_core: 3,
                     strategy_core: 4,
                     execution_core: 5,
@@ -216,6 +250,8 @@ impl ThreadTopology {
 
         let max_core = [
             self.ws_gateio_core,
+            self.ws_binance_core,
+            self.ws_bybit_core,
             self.book_builder_core,
             self.strategy_core,
             self.execution_core,
@@ -556,6 +592,160 @@ impl Default for AlertManagerConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-Exchange Configuration
+// ---------------------------------------------------------------------------
+
+/// Smart Order Router configuration (TOML format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SorConfigToml {
+    /// Minimum order size (USDT) to trigger splitting across exchanges.
+    #[serde(default = "default_sor_min_split")]
+    pub min_split_size_usdt: f64,
+    /// Maximum number of exchanges to split across (1-3).
+    #[serde(default = "default_sor_max_venues")]
+    pub max_venues: usize,
+    /// Maximum slippage tolerance in basis points.
+    #[serde(default = "default_sor_max_slippage")]
+    pub max_slippage_bps: f64,
+    /// Prefer maker orders when spread allows.
+    #[serde(default = "default_sor_prefer_maker")]
+    pub prefer_maker: bool,
+}
+
+fn default_sor_min_split() -> f64 { 5000.0 }
+fn default_sor_max_venues() -> usize { 3 }
+fn default_sor_max_slippage() -> f64 { 30.0 }
+fn default_sor_prefer_maker() -> bool { true }
+
+impl Default for SorConfigToml {
+    fn default() -> Self {
+        Self {
+            min_split_size_usdt: default_sor_min_split(),
+            max_venues: default_sor_max_venues(),
+            max_slippage_bps: default_sor_max_slippage(),
+            prefer_maker: default_sor_prefer_maker(),
+        }
+    }
+}
+
+/// Funding Rate Arbitrage configuration (TOML format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FundingArbConfigToml {
+    /// Minimum net rate spread to consider actionable (e.g., 0.00005 = 0.005%).
+    #[serde(default = "default_funding_min_net_rate")]
+    pub min_net_rate: f64,
+    /// Minimum annualized APR to consider actionable (e.g., 0.10 = 10%).
+    #[serde(default = "default_funding_min_apr")]
+    pub min_annualized_apr: f64,
+    /// Refresh interval in seconds.
+    #[serde(default = "default_funding_refresh_interval")]
+    pub refresh_interval_secs: u64,
+}
+
+fn default_funding_min_net_rate() -> f64 { 0.00005 }
+fn default_funding_min_apr() -> f64 { 0.10 }
+fn default_funding_refresh_interval() -> u64 { 60 }
+
+impl Default for FundingArbConfigToml {
+    fn default() -> Self {
+        Self {
+            min_net_rate: default_funding_min_net_rate(),
+            min_annualized_apr: default_funding_min_apr(),
+            refresh_interval_secs: default_funding_refresh_interval(),
+        }
+    }
+}
+
+/// Cross-Venue Margin Monitor configuration (TOML format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarginMonitorConfigToml {
+    /// Minimum acceptable margin ratio before alert (e.g., 0.30 = 30%).
+    #[serde(default = "default_margin_min_ratio")]
+    pub min_margin_ratio: f64,
+    /// Critical margin ratio threshold (e.g., 0.15 = 15%).
+    #[serde(default = "default_margin_critical_ratio")]
+    pub critical_margin_ratio: f64,
+    /// Refresh interval in seconds.
+    #[serde(default = "default_margin_refresh_interval")]
+    pub refresh_interval_secs: u64,
+}
+
+fn default_margin_min_ratio() -> f64 { 0.30 }
+fn default_margin_critical_ratio() -> f64 { 0.15 }
+fn default_margin_refresh_interval() -> u64 { 30 }
+
+impl Default for MarginMonitorConfigToml {
+    fn default() -> Self {
+        Self {
+            min_margin_ratio: default_margin_min_ratio(),
+            critical_margin_ratio: default_margin_critical_ratio(),
+            refresh_interval_secs: default_margin_refresh_interval(),
+        }
+    }
+}
+
+/// Multi-Exchange Feature configuration.
+///
+/// When `USE_MULTI_EXCHANGE=on`, this configuration controls:
+/// - Simultaneous connections to Gate.io, Binance, and Bybit
+/// - Consolidated Global Order Book fusion
+/// - Smart Order Routing across all exchanges
+/// - Cross-exchange funding rate arbitrage detection
+/// - Cross-venue margin health monitoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiExchangeConfig {
+    /// Master toggle — mirrors USE_MULTI_EXCHANGE env var.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Binance Futures API key.
+    pub binance_api_key: Option<String>,
+    /// Binance Futures API secret.
+    pub binance_secret_key: Option<String>,
+    /// Use Binance Futures testnet.
+    #[serde(default)]
+    pub binance_testnet: bool,
+    /// Bybit v5 API key.
+    pub bybit_api_key: Option<String>,
+    /// Bybit v5 API secret.
+    pub bybit_secret_key: Option<String>,
+    /// Use Bybit testnet.
+    #[serde(default)]
+    pub bybit_testnet: bool,
+    /// Smart Order Router configuration.
+    #[serde(default)]
+    pub sor: SorConfigToml,
+    /// Funding rate arbitrage configuration.
+    #[serde(default)]
+    pub funding_arb: FundingArbConfigToml,
+    /// Margin monitor configuration.
+    #[serde(default)]
+    pub margin_monitor: MarginMonitorConfigToml,
+    /// Maximum open positions when multi-exchange is enabled (default: 5).
+    #[serde(default = "default_multi_max_positions")]
+    pub max_open_positions: u32,
+}
+
+fn default_multi_max_positions() -> u32 { 5 }
+
+impl Default for MultiExchangeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            binance_api_key: None,
+            binance_secret_key: None,
+            binance_testnet: false,
+            bybit_api_key: None,
+            bybit_secret_key: None,
+            bybit_testnet: false,
+            sor: SorConfigToml::default(),
+            funding_arb: FundingArbConfigToml::default(),
+            margin_monitor: MarginMonitorConfigToml::default(),
+            max_open_positions: default_multi_max_positions(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared Memory Config
 // ---------------------------------------------------------------------------
 
@@ -755,6 +945,13 @@ pub struct EngineConfig {
     /// Feature 8: Alert Manager
     #[serde(default)]
     pub alert_manager: AlertManagerConfig,
+    // === Multi-Exchange Feature (USE_MULTI_EXCHANGE) ===
+    /// Master toggle for multi-exchange mode.
+    #[serde(default)]
+    pub multi_exchange_enabled: bool,
+    /// Multi-exchange configuration (Binance, Bybit credentials and settings).
+    #[serde(default)]
+    pub multi_exchange: MultiExchangeConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +1032,8 @@ impl Default for EngineConfig {
             fee_optimizer: FeeOptimizerConfig::default(),
             adaptive_twap: AdaptiveTwapConfig::default(),
             alert_manager: AlertManagerConfig::default(),
+            multi_exchange_enabled: false,
+            multi_exchange: MultiExchangeConfig::default(),
         }
     }
 }

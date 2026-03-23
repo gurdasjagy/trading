@@ -55,16 +55,13 @@ fn classify_binance_error(body: &Value) -> ExchangeError {
     
     match code {
         -1000 => ExchangeError::Unknown { code: code.to_string(), message: msg.to_string() },
-        -1001 => ExchangeError::RateLimited,
-        -1002 | -2015 => ExchangeError::InvalidApiKey,
-        -1003 => ExchangeError::RateLimited,
-        -1013 | -4003 | -4014 | -4015 => ExchangeError::MinSizeViolation,
+        -1001 | -1003 => ExchangeError::RateLimited { retry_after_ms: 1000 },
+        -1002 | -2015 => ExchangeError::Unknown { code: "INVALID_API_KEY".to_string(), message: msg.to_string() },
+        -1013 | -4003 | -4014 | -4015 => ExchangeError::MinimumOrderSize { min_size: 1 },
         -1021 => ExchangeError::Timeout, // Timestamp outside recvWindow
-        -2010 | -2011 => ExchangeError::InsufficientBalance,
-        -2019 => ExchangeError::InsufficientMargin,
-        -2021 => ExchangeError::PostOnlyWouldTake,
-        -2022 => ExchangeError::ReduceOnlyViolation,
-        -4028 | -4030 => ExchangeError::NotionalTooSmall,
+        -2010 | -2011 | -2019 => ExchangeError::InsufficientBalance,
+        -2021 | -2022 => ExchangeError::Unknown { code: "ORDER_REJECTED".to_string(), message: msg.to_string() },
+        -4028 | -4030 => ExchangeError::MinimumOrderSize { min_size: 1 },
         -4131 => ExchangeError::PositionNotFound,
         _ => ExchangeError::Unknown { code: code.to_string(), message: msg.to_string() },
     }
@@ -385,6 +382,55 @@ impl ExecutionGateway for BinanceGateway {
         }
         
         Ok(0.0)
+    }
+
+    async fn get_positions(&self) -> Result<Vec<Position>, ExchangeError> {
+        let response = self.get_signed("/fapi/v2/positionRisk", "").await?;
+        
+        let raw_positions = response.as_array().cloned().unwrap_or_default();
+        let mut positions = Vec::new();
+
+        for pos in &raw_positions {
+            let size_str = pos.get("positionAmt").and_then(|v| v.as_str()).unwrap_or("0");
+            let size: f64 = size_str.parse().unwrap_or(0.0);
+            
+            if size.abs() < 1e-8 {
+                continue;
+            }
+
+            let symbol = pos.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            
+            let entry_price = pos
+                .get("entryPrice")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            
+            let unrealized_pnl = pos
+                .get("unRealizedProfit")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            
+            let leverage = pos
+                .get("leverage")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(1);
+            
+            let side = if size > 0.0 { "long" } else { "short" };
+            
+            positions.push(Position {
+                symbol,
+                size: (size.abs() * 1e8) as i64 * if size > 0.0 { 1 } else { -1 },
+                entry_price,
+                unrealized_pnl,
+                leverage,
+                side: side.to_string(),
+            });
+        }
+
+        Ok(positions)
     }
 }
 

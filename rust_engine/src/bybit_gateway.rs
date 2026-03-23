@@ -379,4 +379,61 @@ impl ExecutionGateway for BybitGateway {
             .unwrap_or(0.0);
         Ok(available)
     }
+
+    async fn get_positions(&self) -> Result<Vec<Position>, ExchangeError> {
+        let query = "category=linear&settleCoin=USDT";
+        let response = self.get_signed("/v5/position/list", query).await?;
+
+        let raw_positions = response
+            .get("result")
+            .and_then(|r| r.get("list"))
+            .and_then(|l| l.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut positions = Vec::new();
+
+        for pos in &raw_positions {
+            let size_str = pos.get("size").and_then(|v| v.as_str()).unwrap_or("0");
+            let size: i64 = size_str.parse().unwrap_or(0);
+            if size == 0 {
+                continue;
+            }
+
+            let side = pos.get("side").and_then(|v| v.as_str()).unwrap_or("None");
+            let signed_size = if side == "Sell" { -size } else { size };
+
+            let symbol = pos.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let entry_price = pos
+                .get("avgPrice")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            let unrealized_pnl = pos
+                .get("unrealisedPnl")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            let leverage = pos
+                .get("leverage")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|f| f as i32)
+                .unwrap_or(1);
+
+            positions.push(Position {
+                symbol,
+                size: signed_size,
+                entry_price,
+                unrealized_pnl,
+                leverage,
+                side: side.to_lowercase(),
+            });
+        }
+
+        Ok(positions)
+    }
 }

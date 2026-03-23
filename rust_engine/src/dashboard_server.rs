@@ -115,6 +115,20 @@ pub struct DashboardState {
     trades_json: std::sync::RwLock<String>,
     /// JSON-encoded orderbook BBO (best bid/offer) for active symbols.
     orderbook_json: std::sync::RwLock<String>,
+
+    // ── Multi-Exchange State ──────────────────────────────────────────────────
+    /// Whether multi-exchange mode is active.
+    pub multi_exchange_enabled: AtomicBool,
+    /// Per-exchange balance (Gate.io=0, Binance=1, Bybit=2) in USDT x 1e8.
+    pub exchange_balances: [AtomicI64; 3],
+    /// Per-exchange margin ratio x 10000 (e.g. 7500 = 75.00%).
+    pub exchange_margin_ratios: [AtomicI64; 3],
+    /// JSON-encoded multi-exchange positions (includes exchange field per position).
+    multi_exchange_positions_json: std::sync::RwLock<String>,
+    /// JSON-encoded funding rate arbitrage opportunities.
+    funding_arb_json: std::sync::RwLock<String>,
+    /// JSON-encoded global book snapshot (best bid/ask per exchange per symbol).
+    global_book_json: std::sync::RwLock<String>,
 }
 
 impl DashboardState {
@@ -152,6 +166,13 @@ impl DashboardState {
             positions_json: std::sync::RwLock::new("[]".to_string()),
             trades_json: std::sync::RwLock::new("[]".to_string()),
             orderbook_json: std::sync::RwLock::new("{}".to_string()),
+            // Multi-Exchange State
+            multi_exchange_enabled: AtomicBool::new(false),
+            exchange_balances: [AtomicI64::new(0), AtomicI64::new(0), AtomicI64::new(0)],
+            exchange_margin_ratios: [AtomicI64::new(10000), AtomicI64::new(10000), AtomicI64::new(10000)],
+            multi_exchange_positions_json: std::sync::RwLock::new("[]".to_string()),
+            funding_arb_json: std::sync::RwLock::new("[]".to_string()),
+            global_book_json: std::sync::RwLock::new("{}".to_string()),
         }
     }
 
@@ -191,6 +212,48 @@ impl DashboardState {
         }
     }
 
+    // ── Multi-Exchange Setters ──
+
+    /// Set whether multi-exchange mode is enabled.
+    pub fn set_multi_exchange_enabled(&self, enabled: bool) {
+        self.multi_exchange_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Set balance for a specific exchange (0=Gate.io, 1=Binance, 2=Bybit).
+    pub fn set_exchange_balance(&self, exchange_idx: usize, balance: f64) {
+        if exchange_idx < 3 {
+            self.exchange_balances[exchange_idx].store((balance * 1e8) as i64, Ordering::Relaxed);
+        }
+    }
+
+    /// Set margin ratio for a specific exchange (0=Gate.io, 1=Binance, 2=Bybit).
+    pub fn set_exchange_margin_ratio(&self, exchange_idx: usize, ratio: f64) {
+        if exchange_idx < 3 {
+            self.exchange_margin_ratios[exchange_idx].store((ratio * 10000.0) as i64, Ordering::Relaxed);
+        }
+    }
+
+    /// Set multi-exchange positions JSON.
+    pub fn set_multi_exchange_positions_json(&self, json: String) {
+        if let Ok(mut guard) = self.multi_exchange_positions_json.write() {
+            *guard = json;
+        }
+    }
+
+    /// Set funding arbitrage opportunities JSON.
+    pub fn set_funding_arb_json(&self, json: String) {
+        if let Ok(mut guard) = self.funding_arb_json.write() {
+            *guard = json;
+        }
+    }
+
+    /// Set global book snapshot JSON.
+    pub fn set_global_book_json(&self, json: String) {
+        if let Ok(mut guard) = self.global_book_json.write() {
+            *guard = json;
+        }
+    }
+
     // ── Getter helpers ──
 
     fn balance(&self) -> f64 {
@@ -225,6 +288,49 @@ impl DashboardState {
 
     fn orderbook_str(&self) -> String {
         self.orderbook_json
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "{}".to_string())
+    }
+
+    // ── Multi-Exchange Getters ──
+
+    fn is_multi_exchange_enabled(&self) -> bool {
+        self.multi_exchange_enabled.load(Ordering::Relaxed)
+    }
+
+    fn exchange_balance(&self, idx: usize) -> f64 {
+        if idx < 3 {
+            self.exchange_balances[idx].load(Ordering::Relaxed) as f64 / 1e8
+        } else {
+            0.0
+        }
+    }
+
+    fn exchange_margin_ratio(&self, idx: usize) -> f64 {
+        if idx < 3 {
+            self.exchange_margin_ratios[idx].load(Ordering::Relaxed) as f64 / 10000.0
+        } else {
+            1.0
+        }
+    }
+
+    fn multi_exchange_positions_str(&self) -> String {
+        self.multi_exchange_positions_json
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn funding_arb_str(&self) -> String {
+        self.funding_arb_json
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn global_book_str(&self) -> String {
+        self.global_book_json
             .read()
             .map(|g| g.clone())
             .unwrap_or_else(|_| "{}".to_string())
@@ -720,7 +826,7 @@ async fn api_strategy_performance() -> Json<Value> {
     Json(json!({ "strategies": [] }))
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════��═════════════════════════════════════════
 // Gate.io Market Data Proxy Endpoints
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -1482,7 +1588,7 @@ fn spawn_ws_broadcast_task(state: Arc<DashboardState>, tx: broadcast::Sender<Str
     });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════���══
 // Template engine initialization
 // ═══════════════════════════════════════════════════════════════════════════
 
