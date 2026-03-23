@@ -13,13 +13,13 @@ from .base_exchange import (
     PositionSide,
     Ticker,
 )
-from .bingx_client import BingXClient
-from .bitget_client import BitgetClient
+
+
 from .ccxt_exchange import SUPPORTED_EXCHANGES, CcxtExchange
 from .exchange_factory import create_exchange
 from .gateio_client import GateIOClient
 from .local_orderbook import LocalOrderBookManager
-from .mexc_client import MEXCClient
+
 from .order_manager import OrderManager, OrderTracker
 from .paper_exchange import PaperExchange
 from .position_manager import PositionManager, PositionTracker
@@ -38,10 +38,10 @@ __all__ = [
     "MarginType",
     "Ticker",
     # Exchange clients
-    "MEXCClient",
+    
     "GateIOClient",
-    "BingXClient",
-    "BitgetClient",
+    
+    
     "CcxtExchange",
     "PaperExchange",
     "SUPPORTED_EXCHANGES",
