@@ -105,7 +105,6 @@ use crate::rate_limiter::RateLimiterPool;
 use crate::smart_entry::{SmartEntryRouter as SmartEntryRouterV2, VolatilityTrailingStop, AdverseSelectionGuard};
 use crate::dashboard_server::DashboardState;
 use crate::correlation_limiter::CorrelationLimiter;
-use crate::risk_calculator;
 use crate::cumulative_delta::CumulativeDeltaTracker;
 use crate::volume_profile::VolumeProfile;
 use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
@@ -651,10 +650,6 @@ mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
 mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
 mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
 
-// ── Multi-Exchange Gateway Support (for arbitrage) ──
-mod bybit_gateway;   // Bybit v5 unified API gateway
-mod binance_gateway; // Binance Futures gateway
-
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
 // ---------------------------------------------------------------------------
@@ -1100,7 +1095,11 @@ fn strategy_evaluator_loop(
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
     let mut funding_check_counter: u64 = 0;
     // Upgrade 1: Funding rate monitor for arbitrage opportunities
-    let mut funding_monitor = funding_rate::FundingRateMonitor::new();
+    let mut funding_monitor = funding_rate::FundingRateMonitor::new(
+        std::env::var("GATEIO_API_KEY").unwrap_or_default(),
+        std::env::var("GATEIO_API_SECRET").unwrap_or_default(),
+        std::env::var("GATEIO_TESTNET").unwrap_or_default() == "true",
+    );
     // FIX 3: Track funding arb positions for exit logic (symbol_id -> (open_timestamp_ns, entry_price))
     let mut funding_arb_positions: HashMap<u16, (u64, f64)> = HashMap::new();
     info!("[strategy] 🧮 DustTracker initialized (max_dust=5.0)");
@@ -1253,12 +1252,13 @@ fn strategy_evaluator_loop(
                 }
                 
                 // Check for arbitrage opportunities (funding rate > 0.01%)
-                if let Some(opportunities) = funding_monitor.check_all_opportunities() {
+                {
+                    let opportunities = funding_monitor.check_all_opportunities();
                     for opp in opportunities {
-                        if opp.funding_rate_pct > 0.01 {
+                        if opp.rate_pct > 0.01 {
                             info!(
                                 "[strategy] 💰 Funding rate arbitrage: {} funding={:.4}% APR={:.2}% — opening SHORT position",
-                                opp.symbol, opp.funding_rate_pct, opp.annualized_apr
+                                opp.symbol, opp.rate_pct, opp.annualized_pct
                             );
                             
                             // Generate SHORT order to capture funding rate
@@ -1364,9 +1364,9 @@ fn strategy_evaluator_loop(
                 cvd_1h: cvd_tracker.get_cvd_1h(),
                 gamma_flip_btc: gamma_reader.get_gamma_flip_level("BTC"),
                 gamma_flip_eth: gamma_reader.get_gamma_flip_level("ETH"),
-                wyckoff_phase: wyckoff_phase.to_string(),
+                wyckoff_phase: format!("{:?}", wyckoff_phase),
                 fib_nearest_level: fib_level_pct,
-                ichimoku_cloud_position: ichimoku_position.to_string(),
+                ichimoku_cloud_position: format!("{:?}", ichimoku_position),
                 mm_inventory_pressure,
                 btc_eth_correlation: btc_eth_corr,
                 // Task 8: Add new FEATURE 1 fields
@@ -1374,7 +1374,7 @@ fn strategy_evaluator_loop(
                 cvd_divergence_bullish: bullish_divergence,
                 funding_rate: funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001),
                 vpoc_distance_pct: volume_profile.get_vpoc().map(|vpoc| ((current_price - vpoc) / vpoc).abs()).unwrap_or(1.0),
-                realized_vol_regime: realized_vol_calc.get_regime().to_string(),
+                realized_vol_regime: format!("{:?}", realized_vol_calc.get_regime()),
                 cascade_active: liq_detector.get_state() == LiquidationCascadeState::Active || liq_detector.get_state() == LiquidationCascadeState::Extreme,
             };
 
@@ -1724,8 +1724,8 @@ fn strategy_evaluator_loop(
                     if let Some(levels) = fib_levels {
                         let nearest_fib_price = levels.levels.iter()
                             .min_by(|a, b| {
-                                let dist_a = (current_price - a).abs();
-                                let dist_b = (current_price - b).abs();
+                                let dist_a = (current_price - *a).abs();
+                                let dist_b = (current_price - *b).abs();
                                 dist_a.partial_cmp(&dist_b).unwrap()
                             })
                             .copied()
@@ -3216,10 +3216,8 @@ fn main() {
 
     // Bridge health monitor: tracks IPC health metrics and exposes /health endpoint
     let mut health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
-    match health_monitor.init() {
-        Ok(()) => info!("📡 Bridge: Health monitor initialized"),
-        Err(e) => warn!("📡 Bridge: Health monitor init failed (non-fatal): {}", e),
-    }
+    // BridgeHealthMonitor is ready after new() — no separate init needed
+    info!("📡 Bridge: Health monitor initialized");
     let health_monitor: &'static parking_lot::Mutex<bridge_ipc::health_monitor::BridgeHealthMonitor> =
         Box::leak(Box::new(parking_lot::Mutex::new(health_monitor)));
 
@@ -3592,11 +3590,11 @@ fn main() {
                     // Every 120 heartbeats (~60s), log bridge health metrics
                     if report_counter % 120 == 0 {
                         let mut hm = health_mon.lock();
-                        hm.record_tick_broadcast(1, 0); // Dummy update to trigger health check
-                        let health = hm.get_health_status();
-                        info!("[telemetry] Bridge Health: tick_rate={:.1}/s, portfolio_rate={:.1}/s, exec_rate={:.1}/s, errors={}",
-                            health.tick_broadcast_rate, health.portfolio_rx_rate,
-                            health.exec_confirm_rate, health.total_errors);
+                        hm.update_rates();
+                        let health = hm.get_status();
+                        let metrics_json = hm.get_metrics_json();
+                        info!("[telemetry] Bridge Health: status={}, metrics={}",
+                            health, metrics_json);
                     }
 
                     thread::sleep(interval);
