@@ -1,0 +1,488 @@
+Note : You must add proper , planned and real working code according to the prompt . The prompt code suggest hints only. Use your own knowledge with proper planning where you finds that hints are not sufficient. Analyse the current code completely and deeply first.
+
+PROMPT: Trading Bot Fixes & Feature Implementation
+CONTEXT
+You are working on a Rust+Python institutional crypto trading bot. The Rust engine (rust_engine/src/) is the hot-path master. Python (crypto_trading_bot/) is the cold-path for ML/dashboard. The Rust dashboard server (dashboard_server.rs) has replaced the Python FastAPI dashboard as the primary web UI on port 8080.
+
+TASK 1: FIX BYBIT TESTNET URLs (Replace with Demo Trading URLs)
+Problem: Bybit's "testnet" (api-testnet.bybit.com) is a completely separate environment from live, NOT a demo/paper trading mode. The user needs Bybit Demo Trading which runs on mainnet infrastructure with simulated funds. API keys must be generated from the "Demo Trading" module inside the mainnet Bybit account.
+Files to modify:
+1a. rust_engine/src/bybit_gateway.rs
+Current code at line ~55:
+
+
+Insert at cursor
+fn base_url(&self) -> &str {
+    if self.testnet {
+        "https://api-testnet.bybit.com"
+    } else {
+        BYBIT_BASE_URL
+    }
+}
+
+Change to:
+
+
+Insert at cursor
+fn base_url(&self) -> &str {
+    if self.testnet {
+        "https://api-demo.bybit.com"
+    } else {
+        BYBIT_BASE_URL
+    }
+}
+
+1b. rust_engine/src/multi_exchange/ws_ingestion_multi.rs
+Current code at lines ~25-26:
+
+
+Insert at cursor
+const BYBIT_WS_LIVE: &str = "wss://stream.bybit.com/v5/public/linear";
+const BYBIT_WS_TESTNET: &str = "wss://stream-testnet.bybit.com/v5/public/linear";
+
+Change to:
+
+
+Insert at cursor
+const BYBIT_WS_LIVE: &str = "wss://stream.bybit.com/v5/public/linear";
+// Demo trading uses live public streams for market data.
+// Private streams (orders, positions) use wss://stream-demo.bybit.com
+const BYBIT_WS_TESTNET: &str = "wss://stream.bybit.com/v5/public/linear";
+
+Note: Bybit Demo Trading uses the exact same live public market data streams. Only private streams (order execution, position updates) use wss://stream-demo.bybit.com. Since ws_ingestion_multi.rs only subscribes to public orderbook data, it should use the live public endpoint.
+1c. rust_engine/src/main.rs - Update the diagnostic log messages
+In apply_env_overrides(), around line ~280, update the Bybit endpoint display:
+
+
+Insert at cursor
+eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}",
+    cfg.multi_exchange.bybit_testnet,
+    if cfg.multi_exchange.bybit_testnet { "https://api-demo.bybit.com" } else { "https://api.bybit.com" },
+    cfg.multi_exchange.bybit_api_key.is_some());
+
+Also in main() around line ~1050 where the Bybit WS URL is constructed:
+
+
+Insert at cursor
+let bybit_ws_url = if config.multi_exchange.bybit_testnet {
+    // Demo trading uses live public streams for market data
+    "wss://stream.bybit.com/v5/public/linear"
+} else {
+    "wss://stream.bybit.com/v5/public/linear"
+};
+
+1d. crypto_trading_bot/.env.example - Update Bybit documentation
+Replace the Bybit testnet comments:
+
+
+Insert at cursor
+# For demo trading: https://api-demo.bybit.com/
+# Demo trading uses mainnet API keys generated from the "Demo Trading" module.
+# Public WS: wss://stream.bybit.com/v5/public/linear (same as live)
+# Private WS: wss://stream-demo.bybit.com/v5/private
+BYBIT_API_KEY=your_bybit_api_key
+BYBIT_SECRET_KEY=your_bybit_secret_key
+# Set to true to use Bybit Demo Trading (https://api-demo.bybit.com)
+BYBIT_TESTNET=false
+
+
+TASK 2: FIX NO TRADES OPENING (Rust Strategy Engine Issues)
+Problem: The bot hasn't opened any trades. After thorough analysis, here are the root causes:
+2a. Multi-timeframe confluence filter blocks ALL signals when candle data isn't ready
+In strategy_engine.rs, the evaluate() method has a 15m EMA/RSI confluence filter that silently returns None when candle data doesn't meet criteria. But the CandleAggregator takes a long time to warm up (needs 50+ 15-minute candles = 12.5 hours minimum). During warmup, is_ready(Timeframe::M15) returns false, so the filter is skipped, but the candle aggregator may also not receive enough trade events to build candles.
+Fix in rust_engine/src/strategy_engine.rs - Add logging when confluence filter blocks:
+
+
+Insert at cursor
+// In the evaluate() method, after the confluence filter block:
+if candle_agg.is_ready(Timeframe::M15) {
+    if let Some(candle_15m) = candle_agg.get_candle(Timeframe::M15) {
+        let ema20 = candle_15m.ema20;
+        let ema50 = candle_15m.ema50;
+        let rsi = candle_15m.rsi14;
+        let is_long_signal = metrics.imbalance > 0.0;
+
+        if is_long_signal {
+            if ema20 <= ema50 || rsi <= 40.0 {
+                debug!(
+                    "[strategy] Long signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
+                    ema20, ema50, rsi
+                );
+                return None;
+            }
+        } else {
+            if ema20 >= ema50 || rsi >= 60.0 {
+                debug!(
+                    "[strategy] Short signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
+                    ema20, ema50, rsi
+                );
+                return None;
+            }
+        }
+    }
+} else {
+    // CRITICAL FIX: Log that confluence is not ready so user knows why no trades
+    debug!("[strategy] 15m candle data not ready yet - skipping confluence filter (warmup period)");
+}
+
+2b. The cascade_active gate blocks signals during any liquidation cascade detection
+In strategy_engine.rs evaluate():
+
+
+Insert at cursor
+if metrics.cascade_active {
+    return None;
+}
+
+The LiquidationCascadeDetector may be overly sensitive. Add logging:
+
+
+Insert at cursor
+if metrics.cascade_active {
+    info!("[strategy] Signal blocked: liquidation cascade active");
+    return None;
+}
+
+2c. Adaptive threshold may be too high
+The AdaptiveThreshold starts with min_threshold=0.02 (2%) but uses mean + 1.5*std_dev. On liquid pairs like BTC/USDT, the imbalance rarely exceeds 3-5%, so the adaptive threshold may climb above typical imbalance values, blocking all signals.
+Fix: Add a maximum cap to the adaptive threshold:
+
+
+Insert at cursor
+pub fn get_threshold(&self) -> f64 {
+    if self.imbalance_history.is_empty() {
+        return self.min_threshold;
+    }
+    let n = self.imbalance_history.len() as f64;
+    let mean = self.running_sum / n;
+    let variance = (self.running_sum_sq / n) - (mean * mean);
+    let std_dev = variance.max(0.0).sqrt();
+    let threshold = mean + self.std_multiplier * std_dev;
+    // Cap at 10% to prevent threshold from becoming unreachable
+    threshold.max(self.min_threshold).min(0.10)
+}
+
+2d. Order flow toxicity blocks signals too aggressively
+In main.rs strategy_evaluator_loop(), toxicity > 0.7 halts ALL signal generation. The TradeFlowAnalyzer may produce high toxicity scores during normal market conditions.
+Fix: Add logging before the halt:
+
+
+Insert at cursor
+if toxicity > 0.7 {
+    info!("[strategy] Order flow toxicity {:.2} > 0.7 - halting signal generation for this tick", toxicity);
+    continue;
+}
+
+
+TASK 3: FIX MULTI-EXCHANGE DASHBOARD BALANCE SHOWING 0
+Problem: The multi-exchange dashboard shows 0 balance for all exchanges because the DashboardState.exchange_balances are never populated with real data from the exchange APIs.
+Fix in rust_engine/src/main.rs - Add periodic balance fetching for all exchanges in the execution router loop.
+In the execution_router_loop() function, inside the periodic health check block (every 30s), add multi-exchange balance fetching. Currently only Gate.io balance is fetched. We need to also fetch Binance and Bybit balances when multi-exchange is enabled.
+The multi-exchange gateways are built in main() but not passed to the execution router. We need to:
+
+Pass the multi-exchange gateways to the execution router
+Fetch balances periodically and update dashboard_state
+
+Modify execution_router_loop signature to accept optional Binance/Bybit gateways:
+
+
+Insert at cursor
+fn execution_router_loop(
+    exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
+    manual_cmd_rx: crossbeam_channel::Receiver<dashboard_server::ManualTradeRequest>,
+    gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
+    forex_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
+    binance_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,  // NEW
+    bybit_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,    // NEW
+    circuit_breaker: &'static CircuitBreaker,
+    registry: Arc<SymbolRegistry>,
+    lifecycle_tracker: &'static OrderLifecycleTracker,
+    latency_tracker: &'static PipelineLatencyTracker,
+    position_slots: &'static PositionSlotManager,
+    dashboard_state: Arc<DashboardState>,
+    funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
+    exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
+    shared_prices: Arc<Vec<AtomicU64>>,
+)
+
+Then inside the health check block, add:
+
+
+Insert at cursor
+// Fetch multi-exchange balances
+if dashboard_state.multi_exchange_enabled.load(Ordering::Relaxed) {
+    // Gate.io balance (index 0) - already fetched above
+    if let Some(ref gw) = gateway {
+        match gw.get_balance().await {
+            Ok(bal) => dashboard_state.set_exchange_balance(0, bal),
+            Err(_) => {}
+        }
+    }
+    // Binance balance (index 1)
+    if let Some(ref bgw) = binance_gateway {
+        match bgw.get_balance().await {
+            Ok(bal) => dashboard_state.set_exchange_balance(1, bal),
+            Err(e) => debug!("[execution] Binance balance fetch failed: {}", e),
+        }
+    }
+    // Bybit balance (index 2)
+    if let Some(ref bygw) = bybit_gateway {
+        match bygw.get_balance().await {
+            Ok(bal) => dashboard_state.set_exchange_balance(2, bal),
+            Err(e) => debug!("[execution] Bybit balance fetch failed: {}", e),
+        }
+    }
+}
+
+Also update the main() function where execution_router_loop is spawned to pass the Binance/Bybit gateways. The gateways are currently built inside the multi-exchange init block but stored in a local multi_gateways HashMap. Extract them before the HashMap is dropped:
+
+
+Insert at cursor
+// After multi-exchange gateway construction, store clones for execution thread
+let binance_gw_for_exec: Option<Arc<dyn ExecutionGateway + Send + Sync>> = 
+    if config.multi_exchange_enabled {
+        // ... (clone from multi_gateways)
+    } else { None };
+let bybit_gw_for_exec: Option<Arc<dyn ExecutionGateway + Send + Sync>> = 
+    if config.multi_exchange_enabled {
+        // ... (clone from multi_gateways)
+    } else { None };
+
+
+TASK 4: IMPLEMENT MANUAL TRADE FEATURE ON DASHBOARD
+Problem: The manual trade feature exists partially. The ManualTradeRequest struct, the /api/manual-trade POST endpoint, and the manual_cmd_tx/manual_cmd_rx channels are already wired. However, the execution router only logs the manual trade request but does NOT actually execute it via the gateway.
+Fix in rust_engine/src/main.rs - In execution_router_loop(), replace the manual trade TODO with actual gateway execution:
+
+
+Insert at cursor
+// Check for manual trade requests from dashboard
+while let Ok(manual_req) = manual_cmd_rx.try_recv() {
+    let sym_upper = manual_req.symbol.replace('/', "_").to_uppercase();
+    let sym_id = registry.get_id(&sym_upper);
+    if sym_id == 0 {
+        warn!("[execution] Manual trade rejected: unknown symbol '{}'", sym_upper);
+        continue;
+    }
+    
+    info!("[execution] 🖐 Manual trade received: {} {} {} contracts lev={}x SL={:.4} TP={:.4}",
+        manual_req.side, sym_upper, manual_req.size, manual_req.leverage,
+        manual_req.stop_loss, manual_req.take_profit);
+    
+    let is_buy = manual_req.side.to_lowercase() == "buy";
+    
+    // Route to the appropriate gateway (default: Gate.io)
+    let target_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> = match manual_req.exchange.as_deref() {
+        Some("binance") => binance_gateway.as_ref(),
+        Some("bybit") => bybit_gateway.as_ref(),
+        _ => gateway.as_ref(), // Default to Gate.io
+    };
+    
+    if let Some(gw) = target_gw {
+        // Step 1: Set leverage
+        if let Err(e) = gw.set_leverage(&sym_upper, manual_req.leverage as i32).await {
+            warn!("[execution] Manual trade: failed to set leverage: {}", e);
+        }
+        
+        // Step 2: Set margin mode to isolated
+        if let Err(e) = gw.set_margin_mode(&sym_upper, "cross").await {
+            warn!("[execution] Manual trade: failed to set margin mode: {}", e);
+        }
+        
+        // Step 3: Build and submit the order
+        let side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
+        let order_type = if manual_req.price.is_some() {
+            execution_gateway::OrderType::Limit
+        } else {
+            execution_gateway::OrderType::Market
+        };
+        let tif = if manual_req.price.is_some() { "gtc" } else { "ioc" };
+        
+        let intent = execution_gateway::OrderIntent {
+            symbol: sym_upper.clone(),
+            side: side.clone(),
+            size: manual_req.size,
+            order_type,
+            price: manual_req.price,
+            reduce_only: false,
+            leverage: Some(manual_req.leverage as i32),
+            time_in_force: tif.to_string(),
+            slippage_cap_pct: Some(0.005),
+            placement: execution_state::PlacementType::AtBest,
+            stop_loss: Some(manual_req.stop_loss),
+            take_profit: Some(manual_req.take_profit),
+            confidence: 1.0,
+            signal_tag: "manual_dashboard".to_string(),
+        };
+        
+        match execution_gateway::submit_with_retry(&**gw, intent).await {
+            Ok(res) => {
+                info!("[execution] ✅ Manual trade filled: {} {} {} @ {:.4} (order_id={})",
+                    manual_req.side, sym_upper, res.filled_size, res.avg_fill_price, res.order_id);
+                
+                orders_submitted += 1;
+                dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
+                
+                // Track position entry for PnL calculation
+                position_entries.insert(sym_id, (res.avg_fill_price, res.filled_size, is_buy));
+                
+                // Submit SL/TP conditional orders
+                let parent_side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
+                let gw_clone = gw.clone();
+                let sym_clone = sym_upper.clone();
+                let sl = manual_req.stop_loss;
+                let tp = manual_req.take_profit;
+                let filled = res.filled_size;
+                tokio::spawn(async move {
+                    if sl > 0.0 {
+                        match gw_clone.submit_conditional_sl(&sym_clone, &parent_side, filled, sl).await {
+                            Ok(()) => info!("[execution] 🛡️ Manual trade SL placed: {} @ {:.4}", sym_clone, sl),
+                            Err(e) => warn!("[execution] Manual trade SL failed: {}", e),
+                        }
+                    }
+                    if tp > 0.0 {
+                        match gw_clone.submit_conditional_tp(&sym_clone, &parent_side, filled, tp).await {
+                            Ok(()) => info!("[execution] 🎯 Manual trade TP placed: {} @ {:.4}", sym_clone, tp),
+                            Err(e) => warn!("[execution] Manual trade TP failed: {}", e),
+                        }
+                    }
+                });
+                
+                // CRITICAL: Send position tracking info to strategy thread
+                // so exit_evaluator and lifecycle_mgr can monitor this position
+                // The _manual_pos_tx sender needs to be wired up
+                // For now, acquire a position slot
+                if !position_slots.try_acquire() {
+                    warn!("[execution] Manual trade: position slots full");
+                }
+            }
+            Err(e) => {
+                warn!("[execution] ❌ Manual trade failed: {}", e);
+            }
+        }
+    } else {
+        warn!("[execution] Manual trade: no gateway available for exchange {:?}", manual_req.exchange);
+    }
+}
+
+Also, wire up the _manual_pos_tx sender (currently unused) by renaming it to manual_pos_tx and sending position tracking data after a successful manual trade fill. In main(), change:
+
+
+Insert at cursor
+let (_manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
+
+to:
+
+
+Insert at cursor
+let (manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
+
+And pass manual_pos_tx to the execution router, then after a successful manual fill, send:
+
+
+Insert at cursor
+let _ = manual_pos_tx.try_send(dashboard_server::ManualPositionTrack {
+    symbol_id: sym_id,
+    is_long: is_buy,
+    entry_price: res.avg_fill_price,
+    size: res.filled_size,
+    leverage: manual_req.leverage as i32,
+    stop_loss: manual_req.stop_loss,
+    take_profit: manual_req.take_profit,
+});
+
+
+TASK 5: DASHBOARD DATA PIPELINE FIXES
+Problem: The Rust dashboard is the real/active dashboard (Python dashboard was the original but Rust replaced it). Data isn't being pushed properly.
+5a. Positions not showing on dashboard
+The positions_json in DashboardState is never updated with real position data. Add position syncing in the execution router health check:
+
+
+Insert at cursor
+// In the health check block, after fetching positions for slot reconciliation:
+if let Some(ref gw) = gateway {
+    match gw.get_positions().await {
+        Ok(positions) => {
+            // Update dashboard with real position data
+            let positions_json = serde_json::to_string(&positions).unwrap_or_else(|_| "[]".to_string());
+            dashboard_state.set_positions_json(positions_json);
+            // ... existing slot reconciliation code ...
+        }
+        Err(e) => { /* ... */ }
+    }
+}
+
+5b. Multi-exchange positions not synced
+When multi-exchange is enabled, also fetch positions from Binance and Bybit and merge them into multi_exchange_positions_json:
+
+
+Insert at cursor
+if dashboard_state.multi_exchange_enabled.load(Ordering::Relaxed) {
+    let mut all_positions = Vec::new();
+    
+    if let Some(ref gw) = gateway {
+        if let Ok(positions) = gw.get_positions().await {
+            for mut p in positions {
+                // Tag with exchange name
+                all_positions.push(serde_json::json!({
+                    "exchange": "gateio",
+                    "symbol": p.symbol,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "leverage": p.leverage,
+                    "side": p.side,
+                }));
+            }
+        }
+    }
+    if let Some(ref bgw) = binance_gateway {
+        if let Ok(positions) = bgw.get_positions().await {
+            for p in positions {
+                all_positions.push(serde_json::json!({
+                    "exchange": "binance",
+                    "symbol": p.symbol,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "leverage": p.leverage,
+                    "side": p.side,
+                }));
+            }
+        }
+    }
+    if let Some(ref bygw) = bybit_gateway {
+        if let Ok(positions) = bygw.get_positions().await {
+            for p in positions {
+                all_positions.push(serde_json::json!({
+                    "exchange": "bybit",
+                    "symbol": p.symbol,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "leverage": p.leverage,
+                    "side": p.side,
+                }));
+            }
+        }
+    }
+    
+    let json = serde_json::to_string(&all_positions).unwrap_or_else(|_| "[]".to_string());
+    dashboard_state.set_multi_exchange_positions_json(json);
+}
+
+
+
+
+
+
+SUMMARY OF ALL FILES TO MODIFY
+
+rust_engine/src/bybit_gateway.rs - Change testnet URL to https://api-demo.bybit.com
+rust_engine/src/multi_exchange/ws_ingestion_multi.rs - Change Bybit testnet WS to live public stream
+rust_engine/src/main.rs - Multiple changes: Bybit URL logs, execution router signature, manual trade execution, balance fetching, position syncing, manual_pos_tx wiring
+rust_engine/src/strategy_engine.rs - Add adaptive threshold cap, add logging for blocked signals
+rust_engine/src/dashboard_server.rs - No structural changes needed (already well-implemented)
+crypto_trading_bot/.env.example - Update Bybit documentation comments
+
+Priority order: Task 1 (Bybit URLs) > Task 4 (Manual Trade) > Task 3 (Balance Display) > Task 5 (Dashboard Data) > Task 2 (Trade Opening) > Task 6 (Feature Verification)
