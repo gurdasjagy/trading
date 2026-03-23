@@ -84,6 +84,18 @@
               <i class="bi bi-terminal me-1"></i>Logs
             </a>
           </li>
+          <!-- Multi-Exchange section (only visible when enabled) -->
+          {% if use_multi_exchange %}
+          <li class="nav-item d-flex align-items-center px-2">
+            <span class="text-secondary" style="font-size: 1.1rem; opacity: 0.4;">|</span>
+          </li>
+          <li class="nav-item multi-exchange-nav">
+            <a class="nav-link {% if active_page == 'multi_exchange' %}active{% endif %}"
+               href="/multi-exchange" style="color: rgba(0,255,136,0.9);">
+              <i class="bi bi-diagram-3 me-1"></i>Multi-Exchange
+            </a>
+          </li>
+          {% endif %}
           <!-- Forex section separator -->
           {% if enable_forex_trading %}
           <li class="nav-item d-flex align-items-center px-2">

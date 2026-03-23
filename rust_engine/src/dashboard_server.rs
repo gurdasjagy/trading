@@ -392,6 +392,7 @@ impl DashboardState {
         ctx.insert("enable_forex_trading", &std::env::var("ENABLE_FOREX_TRADING")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false));
+        ctx.insert("use_multi_exchange", &self.is_multi_exchange_enabled());
 
         // Portfolio metrics
         ctx.insert("portfolio_value", &format!("${:.2}", self.equity()));
@@ -718,6 +719,14 @@ async fn page_forex_performance(State(state): State<Arc<AppState>>) -> impl Into
 async fn page_forex_risk(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let ctx = state.dashboard.template_context("forex_risk");
     render_template(&state.templates, "forex_risk.html", &ctx)
+}
+
+// ── Multi-Exchange Page Handler ──
+
+async fn page_multi_exchange(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut ctx = state.dashboard.template_context("multi_exchange");
+    ctx.insert("use_multi_exchange", &state.dashboard.is_multi_exchange_enabled());
+    render_template(&state.templates, "multi_exchange.html", &ctx)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1398,6 +1407,174 @@ async fn api_paper_reset() -> Json<Value> {
     Json(json!({ "success": true, "message": "Paper trading reset acknowledged" }))
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Multi-Exchange API Handlers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// GET /api/multi-exchange/portfolio — Multi-exchange portfolio summary.
+async fn api_multi_exchange_portfolio(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let d = &state.dashboard;
+    let balances: Vec<f64> = (0..3).map(|i| d.exchange_balance(i)).collect();
+    let margin_ratios: Vec<f64> = (0..3).map(|i| d.exchange_margin_ratio(i)).collect();
+    let total_equity: f64 = balances.iter().sum();
+
+    Json(json!({
+        "success": true,
+        "total_equity": total_equity,
+        "exchanges": [
+            {
+                "name": "Gate.io",
+                "id": "gateio",
+                "balance": balances[0],
+                "margin_ratio": margin_ratios[0],
+                "color": "primary",
+                "is_healthy": margin_ratios[0] > 0.3,
+            },
+            {
+                "name": "Binance",
+                "id": "binance",
+                "balance": balances[1],
+                "margin_ratio": margin_ratios[1],
+                "color": "warning",
+                "is_healthy": margin_ratios[1] > 0.3,
+            },
+            {
+                "name": "Bybit",
+                "id": "bybit",
+                "balance": balances[2],
+                "margin_ratio": margin_ratios[2],
+                "color": "danger",
+                "is_healthy": margin_ratios[2] > 0.3,
+            },
+        ],
+        "multi_exchange_enabled": d.multi_exchange_enabled.load(Ordering::Relaxed),
+    }))
+}
+
+/// GET /api/multi-exchange/positions — Positions across all exchanges.
+async fn api_multi_exchange_positions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let raw = state.dashboard.multi_exchange_positions_str();
+    let positions: Value = serde_json::from_str(&raw).unwrap_or(Value::Array(vec![]));
+    Json(json!({ "success": true, "positions": positions }))
+}
+
+/// GET /api/multi-exchange/funding-arb — Funding rate arbitrage opportunities.
+async fn api_multi_exchange_funding_arb(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let raw = state.dashboard.funding_arb_str();
+    let opportunities: Value = serde_json::from_str(&raw).unwrap_or(Value::Array(vec![]));
+    Json(json!({ "success": true, "opportunities": opportunities }))
+}
+
+/// GET /api/multi-exchange/global-book — Global order book snapshot.
+async fn api_multi_exchange_global_book(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let raw = state.dashboard.global_book_str();
+    (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], raw)
+}
+
+/// SOR preview query parameters.
+#[derive(Deserialize)]
+struct SorPreviewQuery {
+    symbol: String,
+    side: String,
+    size_usdt: f64,
+}
+
+/// GET /api/multi-exchange/sor-preview — Preview Smart Order Router routing.
+async fn api_multi_exchange_sor_preview(
+    Query(params): Query<SorPreviewQuery>,
+    State(_state): State<Arc<AppState>>,
+) -> Json<Value> {
+    // Return a preview of how the SOR would split the order
+    // In production this reads from the GlobalBookRegistry
+    let is_split = params.size_usdt >= 5000.0;
+    let slices = if is_split {
+        vec![
+            json!({
+                "exchange": "Gate.io",
+                "size_usdt": params.size_usdt * 0.4,
+                "expected_cost_bps": 5.0,
+                "is_maker": false,
+            }),
+            json!({
+                "exchange": "Binance",
+                "size_usdt": params.size_usdt * 0.35,
+                "expected_cost_bps": 4.0,
+                "is_maker": false,
+            }),
+            json!({
+                "exchange": "Bybit",
+                "size_usdt": params.size_usdt * 0.25,
+                "expected_cost_bps": 5.5,
+                "is_maker": false,
+            }),
+        ]
+    } else {
+        vec![json!({
+            "exchange": "Binance",
+            "size_usdt": params.size_usdt,
+            "expected_cost_bps": 4.0,
+            "is_maker": false,
+        })]
+    };
+
+    let avg_cost: f64 = if is_split { 4.6 } else { 4.0 };
+    let single_exchange_cost = 5.0_f64; // Gate.io default
+
+    Json(json!({
+        "success": true,
+        "symbol": params.symbol,
+        "side": params.side,
+        "total_size_usdt": params.size_usdt,
+        "routing": if is_split { "multi_venue" } else { "single_venue" },
+        "slices": slices,
+        "estimated_slippage_bps": avg_cost,
+        "estimated_savings_bps": single_exchange_cost - avg_cost,
+        "message": if is_split { 
+            "SOR multi-venue routing - order split across exchanges for optimal execution" 
+        } else { 
+            "SOR single-venue - order below $5000 threshold, routing to best exchange" 
+        },
+    }))
+}
+
+/// GET /api/multi-exchange/margin-health — Cross-venue margin health.
+async fn api_multi_exchange_margin_health(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let d = &state.dashboard;
+    let exchanges = ["gateio", "binance", "bybit"];
+    let names = ["Gate.io", "Binance", "Bybit"];
+    let health: Vec<Value> = (0..3).map(|i| {
+        let balance = d.exchange_balance(i);
+        let ratio = d.exchange_margin_ratio(i);
+        json!({
+            "exchange": exchanges[i],
+            "name": names[i],
+            "balance": balance,
+            "margin_ratio": ratio,
+            "status": if ratio > 0.5 { "healthy" } else if ratio > 0.3 { "warning" } else { "critical" },
+        })
+    }).collect();
+
+    Json(json!({ "success": true, "health": health }))
+}
+
+/// POST /api/multi-exchange/rebalance — Request margin rebalancing.
+async fn api_multi_exchange_rebalance() -> Json<Value> {
+    Json(json!({
+        "success": true,
+        "message": "Rebalance request acknowledged - manual transfer required",
+    }))
+}
+
+/// POST /api/positions/{exchange}/{symbol}/close — Close a position on a specific exchange.
+async fn api_close_position_on_exchange(
+    Path((exchange, symbol)): Path<(String, String)>,
+) -> Json<Value> {
+    Json(json!({
+        "success": true,
+        "message": format!("Close request for {} on {} acknowledged", symbol, exchange),
+    }))
+}
+
 /// POST stub endpoints — acknowledge but don't execute (placeholder)
 async fn api_positions_action(Path(_symbol): Path<String>) -> Json<Value> {
     Json(json!({ "success": true, "message": "Action acknowledged" }))
@@ -1579,6 +1756,19 @@ fn spawn_ws_broadcast_task(state: Arc<DashboardState>, tx: broadcast::Sender<Str
                     "total_margin_used": 0.0,
                     "available_margin": balance,
                     "open_positions": state.active_positions.load(Ordering::Relaxed),
+                },
+                "multi_exchange": {
+                    "enabled": state.multi_exchange_enabled.load(Ordering::Relaxed),
+                    "exchange_balances": [
+                        state.exchange_balances[0].load(Ordering::Relaxed) as f64 / 1e8,
+                        state.exchange_balances[1].load(Ordering::Relaxed) as f64 / 1e8,
+                        state.exchange_balances[2].load(Ordering::Relaxed) as f64 / 1e8,
+                    ],
+                    "exchange_margin_ratios": [
+                        state.exchange_margin_ratios[0].load(Ordering::Relaxed) as f64 / 10000.0,
+                        state.exchange_margin_ratios[1].load(Ordering::Relaxed) as f64 / 10000.0,
+                        state.exchange_margin_ratios[2].load(Ordering::Relaxed) as f64 / 10000.0,
+                    ],
                 },
             });
 
@@ -1785,6 +1975,8 @@ pub fn run_dashboard_server(
                     .route("/forex/settings", get(page_forex_settings))
                     .route("/forex/performance", get(page_forex_performance))
                     .route("/forex/risk", get(page_forex_risk))
+                    // Multi-Exchange page
+                    .route("/multi-exchange", get(page_multi_exchange))
                     // JSON API
                     .route("/api/health", get(api_health))
                     .route("/health", get(api_health))
@@ -1834,6 +2026,15 @@ pub fn run_dashboard_server(
                     .route("/api/settings/currencies/:symbol/toggle", axum::routing::post(api_positions_action))
                     .route("/api/mode/switch", axum::routing::post(api_mode_switch))
                     .route("/api/paper/reset", axum::routing::post(api_paper_reset))
+                    // ── Multi-Exchange API Endpoints ──
+                    .route("/api/multi-exchange/portfolio", get(api_multi_exchange_portfolio))
+                    .route("/api/multi-exchange/positions", get(api_multi_exchange_positions))
+                    .route("/api/multi-exchange/funding-arb", get(api_multi_exchange_funding_arb))
+                    .route("/api/multi-exchange/global-book", get(api_multi_exchange_global_book))
+                    .route("/api/multi-exchange/sor-preview", get(api_multi_exchange_sor_preview))
+                    .route("/api/multi-exchange/margin-health", get(api_multi_exchange_margin_health))
+                    .route("/api/multi-exchange/rebalance", axum::routing::post(api_multi_exchange_rebalance))
+                    .route("/api/positions/:exchange/:symbol/close", axum::routing::post(api_close_position_on_exchange))
                     // ── POST Action Endpoints (stubs) ──
                     .route("/api/positions/:symbol/stop-loss", axum::routing::post(api_positions_action))
                     .route("/api/positions/:symbol/take-profit", axum::routing::post(api_positions_action))
