@@ -17,9 +17,13 @@ pub mod sor;
 pub mod funding_arb;
 pub mod margin_monitor;
 pub mod ws_ingestion_multi;
+pub mod cross_exchange_mm;
+pub mod stat_arb;
 
 // Re-export commonly used types
 pub use global_book::{ExchangeId, GlobalBookRegistry, GlobalOrderBook, SharedGlobalBook};
 pub use sor::{SmartOrderRouter, SorConfig, SorResult, OrderSlice};
 pub use funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity, FundingRateData};
 pub use margin_monitor::{CrossVenueMarginMonitor, ExchangeMarginHealth, MarginImbalanceAlert};
+pub use cross_exchange_mm::{CrossExchangeMarketMaker, CrossExchangeMMConfig, MakerOrder, HedgePosition, MakerOrderStatus};
+pub use stat_arb::{StatArbEngine, StatArbConfig, StatArbPosition, StatArbExitReason};

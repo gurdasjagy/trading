@@ -2399,6 +2399,20 @@ fn execution_router_loop(
     if multi_exchange_enabled {
         info!("[execution] Cross-exchange funding arbitrage initialized (min_net_rate=0.005%, min_apr=10%)");
     }
+    
+    // TASK 3: Initialize CrossExchangeMarketMaker for hedged market making
+    let mut cross_mm = multi_exchange::cross_exchange_mm::CrossExchangeMarketMaker::with_defaults();
+    let mut last_mm_check = std::time::Instant::now();
+    if multi_exchange_enabled {
+        info!("[execution] Cross-exchange market maker initialized (Gate.io maker, Binance hedge)");
+    }
+    
+    // TASK 4: Initialize StatArbEngine for statistical arbitrage
+    let mut stat_arb_engine = multi_exchange::stat_arb::StatArbEngine::with_defaults();
+    let mut last_stat_arb_check = std::time::Instant::now();
+    if multi_exchange_enabled {
+        info!("[execution] Statistical arbitrage engine initialized (2-sigma entry, 0.5-sigma exit)");
+    }
 
     // Initialize event-sourced order state machine
     let mut order_state_machine = order_state_machine::OrderStateMachine::new();
@@ -3521,6 +3535,306 @@ fn execution_router_loop(
                             }
                         }
                     }
+                }
+                
+                // TASK 3: Cross-Exchange Market Making (every 500ms)
+                if multi_exchange_enabled && last_mm_check.elapsed() > Duration::from_millis(500) {
+                    last_mm_check = std::time::Instant::now();
+                    
+                    // Skip if paused or no global book
+                    if !cross_mm.is_paused() {
+                        if let Some(ref gbr) = global_book_registry {
+                            // Process each symbol
+                            for sym_id in gbr.all_symbol_ids() {
+                                let symbol = registry.get_name(sym_id).to_string();
+                                
+                                if let Some(book_arc) = gbr.get(sym_id) {
+                                    // Check if spread is wide enough for market making
+                                    let book = book_arc.read();
+                                    let spread_bps = book.global_spread_bps().unwrap_or(0);
+                                    
+                                    // Only market make if spread is profitable (>3 bps)
+                                    if spread_bps >= 3 && !cross_mm.inventory_limit_reached(&symbol) {
+                                        // Generate maker orders
+                                        let tick_size = 0.1; // Default tick size, should come from symbol config
+                                        let maker_orders = cross_mm.generate_maker_orders(&symbol, &book_arc, tick_size);
+                                        
+                                        for intent in maker_orders {
+                                            // Submit to maker exchange (Gate.io by default)
+                                            if let Some(gw) = multi_gateways.get(&multi_exchange::ExchangeId::GateIo) {
+                                                match execution_gateway::submit_with_retry(&**gw, intent.clone()).await {
+                                                    Ok(res) => {
+                                                        if res.filled_size > 0 {
+                                                            // Fill detected! Generate hedge order
+                                                            info!(
+                                                                "[cross-mm] Maker fill: {} {} @ {:.4} — hedging",
+                                                                intent.symbol,
+                                                                if intent.side == execution_gateway::OrderSide::Buy { "BUY" } else { "SELL" },
+                                                                res.avg_fill_price
+                                                            );
+                                                            
+                                                            // Create maker order tracking
+                                                            let maker_order = multi_exchange::cross_exchange_mm::MakerOrder {
+                                                                order_id: res.order_id.clone(),
+                                                                symbol: intent.symbol.clone(),
+                                                                exchange: multi_exchange::ExchangeId::GateIo,
+                                                                side: intent.side.clone(),
+                                                                price: res.avg_fill_price,
+                                                                size: res.filled_size,
+                                                                original_size: intent.size,
+                                                                filled_size: res.filled_size,
+                                                                created_ns: std::time::SystemTime::now()
+                                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                                    .unwrap_or_default()
+                                                                    .as_nanos() as u64,
+                                                                last_checked_ns: 0,
+                                                                status: multi_exchange::cross_exchange_mm::MakerOrderStatus::Filled,
+                                                            };
+                                                            
+                                                            // Generate and submit hedge order to Binance
+                                                            let hedge_intent = cross_mm.generate_hedge_order(&maker_order, res.filled_size);
+                                                            if let Some(hedge_gw) = multi_gateways.get(&multi_exchange::ExchangeId::Binance) {
+                                                                match hedge_gw.submit_order(hedge_intent).await {
+                                                                    Ok(hedge_res) => {
+                                                                        cross_mm.on_hedge_fill(
+                                                                            &intent.symbol,
+                                                                            intent.side.clone(),
+                                                                            res.avg_fill_price,
+                                                                            hedge_res.avg_fill_price,
+                                                                            res.filled_size,
+                                                                        );
+                                                                        info!(
+                                                                            "[cross-mm] Hedge complete: {} @ {:.4} — PnL=${:.4}",
+                                                                            intent.symbol,
+                                                                            hedge_res.avg_fill_price,
+                                                                            cross_mm.total_pnl()
+                                                                        );
+                                                                    }
+                                                                    Err(e) => {
+                                                                        warn!("[cross-mm] Hedge failed: {} — closing maker position", e);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        orders_submitted += 1;
+                                                    }
+                                                    Err(e) => {
+                                                        debug!("[cross-mm] Maker order failed: {}", e);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Push MM state to dashboard
+                    dashboard_state.set_funding_arb_json(
+                        serde_json::to_string(&cross_mm.to_json()).unwrap_or_default()
+                    );
+                }
+                
+                // TASK 4: Statistical Arbitrage (every 1s)
+                if multi_exchange_enabled && last_stat_arb_check.elapsed() > Duration::from_secs(1) {
+                    last_stat_arb_check = std::time::Instant::now();
+                    
+                    // Update spread history from global book
+                    if let Some(ref gbr) = global_book_registry {
+                        for sym_id in gbr.all_symbol_ids() {
+                            let symbol = registry.get_name(sym_id).to_string();
+                            
+                            if let Some(book_arc) = gbr.get(sym_id) {
+                                let book = book_arc.read();
+                                let now_ns = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_nanos() as u64;
+                                
+                                // Get mid prices from each exchange pair
+                                for (i, ex_a) in multi_exchange::ExchangeId::all().iter().enumerate() {
+                                    for ex_b in multi_exchange::ExchangeId::all().iter().skip(i + 1) {
+                                        let snap_a = book.get_exchange_snapshot(*ex_a);
+                                        let snap_b = book.get_exchange_snapshot(*ex_b);
+                                        
+                                        if let (Some(a), Some(b)) = (snap_a, snap_b) {
+                                            if a.best_bid_fp > 0 && b.best_bid_fp > 0 {
+                                                let mid_a = (a.best_bid_fp + a.best_ask_fp) as f64 / 2.0 / 1e8;
+                                                let mid_b = (b.best_bid_fp + b.best_ask_fp) as f64 / 2.0 / 1e8;
+                                                
+                                                stat_arb_engine.on_price_update(
+                                                    &symbol, *ex_a, mid_a, *ex_b, mid_b, now_ns
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check for entry opportunities
+                    let opportunities = stat_arb_engine.scan_all_opportunities();
+                    for (symbol, long_ex, short_ex, spread, mean, std_dev) in opportunities.iter().take(1) {
+                        // Only take one opportunity at a time
+                        info!(
+                            "[stat-arb] Entry opportunity: {} z={:.2} (long={}, short={})",
+                            symbol,
+                            if *std_dev > 0.0 { (*spread - *mean) / *std_dev } else { 0.0 },
+                            long_ex.name(),
+                            short_ex.name()
+                        );
+                        
+                        // Calculate position size (2% of total equity)
+                        let total_equity = margin_monitor.total_equity();
+                        let position_notional = total_equity * 0.02;
+                        let mid_price = shared_prices.get(0)
+                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                            .unwrap_or(50000.0);
+                        let position_size = (position_notional / mid_price).max(1.0) as i64;
+                        
+                        // Get gateways
+                        let long_gw = multi_gateways.get(long_ex);
+                        let short_gw = multi_gateways.get(short_ex);
+                        
+                        if let (Some(lg), Some(sg)) = (long_gw, short_gw) {
+                            // Build entry intents
+                            let (long_intent, short_intent) = multi_exchange::stat_arb::build_stat_arb_entry_intents(
+                                symbol, *long_ex, *short_ex, position_size, mid_price, mid_price
+                            );
+                            
+                            // Execute both legs in parallel
+                            let lg = lg.clone();
+                            let sg = sg.clone();
+                            let (long_res, short_res) = tokio::join!(
+                                lg.submit_order(long_intent),
+                                sg.submit_order(short_intent)
+                            );
+                            
+                            match (&long_res, &short_res) {
+                                (Ok(lr), Ok(sr)) => {
+                                    let now_ns = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_nanos() as u64;
+                                    
+                                    stat_arb_engine.record_entry(
+                                        symbol,
+                                        *long_ex,
+                                        *short_ex,
+                                        lr.avg_fill_price,
+                                        sr.avg_fill_price,
+                                        lr.filled_size.min(sr.filled_size),
+                                        *spread,
+                                        *mean,
+                                        *std_dev,
+                                        now_ns,
+                                    );
+                                    
+                                    info!(
+                                        "[stat-arb] ENTRY: {} long@{} ({:.4}) short@{} ({:.4})",
+                                        symbol, long_ex.name(), lr.avg_fill_price,
+                                        short_ex.name(), sr.avg_fill_price
+                                    );
+                                    orders_submitted += 2;
+                                }
+                                (Err(e), Ok(_)) => {
+                                    warn!("[stat-arb] Long leg failed: {} — unwinding short", e);
+                                    // Close short position
+                                    let unwind = execution_gateway::OrderIntent {
+                                        symbol: symbol.clone(),
+                                        side: execution_gateway::OrderSide::Buy,
+                                        size: position_size,
+                                        order_type: execution_gateway::OrderType::Market,
+                                        price: Some(mid_price),
+                                        reduce_only: true,
+                                        leverage: None,
+                                        time_in_force: "ioc".to_string(),
+                                        slippage_cap_pct: Some(0.005),
+                                        placement: execution_state::PlacementType::AtBest,
+                                        stop_loss: None,
+                                        take_profit: None,
+                                        confidence: 0.0,
+                                        signal_tag: "stat_arb_unwind".to_string(),
+                                    };
+                                    let _ = sg.submit_order(unwind).await;
+                                }
+                                (Ok(_), Err(e)) => {
+                                    warn!("[stat-arb] Short leg failed: {} — unwinding long", e);
+                                    let unwind = execution_gateway::OrderIntent {
+                                        symbol: symbol.clone(),
+                                        side: execution_gateway::OrderSide::Sell,
+                                        size: position_size,
+                                        order_type: execution_gateway::OrderType::Market,
+                                        price: Some(mid_price),
+                                        reduce_only: true,
+                                        leverage: None,
+                                        time_in_force: "ioc".to_string(),
+                                        slippage_cap_pct: Some(0.005),
+                                        placement: execution_state::PlacementType::AtBest,
+                                        stop_loss: None,
+                                        take_profit: None,
+                                        confidence: 0.0,
+                                        signal_tag: "stat_arb_unwind".to_string(),
+                                    };
+                                    let _ = lg.submit_order(unwind).await;
+                                }
+                                (Err(e1), Err(e2)) => {
+                                    warn!("[stat-arb] Both legs failed: {} / {}", e1, e2);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check exit conditions for active positions
+                    let now_ns = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64;
+                    
+                    let exits = stat_arb_engine.check_exits(now_ns);
+                    for (pos, reason) in exits {
+                        info!(
+                            "[stat-arb] EXIT: {} reason={:?} hours_open={:.1}",
+                            pos.symbol,
+                            reason,
+                            pos.hours_open(now_ns)
+                        );
+                        
+                        // Get current prices
+                        let mid_price = shared_prices.get(0)
+                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                            .unwrap_or(50000.0);
+                        
+                        // Build exit intents
+                        let (close_long, close_short) = multi_exchange::stat_arb::build_stat_arb_exit_intents(
+                            &pos, mid_price, mid_price
+                        );
+                        
+                        // Close both legs
+                        if let (Some(lg), Some(sg)) = (
+                            multi_gateways.get(&pos.long_exchange),
+                            multi_gateways.get(&pos.short_exchange)
+                        ) {
+                            let lg = lg.clone();
+                            let sg = sg.clone();
+                            let symbol = pos.symbol.clone();
+                            tokio::spawn(async move {
+                                let _ = tokio::join!(
+                                    lg.submit_order(close_long),
+                                    sg.submit_order(close_short)
+                                );
+                            });
+                        }
+                        
+                        stat_arb_engine.remove_position(&pos.symbol);
+                    }
+                    
+                    // Push stat arb state to dashboard
+                    dashboard_state.set_funding_arb_json(
+                        serde_json::to_string(&stat_arb_engine.to_json()).unwrap_or_default()
+                    );
                 }
 
                 // Periodic health check + position slot reconciliation (every 30s)
