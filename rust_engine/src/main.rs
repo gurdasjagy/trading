@@ -80,6 +80,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use futures_util::future;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{
@@ -2714,7 +2715,7 @@ fn execution_router_loop(
                             }
                             
                             // Execute all slices in parallel
-                            let results = futures::future::join_all(futures).await;
+                            let results = future::join_all(futures).await;
                             
                             // Aggregate results
                             let mut total_filled: i64 = 0;
