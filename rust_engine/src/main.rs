@@ -491,11 +491,13 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         }
 
         eprintln!("[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}", cfg.risk.max_open_positions);
-        eprintln!("[config] Binance: testnet={}, has_key={}", 
+        eprintln!("[config] Binance: testnet={}, endpoint={}, has_key={}",
             cfg.multi_exchange.binance_testnet,
+            if cfg.multi_exchange.binance_testnet { "https://testnet.binancefuture.com" } else { "https://fapi.binance.com" },
             cfg.multi_exchange.binance_api_key.is_some());
-        eprintln!("[config] Bybit: testnet={}, has_key={}", 
+        eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}",
             cfg.multi_exchange.bybit_testnet,
+            if cfg.multi_exchange.bybit_testnet { "https://api-testnet.bybit.com" } else { "https://api.bybit.com" },
             cfg.multi_exchange.bybit_api_key.is_some());
     } else {
         eprintln!("[config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)");
@@ -1021,6 +1023,7 @@ fn strategy_evaluator_loop(
     funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>>,
     exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
     ml_weights: &'static ml_weight_receiver::MlWeightReader,
+    manual_pos_rx: crossbeam_channel::Receiver<dashboard_server::ManualPositionTrack>,
 ) {
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
@@ -1113,6 +1116,29 @@ fn strategy_evaluator_loop(
     info!("[strategy] ��️ AdverseSelectionGuard initialized (spoofing detection)");
 
     loop {
+        // Check for manual position tracking requests
+        while let Ok(track) = manual_pos_rx.try_recv() {
+            exit_evaluator.track_position(
+                track.symbol_id,
+                track.is_long,
+                track.entry_price,
+                track.stop_loss,
+                track.take_profit,
+                track.size,
+                300_000_000_000u64, // 5 minute TTL
+            );
+            lifecycle_mgr.track_position(
+                track.symbol_id,
+                track.is_long,
+                track.entry_price,
+                track.size,
+                track.leverage,
+            );
+            info!("[strategy] 🖐 Manual position tracked: sym_id={} is_long={} entry={:.4} SL={:.4} TP={:.4}",
+                track.symbol_id, track.is_long, track.entry_price, track.stop_loss, track.take_profit
+            );
+        }
+
         // Early bail-out: if circuit breaker is tripped, skip evaluation.
         if let Some(ref cb) = circuit_breaker {
             if cb.is_trading_halted() {
@@ -2230,6 +2256,7 @@ fn strategy_evaluator_loop(
 /// 8. **Circuit Breaker Update**: Record trade results
 fn execution_router_loop(
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
+    manual_cmd_rx: crossbeam_channel::Receiver<dashboard_server::ManualTradeRequest>,
     gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
     forex_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
     circuit_breaker: &'static CircuitBreaker,
@@ -2321,6 +2348,20 @@ fn execution_router_loop(
         }
 
         loop {
+            // Check for manual trade requests from dashboard
+            while let Ok(manual_req) = manual_cmd_rx.try_recv() {
+                let sym_upper = manual_req.symbol.to_uppercase();
+                let sym_id = registry.get_id(&sym_upper);
+                if sym_id == 0 {
+                    warn!("[execution] Manual trade rejected: unknown symbol '{}'", sym_upper);
+                    continue;
+                }
+                info!("[execution] 🖐 Manual trade received: {} {} {} contracts SL={:.4} TP={:.4}",
+                    manual_req.side, sym_upper, manual_req.size, manual_req.stop_loss, manual_req.take_profit);
+                // TODO: Full inline execution (gateway call) can be added here.
+                // For now, log the receipt so strategy can monitor it.
+            }
+
             // ── Step 0: Check circuit breaker ──
             if circuit_breaker.is_trading_halted() {
                 // Drain the ring to avoid stale orders when trading resumes.
@@ -3319,14 +3360,16 @@ fn main() {
         {
             let reg = registry_me.clone();
             let sym_reg = registry.clone();
+            let binance_ws_url = if config.multi_exchange.binance_testnet {
+                "wss://stream.binancefuture.com/stream"
+            } else {
+                "wss://fstream.binance.com/stream"
+            };
+            eprintln!("[config] Binance WS URL: {}", binance_ws_url);
             let binance_cfg = crate::config::ExchangeConfig {
                 name: "binance".to_string(),
                 symbols: config.symbols.clone(),
-                ws_url: if config.multi_exchange.binance_testnet {
-                    "wss://stream.binancefuture.com/stream".to_string()
-                } else {
-                    "wss://fstream.binance.com/stream".to_string()
-                },
+                ws_url: binance_ws_url.to_string(),
                 api_key: config.multi_exchange.binance_api_key.clone(),
                 secret_key: config.multi_exchange.binance_secret_key.clone(),
                 passphrase: None,
@@ -3357,14 +3400,16 @@ fn main() {
         {
             let reg = registry_me.clone();
             let sym_reg = registry.clone();
+            let bybit_ws_url = if config.multi_exchange.bybit_testnet {
+                "wss://stream-testnet.bybit.com/v5/public/linear"
+            } else {
+                "wss://stream.bybit.com/v5/public/linear"
+            };
+            eprintln!("[config] Bybit WS URL: {}", bybit_ws_url);
             let bybit_cfg = crate::config::ExchangeConfig {
                 name: "bybit".to_string(),
                 symbols: config.symbols.clone(),
-                ws_url: if config.multi_exchange.bybit_testnet {
-                    "wss://stream-testnet.bybit.com/v5/public/linear".to_string()
-                } else {
-                    "wss://stream.bybit.com/v5/public/linear".to_string()
-                },
+                ws_url: bybit_ws_url.to_string(),
                 api_key: config.multi_exchange.bybit_api_key.clone(),
                 secret_key: config.multi_exchange.bybit_secret_key.clone(),
                 passphrase: None,
@@ -3424,6 +3469,12 @@ fn main() {
     // breaker with OrderRateAnomaly to back-pressure the strategy engine.
     let spsc_overflow_monitor: &'static SpscOverflowMonitor =
         Box::leak(Box::new(SpscOverflowMonitor::new(10))); // 10 drops/sec threshold
+
+    // Manual trade channels: dashboard -> execution (command), execution -> strategy (position tracking)
+    let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<dashboard_server::ManualTradeRequest>(32);
+    let manual_cmd_tx_arc = Arc::new(manual_cmd_tx);
+    let (_manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
+
     {
         let book_ring = book_to_strategy;
         let exec_ring = strategy_to_exec;
@@ -3461,6 +3512,7 @@ fn main() {
                     funding_rates_strat,
                     exec_analytics_strat,
                     ml_weights_strat,
+                    manual_pos_rx,
                 );
             })
             .expect("Failed to spawn strategy thread");
@@ -3471,6 +3523,7 @@ fn main() {
     // Mandate 3: Build forex gateway if credentials are available
     let funding_rates_exec = funding_rates.clone();
     let exec_analytics_exec = exec_analytics;
+
     let forex_gw: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
         let login = config.forex_login.as_deref().unwrap_or("").trim();
         let password = config.forex_password.as_deref().unwrap_or("").trim();
@@ -3508,7 +3561,7 @@ fn main() {
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[execution] Pinned to core {} (with Lifecycle + Latency)", core_id);
-                execution_router_loop(exec_ring, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp);
+                execution_router_loop(exec_ring, manual_cmd_rx, gw, fx_gw, cb, reg, lc, lat, position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp);
             })
             .expect("Failed to spawn execution thread");
         thread_handles.push(handle);
@@ -3526,11 +3579,13 @@ fn main() {
         // SAFETY: Called before any threads read JOURNAL_DIR. The dashboard thread
         // hasn't started yet at this point in main().
         unsafe { std::env::set_var("JOURNAL_DIR", &journal_dir_env); }
+        let manual_cmd_tx_dash = manual_cmd_tx_arc.clone();
+        let symbol_registry_dash = registry.clone();
         let handle = thread::Builder::new()
             .name("dashboard-http".into())
             .spawn(move || {
                 info!("[dashboard] Starting HTTP server on {}", bind_addr);
-                dashboard_server::run_dashboard_server(&bind_addr, dash_state, exec_analytics_dash);
+                dashboard_server::run_dashboard_server(&bind_addr, dash_state, exec_analytics_dash, manual_cmd_tx_dash, symbol_registry_dash);
             })
             .expect("Failed to spawn dashboard HTTP thread");
         thread_handles.push(handle);
