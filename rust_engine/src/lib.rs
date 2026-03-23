@@ -91,6 +91,9 @@ pub mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
 pub mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
 pub mod twap_executor;   // Feature 7: Adaptive TWAP (with AdaptiveTwap)
 
+// ── Multi-Exchange Feature (USE_MULTI_EXCHANGE) ──
+pub mod multi_exchange;  // Global order book, SOR, funding arb, margin monitor
+
 // ── Multi-Exchange Gateway Support (for arbitrage) ──
 pub mod bybit_gateway;   // Bybit v5 unified API gateway
 pub mod binance_gateway; // Binance Futures gateway

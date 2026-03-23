@@ -1,0 +1,627 @@
+{% extends "base.html" %}
+
+{% block title %}Multi-Exchange{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <h2 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Multi-Exchange Dashboard</h2>
+  <div class="d-flex align-items-center gap-2">
+    <span id="multi-exchange-status" class="badge {% if use_multi_exchange %}bg-success{% else %}bg-secondary{% endif %}">
+      <i class="bi bi-{% if use_multi_exchange %}check-circle{% else %}x-circle{% endif %} me-1"></i>
+      {% if use_multi_exchange %}ENABLED{% else %}DISABLED{% endif %}
+    </span>
+    <small class="text-muted" id="last-updated-multi">Updating...</small>
+  </div>
+</div>
+
+{% if not use_multi_exchange %}
+<!-- Multi-Exchange Disabled Notice -->
+<div class="alert alert-info d-flex align-items-center" role="alert">
+  <i class="bi bi-info-circle-fill me-3 fs-4"></i>
+  <div>
+    <strong>Multi-Exchange Mode is Disabled</strong><br>
+    <span class="small">Set <code>USE_MULTI_EXCHANGE=on</code> in your environment to enable cross-exchange trading, global order book fusion, and smart order routing.</span>
+  </div>
+</div>
+{% endif %}
+
+<!-- Portfolio Summary Cards -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-wallet2 me-2"></i>Multi-Exchange Portfolio Summary</h5>
+        <span class="badge bg-info" id="total-equity-badge">$0.00</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <!-- Gate.io Card -->
+          <div class="col-12 col-md-4">
+            <div class="card border-primary h-100" style="border-width: 2px;">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="card-title mb-0 text-primary"><i class="bi bi-building me-1"></i>Gate.io</h6>
+                  <span id="gateio-health-badge" class="badge bg-success">Healthy</span>
+                </div>
+                <h3 id="gateio-balance" class="fw-bold mb-1">$0.00</h3>
+                <div class="progress mb-2" style="height: 8px;">
+                  <div id="gateio-margin-bar" class="progress-bar bg-primary" role="progressbar" style="width: 100%"></div>
+                </div>
+                <small class="text-muted">Margin Ratio: <span id="gateio-margin-ratio">100%</span></small>
+              </div>
+            </div>
+          </div>
+          <!-- Binance Card -->
+          <div class="col-12 col-md-4">
+            <div class="card border-warning h-100" style="border-width: 2px;">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="card-title mb-0 text-warning"><i class="bi bi-currency-bitcoin me-1"></i>Binance</h6>
+                  <span id="binance-health-badge" class="badge bg-success">Healthy</span>
+                </div>
+                <h3 id="binance-balance" class="fw-bold mb-1">$0.00</h3>
+                <div class="progress mb-2" style="height: 8px;">
+                  <div id="binance-margin-bar" class="progress-bar bg-warning" role="progressbar" style="width: 100%"></div>
+                </div>
+                <small class="text-muted">Margin Ratio: <span id="binance-margin-ratio">100%</span></small>
+              </div>
+            </div>
+          </div>
+          <!-- Bybit Card -->
+          <div class="col-12 col-md-4">
+            <div class="card border-danger h-100" style="border-width: 2px;">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="card-title mb-0 text-danger"><i class="bi bi-rocket me-1"></i>Bybit</h6>
+                  <span id="bybit-health-badge" class="badge bg-success">Healthy</span>
+                </div>
+                <h3 id="bybit-balance" class="fw-bold mb-1">$0.00</h3>
+                <div class="progress mb-2" style="height: 8px;">
+                  <div id="bybit-margin-bar" class="progress-bar bg-danger" role="progressbar" style="width: 100%"></div>
+                </div>
+                <small class="text-muted">Margin Ratio: <span id="bybit-margin-ratio">100%</span></small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <!-- Active Positions with Exchange Tags -->
+  <div class="col-12 col-xl-8">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-layers me-2"></i>Active Positions (All Exchanges)</h5>
+        <span class="badge bg-secondary" id="position-count">0</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-striped table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Exchange</th>
+                <th>Symbol</th>
+                <th>Direction</th>
+                <th>Size</th>
+                <th>Entry</th>
+                <th>Current</th>
+                <th>P&L</th>
+                <th>P&L %</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="positions-tbody">
+              <tr>
+                <td colspan="9" class="text-center text-muted py-3">
+                  <i class="bi bi-inbox me-2"></i>No active positions
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Margin Health Panel -->
+  <div class="col-12 col-xl-4">
+    <div class="card border-0 h-100">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Margin Health</h5>
+      </div>
+      <div class="card-body">
+        <div id="margin-alert-container"></div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-primary">Gate.io</span>
+            <span id="gateio-margin-pct">100%</span>
+          </div>
+          <div class="progress" style="height: 20px;">
+            <div id="gateio-health-bar" class="progress-bar bg-success" style="width: 100%"></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-warning">Binance</span>
+            <span id="binance-margin-pct">100%</span>
+          </div>
+          <div class="progress" style="height: 20px;">
+            <div id="binance-health-bar" class="progress-bar bg-success" style="width: 100%"></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-danger">Bybit</span>
+            <span id="bybit-margin-pct">100%</span>
+          </div>
+          <div class="progress" style="height: 20px;">
+            <div id="bybit-health-bar" class="progress-bar bg-success" style="width: 100%"></div>
+          </div>
+        </div>
+        <button class="btn btn-outline-warning btn-sm w-100 mt-2" onclick="requestRebalance()">
+          <i class="bi bi-arrow-left-right me-1"></i>Request Rebalance
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <!-- Funding Rate Arbitrage Panel -->
+  <div class="col-12 col-xl-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-percent me-2"></i>Funding Rate Arbitrage</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="refreshFundingArb()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Gate.io</th>
+                <th>Binance</th>
+                <th>Bybit</th>
+                <th>Best Spread</th>
+                <th>Ann. APR</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="funding-arb-tbody">
+              <tr>
+                <td colspan="7" class="text-center text-muted py-3">
+                  <i class="bi bi-hourglass-split me-2"></i>Loading funding rates...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Order Book Panel -->
+  <div class="col-12 col-xl-6">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-book me-2"></i>Global Order Book (BTC_USDT)</h5>
+        <span class="badge bg-info small" id="global-spread-badge">Spread: -- bps</span>
+      </div>
+      <div class="card-body">
+        <div class="row text-center">
+          <div class="col-4">
+            <h6 class="text-primary">Gate.io</h6>
+            <div class="small">
+              <div class="text-success">Bid: <span id="gateio-bid">--</span></div>
+              <div class="text-danger">Ask: <span id="gateio-ask">--</span></div>
+            </div>
+          </div>
+          <div class="col-4">
+            <h6 class="text-warning">Binance</h6>
+            <div class="small">
+              <div class="text-success">Bid: <span id="binance-bid">--</span></div>
+              <div class="text-danger">Ask: <span id="binance-ask">--</span></div>
+            </div>
+          </div>
+          <div class="col-4">
+            <h6 class="text-danger">Bybit</h6>
+            <div class="small">
+              <div class="text-success">Bid: <span id="bybit-bid">--</span></div>
+              <div class="text-danger">Ask: <span id="bybit-ask">--</span></div>
+            </div>
+          </div>
+        </div>
+        <hr class="border-secondary my-3">
+        <div class="text-center">
+          <div class="row">
+            <div class="col-6">
+              <small class="text-muted">Global Best Bid</small>
+              <h5 class="text-success mb-0" id="global-best-bid">--</h5>
+              <small class="text-muted" id="best-bid-exchange">--</small>
+            </div>
+            <div class="col-6">
+              <small class="text-muted">Global Best Ask</small>
+              <h5 class="text-danger mb-0" id="global-best-ask">--</h5>
+              <small class="text-muted" id="best-ask-exchange">--</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Smart Order Router Preview -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0">
+      <div class="card-header bg-transparent border-secondary">
+        <h5 class="mb-0"><i class="bi bi-signpost-split me-2"></i>Smart Order Router (SOR) Preview</h5>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label small">Symbol</label>
+            <select id="sor-symbol" class="form-select form-select-sm bg-dark text-light border-secondary">
+              {% for pair in trading_pairs %}
+              <option value="{{ pair }}">{{ pair }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Side</label>
+            <select id="sor-side" class="form-select form-select-sm bg-dark text-light border-secondary">
+              <option value="buy">Buy (Long)</option>
+              <option value="sell">Sell (Short)</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Size (USDT)</label>
+            <input type="number" id="sor-size" class="form-control form-control-sm bg-dark text-light border-secondary" value="5000" min="100" step="100">
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-primary btn-sm w-100" onclick="previewSorRoute()">
+              <i class="bi bi-search me-1"></i>Preview Route
+            </button>
+          </div>
+        </div>
+
+        <div id="sor-results" class="mt-4" style="display: none;">
+          <div class="row">
+            <div class="col-md-8">
+              <h6 class="mb-3">Order Routing Preview</h6>
+              <div class="table-responsive">
+                <table class="table table-dark table-sm">
+                  <thead>
+                    <tr>
+                      <th>Exchange</th>
+                      <th>Size (USDT)</th>
+                      <th>Expected Cost (bps)</th>
+                      <th>Order Type</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sor-slices-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="p-3 rounded" style="background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2);">
+                <h6 class="text-success mb-3">Estimated Savings</h6>
+                <div class="d-flex justify-content-between mb-2">
+                  <span class="text-muted">Slippage:</span>
+                  <span id="sor-slippage" class="text-warning">-- bps</span>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                  <span class="text-muted">vs. Single Exchange:</span>
+                  <span id="sor-savings" class="text-success">-- bps saved</span>
+                </div>
+                <hr class="border-secondary">
+                <p class="small text-muted mb-0" id="sor-message">Enter order details to preview routing.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Multi-Exchange Dashboard JavaScript ──
+
+let lastUpdate = Date.now();
+
+// WebSocket connection for real-time updates
+function connectMultiExchangeWS() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`);
+  
+  ws.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'update' && data.multi_exchange) {
+        updateMultiExchangeState(data.multi_exchange);
+      }
+    } catch (e) {
+      console.error('WS parse error:', e);
+    }
+  };
+
+  ws.onclose = function() {
+    setTimeout(connectMultiExchangeWS, 3000);
+  };
+}
+
+function updateMultiExchangeState(data) {
+  if (!data.enabled) return;
+  
+  const balances = data.exchange_balances || [0, 0, 0];
+  const ratios = data.exchange_margin_ratios || [1, 1, 1];
+  
+  // Update balance cards
+  document.getElementById('gateio-balance').textContent = '$' + balances[0].toFixed(2);
+  document.getElementById('binance-balance').textContent = '$' + balances[1].toFixed(2);
+  document.getElementById('bybit-balance').textContent = '$' + balances[2].toFixed(2);
+  
+  // Update total equity
+  const total = balances.reduce((a, b) => a + b, 0);
+  document.getElementById('total-equity-badge').textContent = '$' + total.toFixed(2);
+  
+  // Update margin ratios
+  updateMarginBar('gateio', ratios[0]);
+  updateMarginBar('binance', ratios[1]);
+  updateMarginBar('bybit', ratios[2]);
+  
+  lastUpdate = Date.now();
+  updateLastUpdatedTime();
+}
+
+function updateMarginBar(exchange, ratio) {
+  const pct = (ratio * 100).toFixed(1);
+  document.getElementById(`${exchange}-margin-ratio`).textContent = pct + '%';
+  document.getElementById(`${exchange}-margin-pct`).textContent = pct + '%';
+  
+  const bar = document.getElementById(`${exchange}-margin-bar`);
+  const healthBar = document.getElementById(`${exchange}-health-bar`);
+  bar.style.width = pct + '%';
+  healthBar.style.width = pct + '%';
+  
+  const healthBadge = document.getElementById(`${exchange}-health-badge`);
+  if (ratio > 0.5) {
+    bar.className = 'progress-bar bg-success';
+    healthBar.className = 'progress-bar bg-success';
+    healthBadge.className = 'badge bg-success';
+    healthBadge.textContent = 'Healthy';
+  } else if (ratio > 0.3) {
+    bar.className = 'progress-bar bg-warning';
+    healthBar.className = 'progress-bar bg-warning';
+    healthBadge.className = 'badge bg-warning';
+    healthBadge.textContent = 'Warning';
+  } else {
+    bar.className = 'progress-bar bg-danger';
+    healthBar.className = 'progress-bar bg-danger';
+    healthBadge.className = 'badge bg-danger';
+    healthBadge.textContent = 'Critical';
+  }
+}
+
+function updateLastUpdatedTime() {
+  const seconds = Math.floor((Date.now() - lastUpdate) / 1000);
+  document.getElementById('last-updated-multi').textContent = seconds < 2 ? 'Just now' : `${seconds}s ago`;
+}
+
+// Load portfolio data
+async function loadPortfolio() {
+  try {
+    const resp = await fetch('/api/multi-exchange/portfolio');
+    const data = await resp.json();
+    if (data.success && data.exchanges) {
+      data.exchanges.forEach((ex, i) => {
+        const id = ex.id;
+        document.getElementById(`${id}-balance`).textContent = '$' + ex.balance.toFixed(2);
+        updateMarginBar(id, ex.margin_ratio);
+      });
+      document.getElementById('total-equity-badge').textContent = '$' + data.total_equity.toFixed(2);
+    }
+  } catch (e) {
+    console.error('Failed to load portfolio:', e);
+  }
+}
+
+// Load positions
+async function loadPositions() {
+  try {
+    const resp = await fetch('/api/multi-exchange/positions');
+    const data = await resp.json();
+    const tbody = document.getElementById('positions-tbody');
+    
+    if (data.success && data.positions && data.positions.length > 0) {
+      document.getElementById('position-count').textContent = data.positions.length;
+      tbody.innerHTML = data.positions.map(pos => {
+        const pnlClass = pos.pnl >= 0 ? 'text-success' : 'text-danger';
+        const exchangeBadge = getExchangeBadge(pos.exchange || 'gateio');
+        return `
+          <tr>
+            <td>${exchangeBadge}</td>
+            <td class="fw-semibold">${pos.symbol}</td>
+            <td><span class="badge direction-badge direction-badge--${(pos.direction || 'long').toLowerCase()}">${(pos.direction || 'LONG').toUpperCase()}</span></td>
+            <td>$${(pos.size || 0).toFixed(2)}</td>
+            <td>$${(pos.entry_price || 0).toFixed(4)}</td>
+            <td>$${(pos.current_price || 0).toFixed(4)}</td>
+            <td class="${pnlClass}">$${(pos.pnl || 0).toFixed(2)}</td>
+            <td class="${pnlClass}">${(pos.pnl_pct || 0).toFixed(2)}%</td>
+            <td>
+              <button class="btn btn-sm btn-danger" onclick="closePositionOnExchange('${pos.exchange}', '${pos.symbol}')">
+                <i class="bi bi-x-circle"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } else {
+      document.getElementById('position-count').textContent = '0';
+      tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3"><i class="bi bi-inbox me-2"></i>No active positions</td></tr>';
+    }
+  } catch (e) {
+    console.error('Failed to load positions:', e);
+  }
+}
+
+function getExchangeBadge(exchange) {
+  const colors = {
+    'gateio': 'primary',
+    'gate.io': 'primary',
+    'binance': 'warning',
+    'bybit': 'danger'
+  };
+  const names = {
+    'gateio': 'Gate.io',
+    'gate.io': 'Gate.io',
+    'binance': 'Binance',
+    'bybit': 'Bybit'
+  };
+  const color = colors[exchange.toLowerCase()] || 'secondary';
+  const name = names[exchange.toLowerCase()] || exchange;
+  return `<span class="badge bg-${color}">${name}</span>`;
+}
+
+// Load funding arbitrage opportunities
+async function loadFundingArb() {
+  try {
+    const resp = await fetch('/api/multi-exchange/funding-arb');
+    const data = await resp.json();
+    const tbody = document.getElementById('funding-arb-tbody');
+    
+    if (data.success && data.opportunities && data.opportunities.length > 0) {
+      tbody.innerHTML = data.opportunities.map(opp => {
+        const spreadClass = opp.net_rate > 0.0001 ? 'text-success' : 'text-muted';
+        return `
+          <tr>
+            <td class="fw-semibold">${opp.symbol}</td>
+            <td>${(opp.gateio_rate * 100 || 0).toFixed(4)}%</td>
+            <td>${(opp.binance_rate * 100 || 0).toFixed(4)}%</td>
+            <td>${(opp.bybit_rate * 100 || 0).toFixed(4)}%</td>
+            <td class="${spreadClass}">${(opp.net_rate * 100 || 0).toFixed(4)}%</td>
+            <td>${(opp.annualized_apr || 0).toFixed(1)}%</td>
+            <td>
+              ${opp.is_actionable ? '<button class="btn btn-sm btn-success" disabled>Open Arb</button>' : '<span class="text-muted">-</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3"><i class="bi bi-info-circle me-2"></i>No arbitrage opportunities detected</td></tr>';
+    }
+  } catch (e) {
+    console.error('Failed to load funding arb:', e);
+    document.getElementById('funding-arb-tbody').innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Connect multi-exchange mode to view opportunities</td></tr>';
+  }
+}
+
+function refreshFundingArb() {
+  loadFundingArb();
+}
+
+// Preview SOR routing
+async function previewSorRoute() {
+  const symbol = document.getElementById('sor-symbol').value;
+  const side = document.getElementById('sor-side').value;
+  const sizeUsdt = parseFloat(document.getElementById('sor-size').value) || 5000;
+  
+  try {
+    const resp = await fetch(`/api/multi-exchange/sor-preview?symbol=${encodeURIComponent(symbol)}&side=${side}&size_usdt=${sizeUsdt}`);
+    const data = await resp.json();
+    
+    if (data.success) {
+      document.getElementById('sor-results').style.display = 'block';
+      
+      // Populate slices table
+      const tbody = document.getElementById('sor-slices-tbody');
+      tbody.innerHTML = data.slices.map(slice => `
+        <tr>
+          <td>${slice.exchange}</td>
+          <td>$${slice.size_usdt.toFixed(2)}</td>
+          <td>${slice.expected_cost_bps.toFixed(1)} bps</td>
+          <td>${slice.is_maker ? 'Maker' : 'Taker'}</td>
+        </tr>
+      `).join('');
+      
+      // Update summary
+      document.getElementById('sor-slippage').textContent = data.estimated_slippage_bps.toFixed(1) + ' bps';
+      document.getElementById('sor-savings').textContent = data.estimated_savings_bps.toFixed(1) + ' bps saved';
+      document.getElementById('sor-message').textContent = data.message;
+    }
+  } catch (e) {
+    console.error('SOR preview failed:', e);
+  }
+}
+
+// Request margin rebalancing
+async function requestRebalance() {
+  try {
+    const resp = await fetch('/api/multi-exchange/rebalance', { method: 'POST' });
+    const data = await resp.json();
+    showToast(data.message || 'Rebalance requested', 'info');
+  } catch (e) {
+    showToast('Rebalance request failed', 'danger');
+  }
+}
+
+// Close position on specific exchange
+async function closePositionOnExchange(exchange, symbol) {
+  if (!confirm(`Close ${symbol} position on ${exchange}?`)) return;
+  
+  try {
+    const resp = await fetch(`/api/positions/${exchange}/${symbol}/close`, { method: 'POST' });
+    const data = await resp.json();
+    showToast(data.message || 'Close request sent', 'info');
+    loadPositions();
+  } catch (e) {
+    showToast('Close request failed', 'danger');
+  }
+}
+
+// Toast notification
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  
+  const toast = document.createElement('div');
+  toast.className = `toast show align-items-center text-bg-${type} border-0`;
+  toast.role = 'alert';
+  toast.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${message}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  `;
+  container.appendChild(toast);
+  
+  setTimeout(() => toast.remove(), 5000);
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+  loadPortfolio();
+  loadPositions();
+  loadFundingArb();
+  connectMultiExchangeWS();
+  
+  // Update timestamps
+  setInterval(updateLastUpdatedTime, 1000);
+  
+  // Refresh data periodically
+  setInterval(loadPortfolio, 5000);
+  setInterval(loadPositions, 5000);
+  setInterval(loadFundingArb, 60000);
+});
+</script>
+{% endblock %}
