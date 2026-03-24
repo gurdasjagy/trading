@@ -79,11 +79,7 @@ pub struct BinanceGateway {
 impl BinanceGateway {
     /// Create a new Binance gateway instance.
     pub fn new(api_key: String, api_secret: String, testnet: bool) -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        
         let client = Client::builder()
-            .default_headers(headers)
             .timeout(std::time::Duration::from_secs(10))
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(90))
@@ -233,17 +229,27 @@ impl ExecutionGateway for BinanceGateway {
             OrderType::PostOnly => ("LIMIT", "GTX"), // GTX = Post-only on Binance
         };
         
+        // Ensure quantity is at least 1 and properly formatted as a decimal string.
+        // Binance requires 'quantity' as a decimal number string matching the
+        // symbol's lot-size precision (e.g. "0.001" for ETH).
+        let qty = intent.size.max(1);
+        let qty_str = format!("{:.3}", qty as f64);
+        
         let mut params = format!(
             "symbol={}&side={}&type={}&quantity={}",
-            symbol, side, order_type, intent.size
+            symbol, side, order_type, qty_str
         );
         
         if !time_in_force.is_empty() {
             params.push_str(&format!("&timeInForce={}", time_in_force));
         }
         
-        if let Some(price) = intent.price {
-            params.push_str(&format!("&price={:.8}", price));
+        // Only send price for non-MARKET orders — Binance rejects MARKET orders
+        // that include a price parameter with error -1102.
+        if intent.order_type != OrderType::Market {
+            if let Some(price) = intent.price {
+                params.push_str(&format!("&price={:.8}", price));
+            }
         }
         
         if intent.reduce_only {
@@ -280,7 +286,7 @@ impl ExecutionGateway for BinanceGateway {
         
         info!(
             "Binance order {} submitted: {} {} {} @ {:?} | {}us",
-            order_id, side, intent.size, symbol, intent.price, latency_us
+            order_id, side, qty_str, symbol, intent.price, latency_us
         );
         
         Ok(OrderResult {

@@ -3685,12 +3685,23 @@ fn execution_router_loop(
                         let long_gw = long_gw.unwrap().clone();
                         
                         // Calculate position size (2% of total equity)
+                        // Guard against uninitialized equity/prices
                         let total_equity = margin_monitor.total_equity();
-                        let position_notional = total_equity * 0.02;
-                        let mid_price = shared_prices.get(0)
+                        let safe_equity = if total_equity > 0.0 { total_equity } else { 100.0 };
+                        let position_notional = safe_equity * 0.02;
+                        let raw_price = shared_prices.get(0)
                             .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                            .unwrap_or(50000.0);
+                            .unwrap_or(0.0);
+                        let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
                         let position_size = (position_notional / mid_price).max(1.0) as i64;
+                        
+                        // Set leverage on both exchanges before placing orders
+                        if let Err(e) = short_gw.set_leverage(&opp.symbol, 3).await {
+                            warn!("[execution] Funding arb: failed to set leverage on {}: {}", opp.short_exchange.name(), e);
+                        }
+                        if let Err(e) = long_gw.set_leverage(&opp.symbol, 3).await {
+                            warn!("[execution] Funding arb: failed to set leverage on {}: {}", opp.long_exchange.name(), e);
+                        }
                         
                         // Build SHORT intent (on high funding exchange)
                         let short_intent = execution_gateway::OrderIntent {
@@ -4046,18 +4057,41 @@ fn execution_router_loop(
                         );
                         
                         // Calculate position size (2% of total equity)
+                        // Guard against uninitialized equity/prices: use balance
+                        // from margin monitor, falling back to a safe default.
                         let total_equity = margin_monitor.total_equity();
-                        let position_notional = total_equity * 0.02;
-                        let mid_price = shared_prices.get(0)
+                        let safe_equity = if total_equity > 0.0 { total_equity } else { 100.0 };
+                        let position_notional = safe_equity * 0.02;
+                        
+                        // Get mid price from shared prices, skipping uninitialized (0.0) values
+                        let raw_price = shared_prices.get(0)
                             .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                            .unwrap_or(50000.0);
+                            .unwrap_or(0.0);
+                        let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
+                        
+                        // Calculate position size in base currency units.
+                        // For Binance/Bybit this represents the amount of base asset (e.g. ETH).
                         let position_size = (position_notional / mid_price).max(1.0) as i64;
+                        
+                        info!(
+                            "[stat-arb] Position sizing: equity=${:.2} notional=${:.2} mid_price={:.2} size={}",
+                            safe_equity, position_notional, mid_price, position_size
+                        );
                         
                         // Get gateways
                         let long_gw = multi_gateways.get(long_ex);
                         let short_gw = multi_gateways.get(short_ex);
                         
                         if let (Some(lg), Some(sg)) = (long_gw, short_gw) {
+                            // Set leverage on both exchanges before placing orders
+                            let leverage = 3i32;
+                            if let Err(e) = lg.set_leverage(symbol, leverage).await {
+                                warn!("[stat-arb] Failed to set leverage on {}: {}", long_ex.name(), e);
+                            }
+                            if let Err(e) = sg.set_leverage(symbol, leverage).await {
+                                warn!("[stat-arb] Failed to set leverage on {}: {}", short_ex.name(), e);
+                            }
+                            
                             // Build entry intents
                             let (long_intent, short_intent) = multi_exchange::stat_arb::build_stat_arb_entry_intents(
                                 symbol, *long_ex, *short_ex, position_size, mid_price, mid_price
@@ -4067,8 +4101,8 @@ fn execution_router_loop(
                             let lg = lg.clone();
                             let sg = sg.clone();
                             let (long_res, short_res) = tokio::join!(
-                                lg.submit_order(long_intent),
-                                sg.submit_order(short_intent)
+                                execution_gateway::submit_with_retry(&*lg, long_intent),
+                                execution_gateway::submit_with_retry(&*sg, short_intent)
                             );
                             
                             match (&long_res, &short_res) {
