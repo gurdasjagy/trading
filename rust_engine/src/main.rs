@@ -4142,11 +4142,29 @@ fn execution_router_loop(
                             // This ensures neither leg exceeds its exchange's available margin.
                             let position_notional = min_exchange_balance * 0.02 * leverage as f64;
                             
-                            // Get mid price from shared prices, skipping uninitialized (0.0) values
-                            let raw_price = shared_prices.get(0)
-                                .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                                .unwrap_or(0.0);
-                            let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
+                            // BUG 2 FIX: Look up correct per-symbol price from shared_prices
+                            // using the symbol registry index, not hardcoded index 0.
+                            let sym_id = registry.get_id(symbol) as usize;
+                            let raw_price = if sym_id > 0 && sym_id <= shared_prices.len() {
+                                f64::from_bits(shared_prices[sym_id - 1].load(Ordering::Relaxed))
+                            } else {
+                                0.0
+                            };
+                            let mid_price = if raw_price > 0.0 {
+                                raw_price
+                            } else {
+                                // If shared_prices doesn't have data yet, try fetching
+                                // from the gateway's ticker as a live fallback.
+                                let ticker_price = lg.get_ticker(symbol).await
+                                    .map(|t| t.last)
+                                    .unwrap_or(0.0);
+                                if ticker_price > 0.0 {
+                                    ticker_price
+                                } else {
+                                    warn!("[stat-arb] No price available for {} (sym_id={}), skipping", symbol, sym_id);
+                                    continue;
+                                }
+                            };
                             
                             // Pre-flight margin check: ensure each exchange can cover the required margin
                             let required_margin = position_notional / leverage as f64;
@@ -4160,7 +4178,32 @@ fn execution_router_loop(
                             
                             // Calculate position size in base currency units.
                             // For Binance/Bybit this represents the amount of base asset (e.g. ETH).
-                            let position_size = (position_notional / mid_price).max(1.0) as i64;
+                            // BUG 3 FIX: Don't clamp to min 1.0 before casting to i64.
+                            // For Binance/Bybit linear contracts, quantity is in base currency
+                            // units (e.g. 0.001 BTC). Clamping to 1.0 means 1 BTC (~$87,000)
+                            // which exceeds the account balance. Instead, keep the fractional
+                            // value and only enforce a minimum notional check.
+                            let raw_size = position_notional / mid_price;
+                            // Determine minimum order size based on the symbol.
+                            // BTC requires very small increments; ETH/SOL are larger per unit.
+                            let min_order_size = if symbol.starts_with("BTC") {
+                                0.001 // min 0.001 BTC on Bybit/Binance
+                            } else if symbol.starts_with("ETH") {
+                                0.01  // min 0.01 ETH
+                            } else {
+                                0.1   // min 0.1 for SOL and other alts
+                            };
+                            if raw_size < min_order_size {
+                                warn!(
+                                    "[stat-arb] Position size {:.6} {} too small (min {:.4}), skipping",
+                                    raw_size, symbol, min_order_size
+                                );
+                                continue;
+                            }
+                            // Round down to the exchange's precision step.
+                            let precision_step = min_order_size;
+                            let position_size_f = (raw_size / precision_step).floor() * precision_step;
+                            let position_size = (position_size_f * 1000.0).round() as i64; // Store as milli-units for integer math
                             
                             info!(
                                 "[stat-arb] Position sizing: long_bal=${:.2} short_bal=${:.2} notional=${:.2} mid_price={:.2} size={} lev={}x",
