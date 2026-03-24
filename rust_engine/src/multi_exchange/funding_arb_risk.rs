@@ -6,6 +6,7 @@
 //! 3. Basis Risk Calculation
 //! 4. Capital & Margin Sufficiency Check
 
+use tracing::{warn, debug};
 use serde::{Deserialize, Serialize};
 
 use crate::multi_exchange::global_book::{ExchangeId, GlobalBookRegistry};
@@ -65,12 +66,13 @@ impl PreTradeValidator {
         };
 
         if breakeven_periods > config.max_breakeven_periods {
-            return PreTradeResult::Rejected {
-                reason: format!(
-                    "Breakeven requires {:.1} funding periods (max: {:.1}). Net rate: {:.2}bps, fees: {:.2}bps",
-                    breakeven_periods, config.max_breakeven_periods, net_rate_bps, round_trip_fee_bps
-                ),
-            };
+            // BUG 9 FIX: Log WHY validation rejected — previously silent
+            let reason = format!(
+                "Breakeven requires {:.1} funding periods (max: {:.1}). Net rate: {:.2}bps, fees: {:.2}bps",
+                breakeven_periods, config.max_breakeven_periods, net_rate_bps, round_trip_fee_bps
+            );
+            warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            return PreTradeResult::Rejected { reason };
         }
 
         // 2. ORDER BOOK DEPTH & SLIPPAGE CHECK
@@ -80,12 +82,12 @@ impl PreTradeValidator {
         );
 
         if estimated_slippage_bps > config.max_entry_slippage_bps {
-            return PreTradeResult::Rejected {
-                reason: format!(
-                    "Estimated slippage {:.1}bps exceeds max {:.1}bps",
-                    estimated_slippage_bps, config.max_entry_slippage_bps
-                ),
-            };
+            let reason = format!(
+                "Estimated slippage {:.1}bps exceeds max {:.1}bps",
+                estimated_slippage_bps, config.max_entry_slippage_bps
+            );
+            warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            return PreTradeResult::Rejected { reason };
         }
 
         // 3. MARGIN SUFFICIENCY CHECK
@@ -106,14 +108,14 @@ impl PreTradeValidator {
         if short_margin_ratio < config.min_entry_margin_ratio
             || long_margin_ratio < config.min_entry_margin_ratio
         {
-            return PreTradeResult::Rejected {
-                reason: format!(
-                    "Insufficient margin: {}={:.1}% {}={:.1}% (min: {:.1}%)",
-                    opp.short_exchange.name(), short_margin_ratio * 100.0,
-                    opp.long_exchange.name(), long_margin_ratio * 100.0,
-                    config.min_entry_margin_ratio * 100.0
-                ),
-            };
+            let reason = format!(
+                "Insufficient margin: {}={:.1}% {}={:.1}% (min: {:.1}%)",
+                opp.short_exchange.name(), short_margin_ratio * 100.0,
+                opp.long_exchange.name(), long_margin_ratio * 100.0,
+                config.min_entry_margin_ratio * 100.0
+            );
+            warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            return PreTradeResult::Rejected { reason };
         }
 
         // 4. CALCULATE RECOMMENDED SIZE
@@ -129,13 +131,17 @@ impl PreTradeValidator {
         let basis_risk = Self::estimate_basis_risk(opp, global_book_registry);
 
         if basis_risk > config.max_basis_risk_pct {
-            return PreTradeResult::Rejected {
-                reason: format!(
-                    "Basis risk {:.4}% exceeds max {:.4}%",
-                    basis_risk * 100.0, config.max_basis_risk_pct * 100.0
-                ),
-            };
+            let reason = format!(
+                "Basis risk {:.4}% exceeds max {:.4}%",
+                basis_risk * 100.0, config.max_basis_risk_pct * 100.0
+            );
+            warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            return PreTradeResult::Rejected { reason };
         }
+
+        debug!("[pre-trade] {} passed all checks: breakeven={:.1} slippage={:.1}bps margin=({:.1}%/{:.1}%) basis={:.4}%",
+            opp.symbol, breakeven_periods, estimated_slippage_bps,
+            short_margin_ratio * 100.0, long_margin_ratio * 100.0, basis_risk * 100.0);
 
         PreTradeResult::Approved {
             estimated_slippage_bps,

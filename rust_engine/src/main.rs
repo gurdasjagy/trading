@@ -4421,23 +4421,38 @@ fn execution_router_loop(
                             pos.hours_open(now_ns)
                         );
                         
-                        // Get current prices
-                        let mid_price = shared_prices.get(0)
-                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                            .unwrap_or(50000.0);
-                        
-                        // Build exit intents
-                        let (close_long, close_short) = multi_exchange::stat_arb::build_stat_arb_exit_intents(
-                            &pos, mid_price, mid_price
-                        );
-                        
-                        // Close both legs
+                        // BUG 7 FIX: Fetch per-exchange current prices for exit orders
+                        // instead of using shared_prices.get(0) which only has BTC
+                        // and falls back to 50000.0. Use each gateway's ticker for
+                        // accurate per-symbol, per-exchange pricing.
                         if let (Some(lg), Some(sg)) = (
                             multi_gateways.get(&pos.long_exchange),
                             multi_gateways.get(&pos.short_exchange)
                         ) {
                             let lg = lg.clone();
                             let sg = sg.clone();
+
+                            // Fetch live prices from each exchange for this symbol
+                            let long_exit_price = lg.get_ticker(&pos.symbol).await
+                                .map(|t| if t.bid > 0.0 { t.bid } else { t.last })
+                                .unwrap_or(pos.long_entry_price);  // fallback to entry price, never 0
+                            let short_exit_price = sg.get_ticker(&pos.symbol).await
+                                .map(|t| if t.ask > 0.0 { t.ask } else { t.last })
+                                .unwrap_or(pos.short_entry_price);
+
+                            if long_exit_price <= 0.0 || short_exit_price <= 0.0 {
+                                warn!(
+                                    "[stat-arb] Cannot exit {} — no valid prices (long={:.4}, short={:.4})",
+                                    pos.symbol, long_exit_price, short_exit_price
+                                );
+                                continue;
+                            }
+
+                            // Build exit intents with per-exchange prices
+                            let (close_long, close_short) = multi_exchange::stat_arb::build_stat_arb_exit_intents(
+                                &pos, long_exit_price, short_exit_price
+                            );
+
                             let symbol = pos.symbol.clone();
                             tokio::spawn(async move {
                                 let _ = tokio::join!(
@@ -5198,8 +5213,17 @@ fn main() {
                         .expect("Failed to build tokio runtime for funding-arb");
 
                     rt.block_on(async {
+                        // BUG 9 FIX: Use testnet-relaxed thresholds when any exchange
+                        // is in testnet mode. Mainnet defaults reject every opportunity
+                        // on testnet due to thin books and random funding rates.
+                        let config = if fab_gateio_testnet || fab_binance_testnet || fab_bybit_testnet {
+                            info!("[funding-arb] Using TESTNET config with relaxed thresholds");
+                            multi_exchange::FundingArbEngineConfig::testnet()
+                        } else {
+                            multi_exchange::FundingArbEngineConfig::default()
+                        };
                         let mut engine = multi_exchange::FundingArbEngine::new(
-                            multi_exchange::FundingArbEngineConfig::default(),
+                            config,
                             fab_shutdown_clone,
                         );
 

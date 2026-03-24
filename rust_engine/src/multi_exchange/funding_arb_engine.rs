@@ -255,6 +255,45 @@ impl Default for FundingArbEngineConfig {
     }
 }
 
+impl FundingArbEngineConfig {
+    /// BUG 9 FIX: Testnet-aware configuration with relaxed thresholds.
+    /// Testnet order books are thin, funding rates are often random/zero,
+    /// and balances are small. The mainnet defaults reject every opportunity
+    /// on testnet, making the funding arb engine effectively dead.
+    pub fn testnet() -> Self {
+        Self {
+            min_net_rate: 0.00001,          // 0.001% minimum spread (relaxed 10x)
+            min_annualized_apr: 0.01,       // 1% minimum APR (relaxed from 10%)
+            max_entry_slippage_bps: 50.0,   // 50 bps max slippage (relaxed from 5)
+            max_basis_risk_pct: 0.01,       // 1% max basis risk (relaxed from 0.2%)
+            min_entry_margin_ratio: 0.10,   // 10% margin required (relaxed from 40%)
+            max_breakeven_periods: 10.0,    // 10 funding periods (relaxed from 3)
+
+            max_position_pct: 0.30,         // 30% of smallest balance (relaxed)
+            max_notional_usdt: 10_000.0,    // $10k max (smaller for testnet)
+            leverage: 2,                     // 2x leverage (conservative for testnet)
+            max_concurrent_positions: 2,     // Max 2 concurrent arb positions
+
+            rate_check_interval_secs: 30,   // Check rates every 30s (faster on testnet)
+            margin_check_interval_secs: 15, // Check margin every 15s
+            delta_neutral_tolerance: 0.05,  // 5% delta tolerance (relaxed)
+
+            take_profit_usdt: 50.0,         // $50 TP (lower for testnet)
+            take_profit_pct: 0.01,          // 1% TP
+            stop_loss_usdt: -25.0,          // -$25 SL
+            stop_loss_pct: -0.005,          // -0.5% SL
+            spread_reversal_threshold: -0.0001, // Spread inverts by 0.01%
+            max_hold_hours: 48.0,           // 48 hour max hold
+            margin_danger_ratio: 0.10,      // 10% margin = danger
+            max_negative_periods: 5,        // 5 consecutive negative periods
+
+            max_order_slippage: 0.005,      // 0.5% max order slippage (relaxed)
+            execution_timeout_ms: 10000,    // 10 second execution timeout (longer)
+            use_market_orders: true,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Funding Arbitrage Engine
 // ---------------------------------------------------------------------------
