@@ -74,6 +74,9 @@ mod multi_exchange;
 mod binance_gateway;
 mod bybit_gateway;
 
+// Feature 4: Persistent State (SQLite)
+mod state_store;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -89,6 +92,26 @@ use crate::config::{
 };
 use crate::execution_gateway::ExecutionGateway;
 use crate::fixed_point::FixedPrice;
+
+// Feature 3/5: SL/TP update request sent from strategy thread to execution thread
+/// Request to submit or update exchange-side conditional SL/TP orders.
+#[derive(Debug, Clone)]
+struct SlTpUpdateRequest {
+    /// Symbol name (e.g. "BTC_USDT")
+    symbol: String,
+    /// Symbol ID for internal tracking
+    symbol_id: u16,
+    /// Parent position side (Buy = long position, Sell = short position)
+    side: execution_gateway::OrderSide,
+    /// Position size in contracts
+    size: i64,
+    /// New stop-loss price (0.0 = no change)
+    sl_price: f64,
+    /// New take-profit price (0.0 = no change)
+    tp_price: f64,
+    /// Whether this is an update to an existing order (requires cancel first)
+    is_update: bool,
+}
 
 // TASK 2: Funding Arb Position tracking struct
 /// Tracks an active cross-exchange funding rate arbitrage position.
@@ -1072,6 +1095,10 @@ fn strategy_evaluator_loop(
     exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics>,
     ml_weights: &'static ml_weight_receiver::MlWeightReader,
     manual_pos_rx: crossbeam_channel::Receiver<dashboard_server::ManualPositionTrack>,
+    // Feature 2: Configurable auto-protection settings
+    auto_protection_config: config::AutoProtectionConfig,
+    // Feature 3/5: Channel to send SL/TP update requests to execution thread
+    sl_tp_update_tx: crossbeam_channel::Sender<SlTpUpdateRequest>,
 ) {
     info!("[strategy] Starting strategy evaluator on dedicated core");
     let mut last_regime_check = std::time::Instant::now();
@@ -1637,10 +1664,26 @@ fn strategy_evaluator_loop(
                                 "[strategy] 🔒 Break-even SL set for {}: SL moved to {:.4}",
                                 registry.get_name(snapshot.symbol_id), new_sl
                             );
-                            // FIX 4: Update exchange-side conditional order
-                            // This is a fire-and-forget async update — if it fails, the
-                            // Rust-side exit evaluator still protects the position
-                            // TODO: Implement exchange-side SL/TP update via REST API
+                            // Feature 5: Update exchange-side conditional order via channel
+                            let pos_size = exit_evaluator.get_position_size(snapshot.symbol_id).unwrap_or(0);
+                            let is_long = exit_evaluator.is_position_long(snapshot.symbol_id).unwrap_or(true);
+                            let parent_side = if is_long {
+                                execution_gateway::OrderSide::Buy
+                            } else {
+                                execution_gateway::OrderSide::Sell
+                            };
+                            let update_req = SlTpUpdateRequest {
+                                symbol: registry.get_name(snapshot.symbol_id).to_string(),
+                                symbol_id: snapshot.symbol_id,
+                                side: parent_side,
+                                size: pos_size,
+                                sl_price: new_sl,
+                                tp_price: 0.0,
+                                is_update: true,
+                            };
+                            if let Err(e) = sl_tp_update_tx.try_send(update_req) {
+                                warn!("[strategy] Failed to send break-even SL update for {}: {}", registry.get_name(snapshot.symbol_id), e);
+                            }
                         }
                         exit_evaluator::TrailingStopUpdate::TrailStop { new_sl } => {
                             exit_evaluator.update_sl_tp(snapshot.symbol_id, new_sl, 0.0);
@@ -1648,9 +1691,27 @@ fn strategy_evaluator_loop(
                                 "[strategy] 📈 Trailing SL updated for {}: new SL={:.4}",
                                 registry.get_name(snapshot.symbol_id), new_sl
                             );
-                            // FIX 4: Update exchange-side conditional order
+                            // Feature 5: Update exchange-side conditional order via channel
                             // Gate.io requires canceling the old SL and submitting a new one
-                            // TODO: Implement via gateio_gateway.update_conditional_sl()
+                            let pos_size = exit_evaluator.get_position_size(snapshot.symbol_id).unwrap_or(0);
+                            let is_long = exit_evaluator.is_position_long(snapshot.symbol_id).unwrap_or(true);
+                            let parent_side = if is_long {
+                                execution_gateway::OrderSide::Buy
+                            } else {
+                                execution_gateway::OrderSide::Sell
+                            };
+                            let update_req = SlTpUpdateRequest {
+                                symbol: registry.get_name(snapshot.symbol_id).to_string(),
+                                symbol_id: snapshot.symbol_id,
+                                side: parent_side,
+                                size: pos_size,
+                                sl_price: new_sl,
+                                tp_price: 0.0,
+                                is_update: true,
+                            };
+                            if let Err(e) = sl_tp_update_tx.try_send(update_req) {
+                                warn!("[strategy] Failed to send trailing SL update for {}: {}", registry.get_name(snapshot.symbol_id), e);
+                            }
                         }
                         exit_evaluator::TrailingStopUpdate::PartialClose { fraction, reason } => {
                             // Generate a partial close order
@@ -1691,46 +1752,92 @@ fn strategy_evaluator_loop(
                 }
             }
 
-            // ── Auto-Detection of Unprotected Trades ──
-            // Scan tracked positions for missing SL/TP every 50 snapshots.
-            // When found, auto-apply default SL/TP based on a percentage of entry price.
-            // Default: SL = 2% adverse move, TP = 3% favorable move.
-            // This protects manual trades opened without SL/TP from the dashboard.
+            // ── Auto-Detection of Unprotected Trades (Feature 2: Configurable) ──
+            // Scan tracked positions for missing SL/TP using configurable interval and percentages.
+            // When found, auto-apply SL/TP and submit exchange-side conditional orders (Feature 3).
             static UNPROTECTED_SCAN_COUNTER: AtomicU64 = AtomicU64::new(0);
             {
                 let scan_count = UNPROTECTED_SCAN_COUNTER.fetch_add(1, Ordering::Relaxed);
-                if scan_count % 50 == 0 {
+                if scan_count % auto_protection_config.scan_interval == 0 {
                     let unprotected = exit_evaluator.get_unprotected_positions();
+                    let sl_pct = auto_protection_config.default_sl_pct / 100.0;
+                    let tp_pct = auto_protection_config.default_tp_pct / 100.0;
                     for (sym_id, is_long, entry_price, has_sl, has_tp) in &unprotected {
-                        // Default SL: 2% adverse move from entry
+                        // Feature 2: Use configurable SL percentage (or ATR-based if enabled)
                         let default_sl = if !has_sl {
-                            if *is_long {
-                                entry_price * 0.98 // 2% below entry for longs
+                            if auto_protection_config.use_atr_based {
+                                let atr = exit_evaluator.get_position_atr(*sym_id);
+                                if atr > 0.0 {
+                                    if *is_long {
+                                        entry_price - atr * auto_protection_config.atr_sl_multiplier
+                                    } else {
+                                        entry_price + atr * auto_protection_config.atr_sl_multiplier
+                                    }
+                                } else {
+                                    // Fallback to percentage-based if ATR not available
+                                    if *is_long { entry_price * (1.0 - sl_pct) } else { entry_price * (1.0 + sl_pct) }
+                                }
                             } else {
-                                entry_price * 1.02 // 2% above entry for shorts
+                                if *is_long { entry_price * (1.0 - sl_pct) } else { entry_price * (1.0 + sl_pct) }
                             }
                         } else {
-                            0.0 // already has SL, don't overwrite
+                            0.0
                         };
 
-                        // Default TP: 3% favorable move from entry (1.5:1 R:R)
+                        // Feature 2: Use configurable TP percentage (or ATR-based if enabled)
                         let default_tp = if !has_tp {
-                            if *is_long {
-                                entry_price * 1.03 // 3% above entry for longs
+                            if auto_protection_config.use_atr_based {
+                                let atr = exit_evaluator.get_position_atr(*sym_id);
+                                if atr > 0.0 {
+                                    if *is_long {
+                                        entry_price + atr * auto_protection_config.atr_tp_multiplier
+                                    } else {
+                                        entry_price - atr * auto_protection_config.atr_tp_multiplier
+                                    }
+                                } else {
+                                    if *is_long { entry_price * (1.0 + tp_pct) } else { entry_price * (1.0 - tp_pct) }
+                                }
                             } else {
-                                entry_price * 0.97 // 3% below entry for shorts
+                                if *is_long { entry_price * (1.0 + tp_pct) } else { entry_price * (1.0 - tp_pct) }
                             }
                         } else {
-                            0.0 // already has TP, don't overwrite
+                            0.0
                         };
 
                         exit_evaluator.update_sl_tp(*sym_id, default_sl, default_tp);
                         info!(
-                            "[strategy] 🛡️ Auto-protection applied to {} position sym={}: SL={:.4} TP={:.4}",
+                            "[strategy] 🛡️ Auto-protection applied to {} position sym={}: SL={:.4} TP={:.4} (sl_pct={:.1}%, tp_pct={:.1}%, atr_based={})",
                             if *is_long { "LONG" } else { "SHORT" },
                             registry.get_name(*sym_id),
-                            default_sl, default_tp
+                            default_sl, default_tp,
+                            auto_protection_config.default_sl_pct,
+                            auto_protection_config.default_tp_pct,
+                            auto_protection_config.use_atr_based,
                         );
+
+                        // Feature 3: Submit exchange-side conditional orders for auto-protected positions
+                        let pos_size = exit_evaluator.get_position_size(*sym_id).unwrap_or(0);
+                        if pos_size != 0 && (default_sl > 0.0 || default_tp > 0.0) {
+                            let parent_side = if *is_long {
+                                execution_gateway::OrderSide::Buy
+                            } else {
+                                execution_gateway::OrderSide::Sell
+                            };
+                            let update_req = SlTpUpdateRequest {
+                                symbol: registry.get_name(*sym_id).to_string(),
+                                symbol_id: *sym_id,
+                                side: parent_side,
+                                size: pos_size,
+                                sl_price: default_sl,
+                                tp_price: default_tp,
+                                is_update: false,
+                            };
+                            if let Err(e) = sl_tp_update_tx.try_send(update_req) {
+                                warn!("[strategy] Failed to send SL/TP update request for {}: {}", registry.get_name(*sym_id), e);
+                            } else {
+                                info!("[strategy] 📡 Exchange-side SL/TP request sent for {}", registry.get_name(*sym_id));
+                            }
+                        }
                     }
                 }
             }
@@ -2386,6 +2493,12 @@ fn execution_router_loop(
     global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>,
     multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
     multi_exchange_enabled: bool,
+    // Feature 3/5: Channel to receive SL/TP update requests from strategy thread
+    sl_tp_update_rx: crossbeam_channel::Receiver<SlTpUpdateRequest>,
+    // Feature 4: Persistent state store
+    state_store: Option<Arc<state_store::StateStore>>,
+    // Feature 2: Auto-protection config (for reconciled positions)
+    auto_protection_config: config::AutoProtectionConfig,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2540,9 +2653,158 @@ fn execution_router_loop(
                     }
                 }
             }
+
+            // ══════════════════════════════════════════════════════════════
+            // Feature 1: Position Reconciliation on Startup
+            // Query exchange for all open positions and sync with internal state.
+            // Must happen AFTER auth is verified but BEFORE the main loop starts.
+            // ══════════════════════════════════════════════════════════════
+            if let Some(ref gw) = gateway {
+                info!("[execution] 🔄 Starting position reconciliation with exchange...");
+                match gw.get_positions().await {
+                    Ok(positions) => {
+                        let exchange_symbols: Vec<String> = positions.iter().map(|p| p.symbol.clone()).collect();
+                        info!("[execution] Found {} open positions on exchange", positions.len());
+
+                        // Feature 4: Reconcile persisted state with exchange
+                        if let Some(ref store) = state_store {
+                            match store.reconcile_with_exchange(&exchange_symbols) {
+                                Ok(closed) => {
+                                    if closed > 0 {
+                                        info!("[execution] [state-store] Closed {} stale persisted positions", closed);
+                                    }
+                                }
+                                Err(e) => warn!("[execution] [state-store] Reconciliation failed: {}", e),
+                            }
+                        }
+
+                        for pos in &positions {
+                            let sym_id = registry.get_id(&pos.symbol);
+                            if sym_id == 0 {
+                                warn!("[execution] Reconcile: unknown symbol '{}' — skipping", pos.symbol);
+                                continue;
+                            }
+
+                            let is_long = pos.size > 0;
+                            let size_abs = pos.size.unsigned_abs() as i64;
+
+                            // Notify strategy thread to track this position
+                            let track_msg = dashboard_server::ManualPositionTrack {
+                                symbol_id: sym_id,
+                                is_long,
+                                entry_price: pos.entry_price,
+                                size: size_abs,
+                                leverage: pos.leverage,
+                                stop_loss: None,
+                                take_profit: None,
+                            };
+                            if let Err(e) = manual_pos_tx.try_send(track_msg) {
+                                warn!("[execution] Failed to send reconciled position {} to strategy: {}", pos.symbol, e);
+                            }
+
+                            // Apply auto-protection SL/TP to reconciled positions
+                            let sl_pct = auto_protection_config.default_sl_pct / 100.0;
+                            let tp_pct = auto_protection_config.default_tp_pct / 100.0;
+                            let sl_price = if is_long {
+                                pos.entry_price * (1.0 - sl_pct)
+                            } else {
+                                pos.entry_price * (1.0 + sl_pct)
+                            };
+                            let tp_price = if is_long {
+                                pos.entry_price * (1.0 + tp_pct)
+                            } else {
+                                pos.entry_price * (1.0 - tp_pct)
+                            };
+
+                            // Submit exchange-side conditional orders for reconciled positions
+                            let parent_side = if is_long {
+                                execution_gateway::OrderSide::Buy
+                            } else {
+                                execution_gateway::OrderSide::Sell
+                            };
+
+                            if sl_price > 0.0 {
+                                if let Err(e) = gw.submit_conditional_sl(&pos.symbol, &parent_side, size_abs, sl_price).await {
+                                    warn!("[execution] Failed to submit SL for reconciled {}: {}", pos.symbol, e);
+                                }
+                            }
+                            if tp_price > 0.0 {
+                                if let Err(e) = gw.submit_conditional_tp(&pos.symbol, &parent_side, size_abs, tp_price).await {
+                                    warn!("[execution] Failed to submit TP for reconciled {}: {}", pos.symbol, e);
+                                }
+                            }
+
+                            // Feature 4: Persist reconciled position
+                            if let Some(ref store) = state_store {
+                                let persisted = state_store::PersistedPosition {
+                                    symbol: pos.symbol.clone(),
+                                    side: if is_long { "long".to_string() } else { "short".to_string() },
+                                    entry_price: pos.entry_price,
+                                    size: size_abs,
+                                    stop_loss: sl_price,
+                                    take_profit: tp_price,
+                                    leverage: pos.leverage,
+                                    opened_at: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs() as i64,
+                                    closed_at: None,
+                                };
+                                if let Err(e) = store.insert_position(&persisted) {
+                                    warn!("[execution] [state-store] Failed to persist reconciled position {}: {}", pos.symbol, e);
+                                }
+                            }
+
+                            info!(
+                                "[execution] ✅ Reconciled {} position {}: entry={:.4} size={} SL={:.4} TP={:.4}",
+                                if is_long { "LONG" } else { "SHORT" },
+                                pos.symbol, pos.entry_price, size_abs, sl_price, tp_price
+                            );
+                        }
+                        info!("[execution] 🔄 Position reconciliation complete ({} positions synced)", positions.len());
+                    }
+                    Err(e) => {
+                        warn!("[execution] ⚠️ Position reconciliation failed: {} — continuing without sync", e);
+                    }
+                }
+            }
         }
 
         loop {
+            // ── Feature 3/5: Process SL/TP update requests from strategy thread ──
+            while let Ok(req) = sl_tp_update_rx.try_recv() {
+                if let Some(ref gw) = gateway {
+                    if req.is_update {
+                        // Feature 5: For updates (trailing stop moves), cancel old and submit new
+                        info!("[execution] 🔄 Updating exchange-side SL for {}: new SL={:.4}", req.symbol, req.sl_price);
+                        if let Err(e) = gw.cancel_conditional_orders(&req.symbol).await {
+                            warn!("[execution] Failed to cancel old conditional orders for {}: {}", req.symbol, e);
+                        }
+                    }
+
+                    if req.sl_price > 0.0 {
+                        if let Err(e) = gw.submit_conditional_sl(&req.symbol, &req.side, req.size, req.sl_price).await {
+                            warn!("[execution] Failed to submit SL for {}: {}", req.symbol, e);
+                        } else {
+                            info!("[execution] ✅ Exchange-side SL submitted for {} @ {:.4}", req.symbol, req.sl_price);
+                        }
+                    }
+                    if req.tp_price > 0.0 {
+                        if let Err(e) = gw.submit_conditional_tp(&req.symbol, &req.side, req.size, req.tp_price).await {
+                            warn!("[execution] Failed to submit TP for {}: {}", req.symbol, e);
+                        } else {
+                            info!("[execution] ✅ Exchange-side TP submitted for {} @ {:.4}", req.symbol, req.tp_price);
+                        }
+                    }
+
+                    // Feature 4: Update persisted SL/TP
+                    if let Some(ref store) = state_store {
+                        if let Err(e) = store.update_position_sl_tp(&req.symbol, req.sl_price, req.tp_price) {
+                            warn!("[execution] [state-store] Failed to update SL/TP for {}: {}", req.symbol, e);
+                        }
+                    }
+                }
+            }
             // Check for manual trade requests from dashboard
             while let Ok(manual_req) = manual_cmd_rx.try_recv() {
                 let sym_upper = manual_req.symbol.replace('/', "_").to_uppercase();
@@ -4740,6 +5002,26 @@ fn main() {
     // here so the strategy thread can register the position in exit_evaluator / lifecycle_mgr.
     let (manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
 
+    // Feature 3/5: Create crossbeam channel for SL/TP update requests (strategy → execution)
+    let (sl_tp_update_tx, sl_tp_update_rx) = crossbeam_channel::bounded::<SlTpUpdateRequest>(64);
+    // Feature 4: Initialize persistent state store
+    let state_store_instance: Option<Arc<state_store::StateStore>> = if config.persistent_state.enabled {
+        match state_store::StateStore::open(&config.persistent_state.db_path) {
+            Ok(store) => {
+                info!("[main] SQLite persistent state enabled at {}", config.persistent_state.db_path);
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                warn!("[main] Failed to open SQLite state store: {} — continuing without persistence", e);
+                None
+            }
+        }
+    } else {
+        info!("[main] Persistent state disabled (set [persistent_state] enabled=true to enable)");
+        None
+    };
+    let state_store_exec = state_store_instance.clone();
+
     {
         let book_ring = book_to_strategy;
         let exec_ring = strategy_to_exec;
@@ -4753,6 +5035,8 @@ fn main() {
         let funding_rates_strat = funding_rates.clone();
         let exec_analytics_strat = exec_analytics;
         let ml_weights_strat = ml_weights;
+        // Feature 2: Clone auto-protection config for strategy thread
+        let auto_protection_strat = config.auto_protection.clone();
         let handle = thread::Builder::new()
             .name("strategy".into())
             .spawn(move || {
@@ -4778,6 +5062,8 @@ fn main() {
                     exec_analytics_strat,
                     ml_weights_strat,
                     manual_pos_rx,
+                    auto_protection_strat,
+                    sl_tp_update_tx,
                 );
             })
             .expect("Failed to spawn strategy thread");
@@ -4862,6 +5148,8 @@ fn main() {
         let sp = shared_prices.clone();
         // TASK 1: Pass global book registry and multi-gateways to execution router
         let gbr_exec = global_book_registry.clone();
+        // Feature 2: Clone auto-protection config for execution thread (reconciliation)
+        let auto_protection_exec = config.auto_protection.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
@@ -4871,6 +5159,7 @@ fn main() {
                     exec_ring, manual_cmd_rx, manual_pos_tx, gw, fx_gw, cb, reg, lc, lat, 
                     position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp,
                     gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
+                    sl_tp_update_rx, state_store_exec, auto_protection_exec,
                 );
             })
             .expect("Failed to spawn execution thread");

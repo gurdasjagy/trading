@@ -434,6 +434,13 @@ pub trait ExecutionGateway: Send + Sync {
         Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "Conditional TP not supported by this gateway".into() })
     }
 
+    /// Feature 5: Cancel all conditional (price-triggered) orders for a symbol.
+    /// Used when trailing stop updates require canceling old SL before submitting new one.
+    /// Default implementation returns Ok (no-op for gateways that don't support this).
+    async fn cancel_conditional_orders(&self, _symbol: &str) -> Result<(), ExchangeError> {
+        Ok(())
+    }
+
     /// BUG 4 FIX: Add default implementations for set_margin_mode and get_ticker
     async fn set_margin_mode(&self, _symbol: &str, _mode: &str) -> Result<(), ExchangeError> {
         Ok(())

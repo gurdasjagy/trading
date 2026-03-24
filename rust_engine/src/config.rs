@@ -624,6 +624,79 @@ impl Default for AlertManagerConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-Protection Configuration (Feature 2)
+// ---------------------------------------------------------------------------
+
+/// Configuration for automatic SL/TP protection of unprotected positions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoProtectionConfig {
+    /// Default stop-loss percentage (e.g. 2.0 = 2% adverse move from entry).
+    #[serde(default = "default_sl_pct")]
+    pub default_sl_pct: f64,
+    /// Default take-profit percentage (e.g. 3.0 = 3% favorable move from entry).
+    #[serde(default = "default_tp_pct")]
+    pub default_tp_pct: f64,
+    /// Use ATR-based SL/TP instead of fixed percentage.
+    #[serde(default)]
+    pub use_atr_based: bool,
+    /// ATR multiplier for stop-loss (used when use_atr_based=true).
+    #[serde(default = "default_atr_sl_multiplier")]
+    pub atr_sl_multiplier: f64,
+    /// ATR multiplier for take-profit (used when use_atr_based=true).
+    #[serde(default = "default_atr_tp_multiplier")]
+    pub atr_tp_multiplier: f64,
+    /// How often to scan for unprotected positions (in snapshot count).
+    #[serde(default = "default_scan_interval")]
+    pub scan_interval: u64,
+}
+
+fn default_sl_pct() -> f64 { 2.0 }
+fn default_tp_pct() -> f64 { 3.0 }
+fn default_atr_sl_multiplier() -> f64 { 2.0 }
+fn default_atr_tp_multiplier() -> f64 { 3.0 }
+fn default_scan_interval() -> u64 { 50 }
+
+impl Default for AutoProtectionConfig {
+    fn default() -> Self {
+        Self {
+            default_sl_pct: default_sl_pct(),
+            default_tp_pct: default_tp_pct(),
+            use_atr_based: false,
+            atr_sl_multiplier: default_atr_sl_multiplier(),
+            atr_tp_multiplier: default_atr_tp_multiplier(),
+            scan_interval: default_scan_interval(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistent State Configuration (Feature 4)
+// ---------------------------------------------------------------------------
+
+/// Configuration for SQLite-based persistent state storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistentStateConfig {
+    /// Enable persistent state storage.
+    #[serde(default = "default_persistent_enabled")]
+    pub enabled: bool,
+    /// Path to the SQLite database file.
+    #[serde(default = "default_db_path")]
+    pub db_path: String,
+}
+
+fn default_persistent_enabled() -> bool { false }
+fn default_db_path() -> String { "./trading_state.db".to_string() }
+
+impl Default for PersistentStateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_persistent_enabled(),
+            db_path: default_db_path(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Multi-Exchange Configuration
 // ---------------------------------------------------------------------------
 
@@ -977,6 +1050,14 @@ pub struct EngineConfig {
     /// Feature 8: Alert Manager
     #[serde(default)]
     pub alert_manager: AlertManagerConfig,
+    // === Auto-Protection Configuration (Feature 2) ===
+    /// Configurable SL/TP auto-protection for unprotected positions.
+    #[serde(default)]
+    pub auto_protection: AutoProtectionConfig,
+    // === Persistent State Configuration (Feature 4) ===
+    /// SQLite-based persistent state storage.
+    #[serde(default)]
+    pub persistent_state: PersistentStateConfig,
     // === Multi-Exchange Feature (USE_MULTI_EXCHANGE) ===
     /// Master toggle for multi-exchange mode.
     #[serde(default)]
@@ -1064,6 +1145,8 @@ impl Default for EngineConfig {
             fee_optimizer: FeeOptimizerConfig::default(),
             adaptive_twap: AdaptiveTwapConfig::default(),
             alert_manager: AlertManagerConfig::default(),
+            auto_protection: AutoProtectionConfig::default(),
+            persistent_state: PersistentStateConfig::default(),
             multi_exchange_enabled: false,
             multi_exchange: MultiExchangeConfig::default(),
         }

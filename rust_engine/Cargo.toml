@@ -84,6 +84,9 @@ bytes = "1"
 # Environment variable loading (.env files)
 dotenvy = "0.15"
 
+# SQLite for persistent state storage (Feature 4)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 # OS-level thread core affinity & shared memory
 core_affinity = "0.8"
 ctrlc = "3.4"
