@@ -530,11 +530,12 @@ impl OrderCommand {
 
     /// Validate that the command is safe to submit.
     /// Returns Err with reason if the command should be rejected.
+    ///
+    /// NOTE: Unprotected trades (no SL/TP) are ALLOWED. The exit evaluator
+    /// will auto-detect unprotected positions and apply default SL/TP based
+    /// on ATR. This enables manual trades without requiring SL/TP upfront.
     #[inline]
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !self.is_cancel() && !self.has_stop_loss() {
-            return Err("OrderCommand rejected: no stop loss set (unprotected trade)");
-        }
         if self.qty == 0 && !self.is_cancel() {
             return Err("OrderCommand rejected: zero quantity");
         }

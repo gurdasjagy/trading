@@ -580,6 +580,29 @@ impl ExitEvaluator {
             }
         }
     }
+
+    /// Detect unprotected positions (no SL and/or no TP set).
+    ///
+    /// Returns a list of (symbol_id, is_long, entry_price, has_sl, has_tp) for
+    /// positions that are missing SL or TP protection. The caller is responsible
+    /// for computing and applying appropriate SL/TP values (e.g. ATR-based).
+    pub fn get_unprotected_positions(&self) -> Vec<(u16, bool, f64, bool, bool)> {
+        let mut unprotected = Vec::new();
+        for (_, state) in &self.positions {
+            let has_sl = state.stop_loss > 0.0;
+            let has_tp = state.take_profit > 0.0;
+            if !has_sl || !has_tp {
+                unprotected.push((
+                    state.symbol_id,
+                    state.is_long,
+                    state.entry_price,
+                    has_sl,
+                    has_tp,
+                ));
+            }
+        }
+        unprotected
+    }
 }
 
 impl Default for ExitEvaluator {
