@@ -6,7 +6,7 @@
 
 use rusqlite::{Connection, params};
 use std::sync::Mutex;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// A persisted position record.
 #[derive(Debug, Clone)]

@@ -24,12 +24,5 @@ pub mod funding_arb_executor;
 pub mod funding_arb_risk;
 
 // Re-export commonly used types
-pub use global_book::{ExchangeId, GlobalBookRegistry, GlobalOrderBook, SharedGlobalBook};
-pub use sor::{SmartOrderRouter, SorConfig, SorResult, OrderSlice};
-pub use funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity, FundingRateData};
-pub use margin_monitor::{CrossVenueMarginMonitor, ExchangeMarginHealth, MarginImbalanceAlert};
-pub use cross_exchange_mm::{CrossExchangeMarketMaker, CrossExchangeMMConfig, MakerOrder, HedgePosition, MakerOrderStatus};
-pub use stat_arb::{StatArbEngine, StatArbConfig, StatArbPosition, StatArbExitReason};
-pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig, FundingArbState};
-pub use funding_arb_executor::{DualLegExecutor, DualLegResult, LegStatus};
-pub use funding_arb_risk::{PreTradeValidator, PreTradeResult, ExitReason};
+pub use global_book::{ExchangeId, GlobalBookRegistry};
+pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig};

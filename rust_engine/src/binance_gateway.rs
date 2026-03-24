@@ -11,7 +11,7 @@ use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
     Client,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::Sha256;
 use tracing::info;
 

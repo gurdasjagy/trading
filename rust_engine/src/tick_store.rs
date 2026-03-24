@@ -18,7 +18,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use memmap2::{MmapMut, MmapOptions};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Size of each tick record in bytes.
 const TICK_SIZE: usize = 48;

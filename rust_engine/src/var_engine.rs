@@ -26,7 +26,7 @@
 //! ```
 
 use std::collections::VecDeque;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Number of return observations to maintain in the rolling window.
 /// 1000 observations at 1-minute frequency = ~16.7 hours of data.

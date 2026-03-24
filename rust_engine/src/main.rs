@@ -1010,7 +1010,7 @@ fn orderbook_builder_loop(
                 }
                 
                 // Push snapshot to strategy
-                if let (Some((bid, bid_qty)), Some((ask, ask_qty))) = (book.best_bid(), book.best_ask()) {
+                if let (Some((bid, _bid_qty)), Some((ask, _ask_qty))) = (book.best_bid(), book.best_ask()) {
                     let snapshot = BookSnapshot {
                         symbol_id: update.symbol_id,
                         bid_levels: 10,
@@ -1138,7 +1138,7 @@ fn strategy_evaluator_loop(
     // let exec_analytics = exec_analytics.lock();
     info!("[strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)");
     // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
-    let mut tsi_calculator = TrendStrengthIndex::new();
+    let tsi_calculator = TrendStrengthIndex::new();
     info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
     // Task 17: Phase 2 Feature 9 - Realized Volatility Calculator initialization
     let mut realized_vol_calc = RealizedVolatilityCalculator::new(300); // 5-minute window (300 seconds)
@@ -2592,7 +2592,7 @@ fn execution_router_loop(
     }
 
     // Initialize event-sourced order state machine
-    let mut order_state_machine = order_state_machine::OrderStateMachine::new();
+    let _order_state_machine = order_state_machine::OrderStateMachine::new();
 
     // Initialize PnL tracking for position entries
     let mut position_entries: HashMap<u16, (f64, i64, bool)> = HashMap::new();
@@ -3272,7 +3272,7 @@ fn execution_router_loop(
                                 let gw_clone = gw.clone();
                                 let order_id_clone = res.order_id.clone();
                                 let symbol_clone = symbol_name.to_string();
-                                let sym_id = cmd.symbol_id;
+                                let _sym_id = cmd.symbol_id;
                                 tokio::spawn(async move {
                                     // Wait 3 seconds for the order to rest on the book
                                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -4178,7 +4178,7 @@ fn execution_router_loop(
                         ) {
                             let lg = lg.clone();
                             let sg = sg.clone();
-                            let symbol = pos.symbol.clone();
+                            let _symbol = pos.symbol.clone();
                             tokio::spawn(async move {
                                 let _ = tokio::join!(
                                     lg.submit_order(close_long),
@@ -4706,7 +4706,7 @@ fn main() {
         event_buses.control.capacity());
 
     // Bridge health monitor: tracks IPC health metrics and exposes /health endpoint
-    let mut health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
+    let health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
     // BridgeHealthMonitor is ready after new() — no separate init needed
     info!("📡 Bridge: Health monitor initialized");
     let health_monitor: &'static parking_lot::Mutex<bridge_ipc::health_monitor::BridgeHealthMonitor> =
@@ -5243,7 +5243,7 @@ fn main() {
 
                     // Every 120 heartbeats (~60s), log bridge health metrics
                     if report_counter % 120 == 0 {
-                        let mut hm = health_mon.lock();
+                        let hm = health_mon.lock();
                         hm.update_rates();
                         let health = hm.get_status();
                         let metrics_json = hm.get_metrics_json();
