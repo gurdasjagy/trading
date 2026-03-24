@@ -2155,6 +2155,61 @@ impl ExecutionGateway for GateIoGateway {
         self.submit_sl_tp_orders(symbol, parent_side, filled_size, None, Some(tp_price)).await;
         Ok(())
     }
+
+    /// Feature 5: Cancel all conditional (price-triggered) orders for a symbol.
+    /// Gate.io requires canceling old conditional orders before submitting new ones
+    /// when trailing stops update the SL price.
+    async fn cancel_conditional_orders(&self, symbol: &str) -> Result<(), ExchangeError> {
+        let contract = Self::normalize_symbol(symbol);
+        let query = format!("contract={}", contract);
+        let path = "/futures/usdt/price_orders";
+
+        // First, list all open price-triggered orders for this symbol
+        match self.rest_get(path, &query).await {
+            Ok(orders) => {
+                if let Some(order_list) = orders.as_array() {
+                    for order in order_list {
+                        if let Some(order_id) = order.get("id").and_then(|v| v.as_u64()) {
+                            let cancel_path = format!("{}/{}", path, order_id);
+                            let full_cancel_path = format!("/api/v4{}", cancel_path);
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64;
+                            let signature = Self::rest_sign("DELETE", &full_cancel_path, "", "", ts, &self.api_secret);
+                            let url = format!("{}{}", self.base_url(), cancel_path);
+
+                            match self.rest_client.delete(&url)
+                                .header("KEY", &self.api_key)
+                                .header("SIGN", &signature)
+                                .header("Timestamp", ts.to_string())
+                                .send()
+                                .await
+                            {
+                                Ok(resp) => {
+                                    if resp.status().is_success() {
+                                        info!("[gateio] Cancelled conditional order {} for {}", order_id, symbol);
+                                    } else {
+                                        let body = resp.text().await.unwrap_or_default();
+                                        warn!("[gateio] Failed to cancel conditional order {}: {}", order_id, body);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("[gateio] HTTP error cancelling conditional order {}: {}", order_id, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => {
+                warn!("[gateio] Failed to list conditional orders for {}: {}", symbol, e);
+                // Non-fatal: the in-memory exit evaluator still protects the position
+                Ok(())
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
