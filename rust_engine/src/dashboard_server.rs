@@ -611,6 +611,8 @@ pub struct ManualTradeRequest {
     pub take_profit: f64,
     /// Exchange to route to: "gateio", "binance", "bybit"
     pub exchange: Option<String>,
+    /// Margin mode: "cross" or "isolated" (default: "cross")
+    pub margin_mode: Option<String>,
     /// Optional note/tag for this trade
     pub note: Option<String>,
 }

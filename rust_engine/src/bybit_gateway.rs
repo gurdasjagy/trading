@@ -374,12 +374,75 @@ impl ExecutionGateway for BybitGateway {
     async fn get_balance(&self) -> Result<f64, ExchangeError> {
         let query = "accountType=UNIFIED&coin=USDT";
         let response = self.get_signed("/v5/account/wallet-balance", query).await?;
-        let available = response
-            .pointer("/result/list/0/coin/0/availableToWithdraw")
+
+        // Try multiple fields in priority order:
+        // 1. totalAvailableBalance (account-level USD available, works for cross/portfolio margin)
+        // 2. coin[].walletBalance (per-coin wallet balance)
+        // 3. coin[].availableToWithdraw (DEPRECATED since Jan 2025, may return empty)
+        // 4. totalEquity (account-level total equity in USD)
+
+        // First try account-level totalAvailableBalance
+        if let Some(total_avail) = response
+            .pointer("/result/list/0/totalAvailableBalance")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0);
-        Ok(available)
+        {
+            if total_avail > 0.0 {
+                info!("Bybit balance (totalAvailableBalance): ${:.2}", total_avail);
+                return Ok(total_avail);
+            }
+        }
+
+        // Then try per-coin walletBalance
+        if let Some(coins) = response.pointer("/result/list/0/coin").and_then(|v| v.as_array()) {
+            for coin in coins {
+                let coin_name = coin.get("coin").and_then(|v| v.as_str()).unwrap_or("");
+                if coin_name == "USDT" {
+                    // Try walletBalance first (most reliable)
+                    if let Some(wb) = coin.get("walletBalance")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
+                        if wb > 0.0 {
+                            info!("Bybit balance (walletBalance): ${:.2}", wb);
+                            return Ok(wb);
+                        }
+                    }
+                    // Fallback to equity
+                    if let Some(eq) = coin.get("equity")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
+                        if eq > 0.0 {
+                            info!("Bybit balance (equity): ${:.2}", eq);
+                            return Ok(eq);
+                        }
+                    }
+                    // Last resort: deprecated availableToWithdraw
+                    if let Some(atw) = coin.get("availableToWithdraw")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
+                        info!("Bybit balance (availableToWithdraw): ${:.2}", atw);
+                        return Ok(atw);
+                    }
+                }
+            }
+        }
+
+        // Final fallback: account-level totalEquity
+        if let Some(equity) = response
+            .pointer("/result/list/0/totalEquity")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+        {
+            info!("Bybit balance (totalEquity): ${:.2}", equity);
+            return Ok(equity);
+        }
+
+        info!("Bybit balance: could not extract balance from response: {}", 
+            serde_json::to_string(&response).unwrap_or_default());
+        Ok(0.0)
     }
 
     async fn get_positions(&self) -> Result<Vec<Position>, ExchangeError> {

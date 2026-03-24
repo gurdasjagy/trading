@@ -1458,9 +1458,11 @@ fn strategy_evaluator_loop(
             let cvd_divergence_score = 0.0; // Placeholder - would need actual divergence calculation
             let toxicity = trade_flow_analyzer.calculate_toxicity_score(metrics.vpin, cvd_divergence_score);
             
-            // TASK 2d FIX: Halt trading if toxicity > 0.7 with info-level logging
-            if toxicity > 0.7 {
-                info!("[strategy] Order flow toxicity {:.2} > 0.7 - halting signal generation for this tick", toxicity);
+            // TASK 2d FIX: Halt trading if toxicity > 0.85 with info-level logging
+            // Raised from 0.7 to 0.85: synthetic VPIN (from depth proxy, not real trades)
+            // can produce noisy toxicity values that block trading on testnet.
+            if toxicity > 0.85 {
+                info!("[strategy] Order flow toxicity {:.2} > 0.85 - halting signal generation for this tick", toxicity);
                 continue;
             }
 
@@ -1820,14 +1822,24 @@ fn strategy_evaluator_loop(
                 
                 // ── Phase 3 Feature 13: Ichimoku Cloud Trend Filter ──
                 // Skip long signals when price is below cloud, short signals when above cloud
+                // FIX: Only apply filter when Ichimoku cloud has warmed up (needs ~52 candles).
+                // During warmup, cloud position defaults to BelowCloud which blocks all longs.
                 match ichimoku_position {
                     ichimoku_cloud::CloudPosition::BelowCloud if is_buy => {
-                        info!("[strategy] ☁️ Ichimoku: price below cloud — skipping long signal");
-                        continue;
+                        if ichimoku_cloud.is_warmed_up() {
+                            info!("[strategy] ☁️ Ichimoku: price below cloud — skipping long signal");
+                            continue;
+                        } else {
+                            debug!("[strategy] ☁️ Ichimoku cloud not warmed up — allowing long signal through");
+                        }
                     }
                     ichimoku_cloud::CloudPosition::AboveCloud if !is_buy => {
-                        info!("[strategy] ☁️ Ichimoku: price above cloud — skipping short signal");
-                        continue;
+                        if ichimoku_cloud.is_warmed_up() {
+                            info!("[strategy] ☁️ Ichimoku: price above cloud — skipping short signal");
+                            continue;
+                        } else {
+                            debug!("[strategy] ☁️ Ichimoku cloud not warmed up — allowing short signal through");
+                        }
                     }
                     _ => {}
                 }
@@ -2029,10 +2041,12 @@ fn strategy_evaluator_loop(
                     1.0
                 };
                 
-                // Task 24: Reduce size by 50% if toxicity > 0.5
-                if toxicity > 0.5 {
+                // Task 24: Reduce size by 50% if toxicity > 0.7
+                // Raised from 0.5 to 0.7: synthetic VPIN proxy can produce elevated
+                // toxicity readings that over-reduce position sizes on testnet.
+                if toxicity > 0.7 {
                     impact_scalar *= 0.5;
-                    info!("[strategy] 🚫 Order flow toxicity {:.2} > 0.5 — reducing size by 50%", toxicity);
+                    info!("[strategy] 🚫 Order flow toxicity {:.2} > 0.7 — reducing size by 50%", toxicity);
                 }
                 
                 // ── Phase 3 Feature 15: Cross-Asset Correlation Check ──
@@ -2308,6 +2322,7 @@ fn strategy_evaluator_loop(
 fn execution_router_loop(
     exec_ring: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY>,
     manual_cmd_rx: crossbeam_channel::Receiver<dashboard_server::ManualTradeRequest>,
+    manual_pos_tx: crossbeam_channel::Sender<dashboard_server::ManualPositionTrack>,
     gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
     forex_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>>,
     circuit_breaker: &'static CircuitBreaker,
@@ -2516,9 +2531,10 @@ fn execution_router_loop(
                         warn!("[execution] Manual trade: failed to set leverage: {}", e);
                     }
                     
-                    // Step 2: Set margin mode to cross
-                    if let Err(e) = gw.set_margin_mode(&sym_upper, "cross").await {
-                        warn!("[execution] Manual trade: failed to set margin mode: {}", e);
+                    // Step 2: Set margin mode (from request, default "cross")
+                    let margin_mode = manual_req.margin_mode.as_deref().unwrap_or("cross");
+                    if let Err(e) = gw.set_margin_mode(&sym_upper, margin_mode).await {
+                        warn!("[execution] Manual trade: failed to set margin mode to '{}': {}", margin_mode, e);
                     }
                     
                     // Step 3: Build and submit the order
@@ -2581,6 +2597,23 @@ fn execution_router_loop(
                                 }
                             });
                             
+                            // Send position tracking info to strategy thread
+                            // so exit_evaluator and lifecycle_mgr can monitor this position
+                            let track = dashboard_server::ManualPositionTrack {
+                                symbol_id: sym_id,
+                                is_long: is_buy,
+                                entry_price: res.avg_fill_price,
+                                size: res.filled_size,
+                                leverage: manual_req.leverage as i32,
+                                stop_loss: manual_req.stop_loss,
+                                take_profit: manual_req.take_profit,
+                            };
+                            if let Err(e) = manual_pos_tx.try_send(track) {
+                                warn!("[execution] Failed to send manual position tracking to strategy thread: {}", e);
+                            } else {
+                                info!("[execution] Manual position tracking sent to strategy thread for {}", sym_upper);
+                            }
+
                             // Acquire a position slot
                             if !position_slots.try_acquire() {
                                 warn!("[execution] Manual trade: position slots full");
@@ -4640,10 +4673,9 @@ fn main() {
     // Manual trade channels: dashboard -> execution (command), execution -> strategy (position tracking)
     let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<dashboard_server::ManualTradeRequest>(32);
     let manual_cmd_tx_arc = Arc::new(manual_cmd_tx);
-    // TODO: When the execution loop processes a manual trade fill, it sends the fill details
+    // When the execution loop processes a manual trade fill, it sends the fill details
     // here so the strategy thread can register the position in exit_evaluator / lifecycle_mgr.
-    // For now the sender is unused because the full gateway-call path is not yet wired.
-    let (_manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
+    let (manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
 
     {
         let book_ring = book_to_strategy;
@@ -4773,7 +4805,7 @@ fn main() {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
                 info!("[execution] Pinned to core {} (with Lifecycle + Latency + Multi-Exchange SOR)", core_id);
                 execution_router_loop(
-                    exec_ring, manual_cmd_rx, gw, fx_gw, cb, reg, lc, lat, 
+                    exec_ring, manual_cmd_rx, manual_pos_tx, gw, fx_gw, cb, reg, lc, lat, 
                     position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp,
                     gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
                 );

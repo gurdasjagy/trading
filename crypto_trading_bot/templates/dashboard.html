@@ -246,41 +246,97 @@
     </div>
   </div>
 
-  <!-- Manual Trade Override Panel — REMOVED (100% Autonomous Operation) -->
+  <!-- Manual Trade Panel -->
   <div class="col-12 col-xl-4">
-    <div class="card border-0 h-100" style="border-color: rgba(0,255,136,0.3) !important;">
+    <div class="card border-0 h-100" style="border-color: rgba(255,193,7,0.3) !important;">
       <div class="card-header bg-transparent border-secondary">
-        <h5 class="mb-0 text-success"><i class="bi bi-robot me-2"></i>Alpha Oracle Status</h5>
-        <small class="text-muted">Autonomous execution — no manual intervention</small>
+        <h5 class="mb-0 text-warning"><i class="bi bi-joystick me-2"></i>Manual Trade</h5>
+        <small class="text-muted">Place trades directly via Rust engine</small>
       </div>
-      <div class="card-body text-center">
-        <div class="mb-3 p-3 rounded" style="background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.15);">
-          <i class="bi bi-shield-check text-success" style="font-size:2.5rem;"></i>
-          <h6 class="mt-2 text-success fw-bold">Fully Autonomous</h6>
-          <p class="small text-muted mb-0">
-            All trade execution flows through the Rust hot-path via the Alpha Oracle
-            signal queue. The Python confluence engine evaluates 60+ strategies and
-            writes TradeIntent signals to shared memory for zero-latency execution.
-          </p>
-        </div>
-        <div id="alpha-oracle-stats" class="small text-start">
-          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
-            <span class="text-muted">Signal Queue Depth:</span>
-            <span id="signal-queue-depth" class="text-light">—</span>
+      <div class="card-body">
+        <form id="manual-trade-form" onsubmit="return placeManualTrade(event);">
+          <!-- Symbol -->
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Symbol</label>
+            <select id="mt-symbol" class="form-select form-select-sm bg-dark text-light border-secondary">
+              <option value="BTC_USDT">BTC/USDT</option>
+              <option value="ETH_USDT">ETH/USDT</option>
+              <option value="SOL_USDT">SOL/USDT</option>
+            </select>
           </div>
-          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
-            <span class="text-muted">Confluence Threshold:</span>
-            <span class="text-warning">75%+</span>
+          <!-- Side -->
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Side</label>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="mt-side" id="mt-side-buy" value="buy" checked>
+              <label class="btn btn-outline-success btn-sm" for="mt-side-buy">Buy / Long</label>
+              <input type="radio" class="btn-check" name="mt-side" id="mt-side-sell" value="sell">
+              <label class="btn btn-outline-danger btn-sm" for="mt-side-sell">Sell / Short</label>
+            </div>
           </div>
-          <div class="d-flex justify-content-between py-1 border-bottom border-secondary">
-            <span class="text-muted">Min Risk/Reward:</span>
-            <span class="text-warning">2.0:1</span>
+          <!-- Size + Leverage row -->
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Size (contracts)</label>
+              <input type="number" id="mt-size" class="form-control form-control-sm bg-dark text-light border-secondary" min="1" value="1" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Leverage</label>
+              <select id="mt-leverage" class="form-select form-select-sm bg-dark text-light border-secondary">
+                <option value="1">1x</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="5">5x</option>
+                <option value="10" selected>10x</option>
+                <option value="20">20x</option>
+                <option value="25">25x</option>
+                <option value="50">50x</option>
+                <option value="75">75x</option>
+                <option value="100">100x</option>
+                <option value="125">125x</option>
+              </select>
+            </div>
           </div>
-          <div class="d-flex justify-content-between py-1">
-            <span class="text-muted">Execution Path:</span>
-            <span class="text-info">SHM → Rust Hot-Path</span>
+          <!-- Order Type + Margin Mode row -->
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Order Type</label>
+              <select id="mt-order-type" class="form-select form-select-sm bg-dark text-light border-secondary" onchange="toggleLimitPrice()">
+                <option value="market" selected>Market</option>
+                <option value="limit">Limit</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Margin Mode</label>
+              <select id="mt-margin-mode" class="form-select form-select-sm bg-dark text-light border-secondary">
+                <option value="cross" selected>Cross</option>
+                <option value="isolated">Isolated</option>
+              </select>
+            </div>
           </div>
-        </div>
+          <!-- Limit Price (hidden by default) -->
+          <div class="mb-2" id="mt-limit-price-group" style="display:none;">
+            <label class="form-label small text-muted mb-1">Limit Price (USDT)</label>
+            <input type="number" id="mt-limit-price" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" placeholder="Enter limit price">
+          </div>
+          <!-- SL + TP row -->
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Stop Loss (USDT)</label>
+              <input type="number" id="mt-sl" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" required placeholder="SL price">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted mb-1">Take Profit (USDT)</label>
+              <input type="number" id="mt-tp" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" required placeholder="TP price">
+            </div>
+          </div>
+          <!-- Submit -->
+          <button type="submit" id="mt-submit-btn" class="btn btn-warning w-100 btn-sm fw-bold">
+            <i class="bi bi-lightning-charge me-1"></i>Place Trade
+          </button>
+          <!-- Status -->
+          <div id="mt-status" class="mt-2 small text-center" style="display:none;"></div>
+        </form>
       </div>
     </div>
   </div>
@@ -1376,13 +1432,87 @@ function _handleKlineUpdate(data) {
   });
 })();
 
-// ── Manual Trade Override — REMOVED (100% Autonomous Operation) ──────────
-// All manual trading functions have been eradicated. The bot operates
-// autonomously via the Alpha Oracle signal queue (Python → SHM → Rust).
-function togglePriceInput() { /* no-op: manual trading removed */ }
-function placeManualTrade() { alert('Manual trading has been permanently disabled. Bot operates autonomously.'); }
+// ── Manual Trade Functions ────────────────────────────────────────────────
+function toggleLimitPrice() {
+  const orderType = document.getElementById('mt-order-type').value;
+  const group = document.getElementById('mt-limit-price-group');
+  if (group) group.style.display = orderType === 'limit' ? 'block' : 'none';
+}
 
-// (Old placeManualTrade function body removed — see stub above)
+function placeManualTrade(event) {
+  if (event) event.preventDefault();
+  const btn = document.getElementById('mt-submit-btn');
+  const statusDiv = document.getElementById('mt-status');
+
+  const symbol = document.getElementById('mt-symbol').value;
+  const side = document.querySelector('input[name="mt-side"]:checked').value;
+  const size = parseInt(document.getElementById('mt-size').value, 10);
+  const leverage = parseInt(document.getElementById('mt-leverage').value, 10);
+  const orderType = document.getElementById('mt-order-type').value;
+  const marginMode = document.getElementById('mt-margin-mode').value;
+  const sl = parseFloat(document.getElementById('mt-sl').value);
+  const tp = parseFloat(document.getElementById('mt-tp').value);
+
+  if (!size || size <= 0) { showMtStatus('Size must be positive', 'danger'); return false; }
+  if (isNaN(sl) || sl <= 0) { showMtStatus('Stop Loss is required', 'danger'); return false; }
+  if (isNaN(tp) || tp <= 0) { showMtStatus('Take Profit is required', 'danger'); return false; }
+
+  const payload = {
+    symbol: symbol,
+    side: side,
+    size: size,
+    leverage: leverage,
+    stop_loss: sl,
+    take_profit: tp,
+    margin_mode: marginMode,
+    exchange: null,
+    note: 'dashboard_manual'
+  };
+
+  if (orderType === 'limit') {
+    const limitPrice = parseFloat(document.getElementById('mt-limit-price').value);
+    if (isNaN(limitPrice) || limitPrice <= 0) { showMtStatus('Limit price is required', 'danger'); return false; }
+    payload.price = limitPrice;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting...';
+  showMtStatus('Sending order to Rust engine...', 'info');
+
+  fetch('/api/manual-trade', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      showMtStatus('Trade submitted: ' + data.message, 'success');
+    } else {
+      showMtStatus('Failed: ' + data.message, 'danger');
+    }
+  })
+  .catch(err => {
+    showMtStatus('Network error: ' + err.message, 'danger');
+  })
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Place Trade';
+  });
+
+  return false;
+}
+
+function showMtStatus(msg, type) {
+  const el = document.getElementById('mt-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = 'mt-2 small text-center text-' + type;
+  el.textContent = msg;
+  if (type === 'success') setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+function togglePriceInput() { toggleLimitPrice(); }
 
 // ── Open orders count badge observer ─────────────────────────────────────────
 (function() {
