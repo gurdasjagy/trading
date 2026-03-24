@@ -225,7 +225,9 @@ impl SmartOrderRouter {
                 venue.taker_fee_bps
             };
 
-            // Impact estimate: linear model based on order size vs depth
+            // INST: Square-root market impact model (Almgren & Chriss 2005).
+            // Impact grows with sqrt(size/depth), not linearly, matching
+            // empirical observations from institutional order flow.
             let available_depth = if is_maker {
                 // For maker orders, we're joining the book — less impact
                 venue.bid_depth_usdt.max(venue.ask_depth_usdt).max(1.0)
@@ -235,7 +237,9 @@ impl SmartOrderRouter {
             };
 
             let impact_bps = if available_depth > 0.0 {
-                ((order_size_usdt / available_depth) * self.impact_coefficient_bps * 100.0) as i64
+                let size_ratio = order_size_usdt / available_depth;
+                // sqrt impact: more realistic than linear for larger orders
+                (size_ratio.sqrt() * self.impact_coefficient_bps * 100.0) as i64
             } else {
                 100 // High penalty if no liquidity
             };

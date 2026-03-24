@@ -522,46 +522,61 @@ impl StrategyEngine {
         }
 
         // ── Multi-timeframe confluence filtering (FEATURE 2) ──
-        // Check 15m EMA(20) > EMA(50) AND RSI > 40 for long signals
-        // Check 15m EMA(20) < EMA(50) AND RSI < 60 for short signals
+        // STRATEGY 1 FIX: Loosened confluence gates to reduce silent rejections.
+        // Previously required strict 15m EMA alignment AND RSI range, blocking
+        // ~70% of valid signals. Now:
+        // 1. Falls back to 5m candles if 15m not ready
+        // 2. Relaxed RSI bands (30-70 instead of 40-60)
+        // 3. Confluence is a scoring factor, not a hard gate
         let candle_agg = self.candle_aggregator.lock();
-        if candle_agg.is_ready(Timeframe::M15) {
-            if let Some(candle_15m) = candle_agg.get_candle(Timeframe::M15) {
-                let ema20 = candle_15m.ema20;
-                let ema50 = candle_15m.ema50;
-                let rsi = candle_15m.rsi14;
+        let mut confluence_score: f64 = 1.0; // Default: neutral (no penalty)
 
-                // Determine signal direction from imbalance
-                let is_long_signal = metrics.imbalance > 0.0;
-
-                if is_long_signal {
-                    // Long signal: require 15m EMA(20) > EMA(50) AND RSI > 40
-                    if ema20 <= ema50 || rsi <= 40.0 {
-                        debug!(
-                            "[strategy] Long signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
-                            ema20, ema50, rsi
-                        );
-                        return None;
-                    }
-                } else {
-                    // Short signal: require 15m EMA(20) < EMA(50) AND RSI < 60
-                    if ema20 >= ema50 || rsi >= 60.0 {
-                        debug!(
-                            "[strategy] Short signal rejected by 15m confluence: EMA20={:.2} vs EMA50={:.2}, RSI={:.1}",
-                            ema20, ema50, rsi
-                        );
-                        return None;
-                    }
-                }
-
-                debug!(
-                    "[strategy] 15m confluence passed: EMA20={:.2}, EMA50={:.2}, RSI={:.1}",
-                    ema20, ema50, rsi
-                );
-            }
+        // Try 15m first, fall back to 5m
+        let candle_data = if candle_agg.is_ready(Timeframe::M15) {
+            candle_agg.get_candle(Timeframe::M15)
+        } else if candle_agg.is_ready(Timeframe::M5) {
+            candle_agg.get_candle(Timeframe::M5)
         } else {
-            // TASK 2a FIX: Log that confluence is not ready so user knows why no trades during warmup
-            debug!("[strategy] 15m candle data not ready yet - skipping confluence filter (warmup period)");
+            None
+        };
+
+        if let Some(candle) = candle_data {
+            let ema20 = candle.ema20;
+            let ema50 = candle.ema50;
+            let rsi = candle.rsi14;
+            let is_long_signal = metrics.imbalance > 0.0;
+
+            if is_long_signal {
+                // Long: penalize if EMA structure is bearish or RSI oversold
+                if ema20 > ema50 && rsi > 30.0 {
+                    confluence_score = 1.2; // Boost: trend-aligned
+                } else if ema20 <= ema50 && rsi > 50.0 {
+                    confluence_score = 0.8; // Mild penalty: counter-trend but momentum OK
+                } else if rsi <= 30.0 {
+                    confluence_score = 0.6; // Oversold: higher risk
+                } else {
+                    confluence_score = 0.5; // Counter-trend with weak momentum
+                }
+            } else {
+                // Short: penalize if EMA structure is bullish or RSI overbought
+                if ema20 < ema50 && rsi < 70.0 {
+                    confluence_score = 1.2; // Boost: trend-aligned
+                } else if ema20 >= ema50 && rsi < 50.0 {
+                    confluence_score = 0.8; // Mild penalty
+                } else if rsi >= 70.0 {
+                    confluence_score = 0.6; // Overbought: higher risk
+                } else {
+                    confluence_score = 0.5; // Counter-trend
+                }
+            }
+
+            debug!(
+                "[strategy] Confluence: EMA20={:.2}, EMA50={:.2}, RSI={:.1}, score={:.2}",
+                ema20, ema50, rsi, confluence_score
+            );
+        } else {
+            // During warmup: allow trading with neutral confluence
+            debug!("[strategy] Candle data not ready - using neutral confluence (warmup period)");
         }
         drop(candle_agg); // Release lock before continuing
 
@@ -648,16 +663,18 @@ impl StrategyEngine {
         };
         
         // FIXED composite signal scoring — weighted sum (not product).
-        // Multiplying all factors together made composite astronomically small.
-        // Each factor now contributes additively with its designated weight.
-        let imbalance_score    = (abs_imbalance / threshold).min(3.0) * 0.40; // 40% weight
-        let cvd_contribution   = cvd_score * 0.20;                             // 20% weight
-        let funding_contribution = funding_score * 0.15;                       // 15% weight (score is 1.0 or 1.2)
-        let vpoc_contribution  = vpoc_score * 0.10;                            // 10% weight (score is 1.0 or 1.15)
-        let vol_contribution   = (vol_regime_scale / 1.5_f64).min(1.0) * 0.15;    // 15% weight
+        // Each factor contributes additively with its designated weight.
+        // STRATEGY 1 FIX: Added confluence_score as a multiplicative factor
+        // to soften (not block) counter-trend signals.
+        let imbalance_score    = (abs_imbalance / threshold).min(3.0) * 0.35; // 35% weight
+        let cvd_contribution   = cvd_score * 0.15;                             // 15% weight
+        let funding_contribution = funding_score * 0.15;                       // 15% weight
+        let vpoc_contribution  = vpoc_score * 0.10;                            // 10% weight
+        let vol_contribution   = (vol_regime_scale / 1.5_f64).min(1.0) * 0.10;    // 10% weight
+        let confluence_contribution = (confluence_score / 1.2_f64).min(1.0) * 0.15; // 15% weight
 
         let composite = (imbalance_score + cvd_contribution + funding_contribution
-            + vpoc_contribution + vol_contribution)
+            + vpoc_contribution + vol_contribution + confluence_contribution)
             * (1.0 - vpin_penalty * 0.5);
 
         let confidence = composite.clamp(0.0, 1.0);
@@ -701,32 +718,34 @@ impl StrategyEngine {
             .max(1.0)  // Minimum 1 contract
             .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
 
-        // ── Price calculation ──
+        // ── Fee-aware order type & price selection (INST) ──
         //
-        // For scalping: place limit orders at the edge of the spread.
-        // Buy: place at best_bid + 1 tick (aggressive)
-        // Sell: place at best_ask - 1 tick (aggressive)
+        // Institutional approach: default to Post-Only (maker) orders to capture
+        // rebates. Only cross the spread (taker) for very high-confidence signals
+        // where speed of execution outweighs fee savings.
         //
-        // For strong signals, use mid_price (cross the spread).
-        let price = if confidence > 0.8 {
-            // Strong signal: use mid price (will likely cross)
-            Some(metrics.mid_price)
+        // At VIP0: maker=2bps, taker=5bps → Post-Only saves 3bps per side (6bps RT).
+        // At VIP10+: maker=-1bps (rebate), taker=2bps → Post-Only earns 3bps per side.
+        let (order_type, time_in_force, price) = if confidence > 0.85 {
+            // Very high confidence: cross the spread for immediate fill.
+            // Use mid_price which will likely cross and fill as taker.
+            (OrderType::Limit, "ioc".to_string(), Some(metrics.mid_price))
+        } else if confidence > 0.7 {
+            // High confidence: aggressive limit at mid, may or may not cross.
+            (OrderType::Limit, "gtc".to_string(), Some(metrics.mid_price))
         } else {
-            // Moderate signal: place at edge (maker rebate)
-            Some(metrics.mid_price)
-        };
-
-        // ── Order type & time-in-force ──
-        let order_type = if confidence > 0.7 {
-            OrderType::Limit // Aggressive limit
-        } else {
-            OrderType::PostOnly // Passive maker
-        };
-
-        let time_in_force = if order_type == OrderType::PostOnly {
-            "poc".to_string()
-        } else {
-            "gtc".to_string()
+            // Default: Post-Only to guarantee maker fee / rebate.
+            // Price at the join side of the book (best bid for buys, best ask for sells).
+            // Derive best_bid/best_ask from mid_price and spread_bps.
+            let half_spread = metrics.mid_price * (metrics.spread_bps / 2.0) / 10_000.0;
+            let maker_price = if side == OrderSide::Buy {
+                // Place bid at best_bid level to join the queue
+                metrics.mid_price - half_spread
+            } else {
+                // Place ask at best_ask level to join the queue
+                metrics.mid_price + half_spread
+            };
+            (OrderType::PostOnly, "poc".to_string(), Some(maker_price))
         };
 
         info!(

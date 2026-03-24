@@ -529,14 +529,42 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         }
 
         eprintln!("[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}", cfg.risk.max_open_positions);
-        eprintln!("[config] Binance: testnet={}, endpoint={}, has_key={}",
+
+        // BUG 3 FIX: Validate Binance API keys and warn clearly if missing/invalid.
+        // Previously the bot silently dropped Binance from the gateway pool when keys
+        // were missing, causing the margin monitor to never query Binance, which in turn
+        // contributed to the "Insufficient Margin: 0.0%" error (BUG 2).
+        let binance_key = cfg.multi_exchange.binance_api_key.as_deref().unwrap_or("");
+        let binance_secret = cfg.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+        let binance_key_valid = is_valid_key(binance_key) && is_valid_key(binance_secret);
+        if !binance_key_valid {
+            eprintln!("[config] WARNING: Binance API keys are MISSING or INVALID!");
+            eprintln!("[config]   -> Set BINANCE_API_KEY and BINANCE_SECRET_KEY environment variables");
+            eprintln!("[config]   -> Or add them to your config.toml [multi_exchange] section");
+            eprintln!("[config]   -> Binance will run in SIGNAL-ONLY mode (no margin monitoring, no execution)");
+            eprintln!("[config]   -> This may cause funding arb to reject with 'Insufficient Margin: 0.0%%'");
+        }
+
+        let bybit_key = cfg.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
+        let bybit_secret = cfg.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
+        let bybit_key_valid = is_valid_key(bybit_key) && is_valid_key(bybit_secret);
+        if !bybit_key_valid {
+            eprintln!("[config] WARNING: Bybit API keys are MISSING or INVALID!");
+            eprintln!("[config]   -> Set BYBIT_API_KEY and BYBIT_SECRET_KEY environment variables");
+            eprintln!("[config]   -> Or add them to your config.toml [multi_exchange] section");
+            eprintln!("[config]   -> Bybit will run in SIGNAL-ONLY mode (no margin monitoring, no execution)");
+        }
+
+        eprintln!("[config] Binance: testnet={}, endpoint={}, has_key={}, key_valid={}",
             cfg.multi_exchange.binance_testnet,
             if cfg.multi_exchange.binance_testnet { "https://testnet.binancefuture.com" } else { "https://fapi.binance.com" },
-            cfg.multi_exchange.binance_api_key.is_some());
-        eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}",
+            cfg.multi_exchange.binance_api_key.is_some(),
+            binance_key_valid);
+        eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}, key_valid={}",
             cfg.multi_exchange.bybit_testnet,
             if cfg.multi_exchange.bybit_testnet { "https://api-demo.bybit.com" } else { "https://api.bybit.com" },
-            cfg.multi_exchange.bybit_api_key.is_some());
+            cfg.multi_exchange.bybit_api_key.is_some(),
+            bybit_key_valid);
     } else {
         eprintln!("[config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)");
     }

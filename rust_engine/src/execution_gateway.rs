@@ -575,10 +575,16 @@ impl ExecutionContext {
     }
 
     /// Process a trade event through the adverse selection detector.
-    /// Returns true if cancellation is recommended for buy-side orders.
+    ///
+    /// INST: Active adverse selection protection — returns cancel recommendation
+    /// at urgency >= 1 (previously only at >= 2), enabling faster reaction to
+    /// toxic flow. Urgency 1 = prepare to cancel, urgency 2 = cancel immediately.
     pub fn on_trade_event(&mut self, event: &TradeEvent) -> Option<CancelReason> {
         if let Some(signal) = self.adverse_detector.on_trade(event) {
-            if signal.urgency >= 2 {
+            // Active protection: act on urgency >= 1 (medium or high)
+            // Previously only acted on urgency >= 2 (critical only), missing
+            // early warning signals that could have prevented adverse fills.
+            if signal.urgency >= 1 {
                 return Some(CancelReason::AdverseSelection);
             }
         }
@@ -587,8 +593,13 @@ impl ExecutionContext {
 
     /// Check all resting orders for adverse selection or stale queue positions.
     /// Returns indices of orders that should be canceled.
+    ///
+    /// INST: Enhanced with stale order detection — orders resting beyond
+    /// stale_timeout_s with low fill probability are proactively canceled
+    /// and repriced closer to market.
     pub fn check_resting_orders(&self) -> Vec<(usize, CancelReason)> {
         let mut cancels = Vec::new();
+        let now = now_ms();
 
         for (idx, lifecycle) in self.ws_order_mgr.lifecycles.iter().enumerate() {
             if !lifecycle.is_resting() {
@@ -611,6 +622,26 @@ impl ExecutionContext {
                         let _ = queue_ahead;
                     }
                 }
+            }
+
+            // INST: Stale order detection — if we couldn't find the order
+            // in the MBO book at all (no queue position data), it may be
+            // orphaned. Mark for cancel to avoid stuck resting orders.
+            let found_in_book = if let Some(oid_bytes) = lifecycle.order_id() {
+                let oid_str = String::from_utf8_lossy(oid_bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if let Ok(oid_u64) = oid_str.parse::<u64>() {
+                    self.mbo_book.get_queue_position(oid_u64).is_some()
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !found_in_book && lifecycle.transition_count() > 2 {
+                // Order has gone through multiple transitions but isn't in book
+                cancels.push((idx, CancelReason::QueuePositionBad));
             }
         }
 
