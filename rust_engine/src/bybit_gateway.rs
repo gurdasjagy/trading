@@ -15,6 +15,7 @@ use tracing::info;
 use crate::execution_gateway::{
     classify_bybit_error, now_ms, now_us, sign_bybit_request, AdaptiveRateLimiter,
     ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, Position,
+    RustTicker,
 };
 
 const BYBIT_BASE_URL: &str = "https://api.bybit.com";
@@ -375,9 +376,51 @@ impl ExecutionGateway for BybitGateway {
             "buyLeverage": leverage.to_string(),
             "sellLeverage": leverage.to_string(),
         });
-        self.post_signed("/v5/position/set-leverage", &body).await?;
-        info!("Bybit leverage set to {}× for {}", leverage, normalized);
-        Ok(())
+        match self.post_signed("/v5/position/set-leverage", &body).await {
+            Ok(_) => {
+                info!("Bybit leverage set to {}× for {}", leverage, normalized);
+                Ok(())
+            }
+            Err(ref e) => {
+                // Bybit returns retCode 110043 with "leverage not modified" when leverage
+                // is already set to the requested value. This is NOT a real error — treat
+                // it as a successful no-op so callers (stat-arb, funding-arb) don't abort.
+                let err_str = format!("{}", e);
+                if err_str.contains("leverage not modified")
+                    || err_str.contains("Not modified")
+                    || err_str.contains("110043")
+                {
+                    info!("Bybit leverage already at {}× for {} (no change needed)", leverage, normalized);
+                    Ok(())
+                } else {
+                    Err(e.clone())
+                }
+            }
+        }
+    }
+
+    async fn get_ticker(&self, symbol: &str) -> Result<RustTicker, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let query = format!("category=linear&symbol={}", normalized);
+        let response = self.get_signed("/v5/market/tickers", &query).await?;
+
+        let ticker = response
+            .pointer("/result/list/0")
+            .ok_or_else(|| ExchangeError::Unknown {
+                code: "NO_TICKER".into(),
+                message: format!("No ticker data for {}", normalized),
+            })?;
+
+        let last = ticker.get("lastPrice").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+        let bid = ticker.get("bid1Price").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(last);
+        let ask = ticker.get("ask1Price").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(last);
+        let volume = ticker.get("volume24h").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+
+        Ok(RustTicker { last, bid, ask, volume_24h: volume })
     }
 
     async fn get_balance(&self) -> Result<f64, ExchangeError> {

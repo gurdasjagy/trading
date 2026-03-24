@@ -2820,17 +2820,27 @@ fn execution_router_loop(
                 
                 let is_buy = manual_req.side.to_lowercase() == "buy";
                 
-                // Route to the appropriate gateway (default: Gate.io)
-                let target_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> = match manual_req.exchange.as_deref() {
+                // Route to the appropriate gateway using multi_gateways map
+                let target_gw: Option<Arc<dyn ExecutionGateway + Send + Sync>> = match manual_req.exchange.as_deref() {
                     Some("binance") => {
-                        warn!("[execution] Manual trade: Binance gateway not yet wired to execution router");
-                        gateway.as_ref()
+                        multi_gateways.get(&multi_exchange::ExchangeId::Binance).cloned()
+                            .or_else(|| {
+                                warn!("[execution] Manual trade: Binance gateway not available, falling back to default");
+                                gateway.as_ref().cloned()
+                            })
                     },
                     Some("bybit") => {
-                        warn!("[execution] Manual trade: Bybit gateway not yet wired to execution router");
-                        gateway.as_ref()
+                        multi_gateways.get(&multi_exchange::ExchangeId::Bybit).cloned()
+                            .or_else(|| {
+                                warn!("[execution] Manual trade: Bybit gateway not available, falling back to default");
+                                gateway.as_ref().cloned()
+                            })
                     },
-                    _ => gateway.as_ref(),
+                    Some("gateio") | Some("gate.io") | Some("gate") => {
+                        multi_gateways.get(&multi_exchange::ExchangeId::GateIo).cloned()
+                            .or_else(|| gateway.as_ref().cloned())
+                    },
+                    _ => gateway.as_ref().cloned(),
                 };
                 
                 if let Some(gw) = target_gw {
@@ -2885,7 +2895,7 @@ fn execution_router_loop(
                         signal_tag: "manual_dashboard".to_string(),
                     };
                     
-                    match execution_gateway::submit_with_retry(&**gw, intent).await {
+                    match execution_gateway::submit_with_retry(&*gw, intent).await {
                         Ok(res) => {
                             info!("[execution] Manual trade filled: {} {} {} contracts @ {:.4} (order_id={})",
                                 manual_req.side, sym_upper, res.filled_size, res.avg_fill_price, res.order_id);
@@ -3684,16 +3694,54 @@ fn execution_router_loop(
                         let short_gw = short_gw.unwrap().clone();
                         let long_gw = long_gw.unwrap().clone();
                         
-                        // Calculate position size (2% of total equity)
-                        // Guard against uninitialized equity/prices
+                        // Calculate position size (2% of total equity) with proper USDT→contract conversion
                         let total_equity = margin_monitor.total_equity();
                         let safe_equity = if total_equity > 0.0 { total_equity } else { 100.0 };
                         let position_notional = safe_equity * 0.02;
-                        let raw_price = shared_prices.get(0)
-                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                            .unwrap_or(0.0);
-                        let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
-                        let position_size = (position_notional / mid_price).max(1.0) as i64;
+
+                        // Fetch real mid price from the long exchange ticker (most reliable)
+                        let mid_price = match long_gw.get_ticker(&opp.symbol).await {
+                            Ok(ticker) => {
+                                let mid = (ticker.bid + ticker.ask) / 2.0;
+                                if mid > 0.0 { mid } else { ticker.last }
+                            }
+                            Err(_) => {
+                                // Fallback: try short exchange
+                                match short_gw.get_ticker(&opp.symbol).await {
+                                    Ok(ticker) => ticker.last,
+                                    Err(e) => {
+                                        warn!("[execution] Funding arb: cannot fetch price for {}: {} — skipping", opp.symbol, e);
+                                        continue;
+                                    }
+                                }
+                            }
+                        };
+
+                        if mid_price <= 0.0 {
+                            warn!("[execution] Funding arb: invalid mid_price {:.4} for {} — skipping", mid_price, opp.symbol);
+                            continue;
+                        }
+
+                        // Pre-flight balance check: ensure both exchanges have enough margin
+                        let required_margin = position_notional / 3.0; // leverage=3
+                        let short_balance = short_gw.get_balance().await.unwrap_or(0.0);
+                        let long_balance = long_gw.get_balance().await.unwrap_or(0.0);
+                        if short_balance < required_margin * 1.1 || long_balance < required_margin * 1.1 {
+                            warn!(
+                                "[execution] Funding arb: insufficient margin for {} — need ${:.2}, short_bal=${:.2}, long_bal=${:.2}",
+                                opp.symbol, required_margin, short_balance, long_balance
+                            );
+                            continue;
+                        }
+
+                        // Use usdt_to_contracts() for proper exchange-specific contract sizing
+                        let position_size = match long_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
+                            Ok(size) if size > 0 => size,
+                            _ => {
+                                // Fallback: manual calculation
+                                (position_notional / mid_price).max(1.0) as i64
+                            }
+                        };
                         
                         // Set leverage on both exchanges before placing orders
                         if let Err(e) = short_gw.set_leverage(&opp.symbol, 3).await {

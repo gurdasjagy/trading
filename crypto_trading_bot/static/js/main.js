@@ -727,26 +727,57 @@ async function resetCircuitBreaker() {
  * @param {number} leverage - integer leverage (1–20)
  * @param {number} amountUsdt - notional USDT size
  */
-async function openManualTrade(symbol, side, leverage, amountUsdt) {
+async function openManualTrade(symbol, side, leverage, amountUsdt, exchange, stopLoss, takeProfit) {
   if (!symbol || !side || !leverage || !amountUsdt) {
-    showToast('Please fill in all trade fields.', 'warning');
+    showToast('Please fill in all trade fields (symbol, side, leverage, amount).', 'warning');
     return;
   }
+  const sizeUsdt = parseFloat(amountUsdt);
+  if (isNaN(sizeUsdt) || sizeUsdt <= 0) {
+    showToast('Please enter a valid USDT amount.', 'warning');
+    return;
+  }
+  const lev = parseInt(leverage, 10);
+  if (isNaN(lev) || lev < 1 || lev > 125) {
+    showToast('Leverage must be between 1 and 125.', 'warning');
+    return;
+  }
+
+  const exchangeLabel = exchange ? ` on ${exchange.toUpperCase()}` : '';
   const confirmed = confirm(
-    `Open ${side.toUpperCase()} ${symbol} @ ${leverage}x for $${amountUsdt} USDT?`
+    `Open ${side.toUpperCase()} ${symbol} @ ${lev}x for $${sizeUsdt} USDT${exchangeLabel}?`
   );
   if (!confirmed) return;
+
+  // Build payload — SL/TP are optional, only include if provided
+  const payload = {
+    symbol,
+    side,
+    leverage: lev,
+    size_usdt: sizeUsdt,
+  };
+  if (exchange) payload.exchange = exchange;
+  const sl = parseFloat(stopLoss);
+  if (!isNaN(sl) && sl > 0) payload.stop_loss = sl;
+  const tp = parseFloat(takeProfit);
+  if (!isNaN(tp) && tp > 0) payload.take_profit = tp;
+
   try {
-    const res = await fetch('/api/manual/trade', {
+    const res = await fetch('/api/manual-trade', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol, side, leverage: parseInt(leverage, 10), amount_usdt: parseFloat(amountUsdt) }),
+      body: JSON.stringify(payload),
     });
+    if (!res.ok) {
+      const text = await res.text();
+      showToast('Trade failed: ' + escapeHtml(text || `HTTP ${res.status}`), 'danger');
+      return;
+    }
     const json = await res.json();
     if (json.success) {
-      showToast(`✅ Trade opened: ${escapeHtml(symbol)} ${escapeHtml(side.toUpperCase())} @ ${leverage}x`, 'success');
+      showToast(`Trade opened: ${escapeHtml(symbol)} ${escapeHtml(side.toUpperCase())} @ ${lev}x`, 'success');
     } else {
-      showToast('Trade failed: ' + escapeHtml(json.error || 'Unknown error'), 'danger');
+      showToast('Trade failed: ' + escapeHtml(json.message || json.error || 'Unknown error'), 'danger');
     }
   } catch (err) {
     showToast('Request failed: ' + escapeHtml(err.message), 'danger');
