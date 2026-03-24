@@ -506,6 +506,70 @@ impl GateIoGateway {
         size_f.trunc() as i64
     }
 
+    /// Convert a USDT amount to integer contracts for a given Gate.io futures contract.
+    ///
+    /// Fetches the contract spec from Gate.io REST API to get `quanto_multiplier`,
+    /// then calculates: contracts = usdt_amount / (quanto_multiplier * last_price).
+    /// Falls back to usdt_amount / last_price if contract spec fetch fails.
+    pub async fn usdt_to_contracts(&self, contract: &str, usdt_amount: f64) -> Result<i64, ExchangeError> {
+        let normalized = Self::normalize_symbol(contract);
+
+        // Fetch contract spec to get quanto_multiplier
+        let spec_url = format!("{}/futures/usdt/contracts/{}", self.base_url(), normalized);
+        let quanto_multiplier = match self.rest_client.get(&spec_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(spec) => {
+                        spec.get("quanto_multiplier")
+                            .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok())
+                                .or_else(|| v.as_f64()))
+                            .unwrap_or(0.0)
+                    }
+                    Err(e) => {
+                        warn!("[gateio] Failed to parse contract spec for {}: {}", normalized, e);
+                        0.0
+                    }
+                }
+            }
+            _ => {
+                warn!("[gateio] Failed to fetch contract spec for {}, falling back to price-only conversion", normalized);
+                0.0
+            }
+        };
+
+        // Fetch last price
+        let last_price = self.fetch_last_price(&normalized).await
+            .ok_or_else(|| ExchangeError::Unknown {
+                code: "PRICE_FETCH".to_string(),
+                message: format!("Cannot fetch last price for {}", normalized),
+            })?;
+
+        if last_price <= 0.0 {
+            return Err(ExchangeError::Unknown {
+                code: "INVALID_PRICE".to_string(),
+                message: format!("Last price for {} is {}", normalized, last_price),
+            });
+        }
+
+        let contracts = if quanto_multiplier > 0.0 {
+            // Each contract = quanto_multiplier * underlying
+            // Value of 1 contract in USDT = quanto_multiplier * last_price
+            let contract_value_usdt = quanto_multiplier * last_price;
+            (usdt_amount / contract_value_usdt).floor() as i64
+        } else {
+            // Fallback: assume 1 contract = 1 USD (common for some Gate.io contracts)
+            (usdt_amount / last_price).floor() as i64
+        };
+
+        if contracts < MIN_CONTRACT_SIZE {
+            return Err(ExchangeError::MinimumOrderSize { min_size: MIN_CONTRACT_SIZE });
+        }
+
+        info!("[gateio] USDT→contracts: {:.2} USDT → {} contracts (price={:.4}, quanto={:.8})",
+            usdt_amount, contracts, last_price, quanto_multiplier);
+        Ok(contracts)
+    }
+
     /// Fetch the last traded price for a contract from Gate.io REST API.
     ///
     /// Used to validate SL/TP trigger prices before submission. Gate.io
@@ -1938,33 +2002,35 @@ impl ExecutionGateway for GateIoGateway {
 
     async fn set_leverage(&self, symbol: &str, leverage: i32) -> Result<(), ExchangeError> {
         // Leverage changes are rare — use REST
+        // Gate.io v4 API requires leverage & cross_leverage_limit as QUERY PARAMETERS,
+        // NOT in the JSON body. Sending them in the body causes MISSING_REQUIRED_PARAM.
         let normalized = Self::normalize_symbol(symbol);
         let path = format!("/futures/usdt/positions/{}/leverage", normalized);
-        let body = format!(r#"{{"leverage":{},"cross_leverage_limit":0}}"#, leverage);
+        let query = format!("leverage={}&cross_leverage_limit=0", leverage);
+        let body = ""; // Body must be empty — params go in query string
         let timestamp = now_ms() / 1000;
         // Gate.io v4 requires the FULL path (including /api/v4) in the signature
         let full_path = format!("/api/v4{}", path);
-        let signature = Self::rest_sign("POST", &full_path, "", &body, timestamp, &self.api_secret);
+        let signature = Self::rest_sign("POST", &full_path, &query, body, timestamp, &self.api_secret);
 
-        let url = format!("{}{}", self.base_url(), path);
+        let url = format!("{}{}?{}", self.base_url(), path, query);
         let response = self.rest_client
             .post(&url)
             .header("KEY", &self.api_key)
             .header("SIGN", &signature)
             .header("Timestamp", timestamp.to_string())
             .header("Content-Type", "application/json")
-            .body(body)
             .send()
             .await
             .map_err(|_| ExchangeError::Timeout)?;
 
         let status = response.status().as_u16();
         if status >= 400 {
-            let body: serde_json::Value = response.json().await.map_err(|e| ExchangeError::Unknown {
+            let resp_body: serde_json::Value = response.json().await.map_err(|e| ExchangeError::Unknown {
                 code: "JSON_PARSE".to_string(),
                 message: e.to_string(),
             })?;
-            return Err(crate::execution_gateway::classify_gateio_error(status, &body));
+            return Err(crate::execution_gateway::classify_gateio_error(status, &resp_body));
         }
 
         info!("[gateio-ws] Leverage set to {}x for {}", leverage, normalized);

@@ -442,6 +442,24 @@ pub trait ExecutionGateway: Send + Sync {
     async fn get_ticker(&self, _symbol: &str) -> Result<RustTicker, ExchangeError> {
         Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "get_ticker not supported".into() })
     }
+
+    /// Convert a USDT amount to integer contracts for a given futures contract.
+    /// Each gateway implements this based on the exchange's contract specifications.
+    /// Default implementation uses get_ticker to do a simple price-based conversion.
+    async fn usdt_to_contracts(&self, symbol: &str, usdt_amount: f64) -> Result<i64, ExchangeError> {
+        let ticker = self.get_ticker(symbol).await?;
+        if ticker.last <= 0.0 {
+            return Err(ExchangeError::Unknown {
+                code: "INVALID_PRICE".into(),
+                message: format!("Last price for {} is {}", symbol, ticker.last),
+            });
+        }
+        let contracts = (usdt_amount / ticker.last).floor() as i64;
+        if contracts < 1 {
+            return Err(ExchangeError::MinimumOrderSize { min_size: 1 });
+        }
+        Ok(contracts)
+    }
 }
 
 /// BUG 4 FIX: Define RustTicker struct for get_ticker return type
