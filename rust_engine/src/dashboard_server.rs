@@ -599,16 +599,21 @@ pub struct ManualTradeRequest {
     pub symbol: String,
     /// "buy" or "sell"
     pub side: String,
-    /// Position size in contracts (integer)
-    pub size: i64,
+    /// Position size in USDT (the bot converts to contracts using exchange specs).
+    /// Example: 100.0 means $100 USDT position.
+    pub size_usdt: f64,
     /// Leverage (1-125)
     pub leverage: u8,
     /// Optional limit price. If None, uses market order.
     pub price: Option<f64>,
-    /// Stop loss price (required)
-    pub stop_loss: f64,
-    /// Take profit price (required)
-    pub take_profit: f64,
+    /// Stop loss price (optional). If not set, the bot will auto-detect
+    /// unprotected positions and apply SL based on strategy defaults.
+    #[serde(default)]
+    pub stop_loss: Option<f64>,
+    /// Take profit price (optional). If not set, the bot will auto-detect
+    /// unprotected positions and apply TP based on strategy defaults.
+    #[serde(default)]
+    pub take_profit: Option<f64>,
     /// Exchange to route to: "gateio", "binance", "bybit"
     pub exchange: Option<String>,
     /// Margin mode: "cross" or "isolated" (default: "cross")
@@ -635,8 +640,8 @@ pub struct ManualPositionTrack {
     pub entry_price: f64,
     pub size: i64,
     pub leverage: i32,
-    pub stop_loss: f64,
-    pub take_profit: f64,
+    pub stop_loss: Option<f64>,
+    pub take_profit: Option<f64>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2085,35 +2090,30 @@ async fn api_manual_trade(
         });
     }
 
-    if req.size <= 0 {
+    if req.size_usdt <= 0.0 {
         return Json(ManualTradeResponse {
             success: false,
-            message: "Size must be positive".to_string(),
+            message: "size_usdt must be positive (amount in USDT)".to_string(),
             order_id: None,
         });
     }
 
-    if req.stop_loss <= 0.0 || req.take_profit <= 0.0 {
-        return Json(ManualTradeResponse {
-            success: false,
-            message: "Stop loss and take profit are required".to_string(),
-            order_id: None,
-        });
-    }
-
-    if side_lower == "buy" && req.stop_loss >= req.take_profit {
-        return Json(ManualTradeResponse {
-            success: false,
-            message: "For BUY: stop_loss must be below take_profit".to_string(),
-            order_id: None,
-        });
-    }
-    if side_lower == "sell" && req.stop_loss <= req.take_profit {
-        return Json(ManualTradeResponse {
-            success: false,
-            message: "For SELL: stop_loss must be above take_profit".to_string(),
-            order_id: None,
-        });
+    // SL/TP are optional — only validate if provided
+    if let (Some(sl), Some(tp)) = (req.stop_loss, req.take_profit) {
+        if side_lower == "buy" && sl >= tp {
+            return Json(ManualTradeResponse {
+                success: false,
+                message: "For BUY: stop_loss must be below take_profit".to_string(),
+                order_id: None,
+            });
+        }
+        if side_lower == "sell" && sl <= tp {
+            return Json(ManualTradeResponse {
+                success: false,
+                message: "For SELL: stop_loss must be above take_profit".to_string(),
+                order_id: None,
+            });
+        }
     }
 
     let sym_upper = req.symbol.to_uppercase();
@@ -2127,17 +2127,17 @@ async fn api_manual_trade(
     }
 
     // Capture fields for logging before req is moved into the channel
-    let req_size = req.size;
+    let req_size_usdt = req.size_usdt;
     let req_sl = req.stop_loss;
     let req_tp = req.take_profit;
 
     match state.manual_trade_tx.try_send(req) {
         Ok(()) => {
-            info!("[dashboard] Manual trade submitted: {} {} {} contracts SL={} TP={}",
-                side_lower, sym_upper, req_size, req_sl, req_tp);
+            info!("[dashboard] Manual trade submitted: {} {} {:.2} USDT SL={:?} TP={:?}",
+                side_lower, sym_upper, req_size_usdt, req_sl, req_tp);
             Json(ManualTradeResponse {
                 success: true,
-                message: format!("Manual trade submitted: {} {} {} contracts", side_lower, sym_upper, req_size),
+                message: format!("Manual trade submitted: {} {} {:.2} USDT", side_lower, sym_upper, req_size_usdt),
                 order_id: None,
             })
         }

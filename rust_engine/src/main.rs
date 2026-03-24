@@ -1166,12 +1166,16 @@ fn strategy_evaluator_loop(
     loop {
         // Check for manual position tracking requests
         while let Ok(track) = manual_pos_rx.try_recv() {
+            // SL/TP are optional — use 0.0 to signal "not set" to the exit evaluator.
+            // The unprotected-position detector will auto-apply SL/TP later.
+            let sl = track.stop_loss.unwrap_or(0.0);
+            let tp = track.take_profit.unwrap_or(0.0);
             exit_evaluator.track_position(
                 track.symbol_id,
                 track.is_long,
                 track.entry_price,
-                track.stop_loss,
-                track.take_profit,
+                sl,
+                tp,
                 track.size,
                 300_000_000_000u64, // 5 minutes TTL in nanoseconds
             );
@@ -1182,7 +1186,7 @@ fn strategy_evaluator_loop(
                 track.size,
                 track.leverage,
             );
-            info!("[strategy] 🖐 Manual position tracked: sym_id={} is_long={} entry={:.4} SL={:.4} TP={:.4}",
+            info!("[strategy] Manual position tracked: sym_id={} is_long={} entry={:.4} SL={:?} TP={:?}",
                 track.symbol_id, track.is_long, track.entry_price, track.stop_loss, track.take_profit
             );
         }
@@ -2504,40 +2508,52 @@ fn execution_router_loop(
                     continue;
                 }
                 
-                info!("[execution] Manual trade received: {} {} {} contracts lev={}x SL={:.4} TP={:.4}",
-                    manual_req.side, sym_upper, manual_req.size, manual_req.leverage,
+                info!("[execution] Manual trade received: {} {} {:.2} USDT lev={}x SL={:?} TP={:?}",
+                    manual_req.side, sym_upper, manual_req.size_usdt, manual_req.leverage,
                     manual_req.stop_loss, manual_req.take_profit);
                 
                 let is_buy = manual_req.side.to_lowercase() == "buy";
                 
                 // Route to the appropriate gateway (default: Gate.io)
-                // Note: binance_gateway and bybit_gateway would need to be passed to this function
-                // for multi-exchange support. For now, use the primary gateway.
                 let target_gw: Option<&Arc<dyn ExecutionGateway + Send + Sync>> = match manual_req.exchange.as_deref() {
                     Some("binance") => {
                         warn!("[execution] Manual trade: Binance gateway not yet wired to execution router");
-                        gateway.as_ref() // Fallback to Gate.io
+                        gateway.as_ref()
                     },
                     Some("bybit") => {
                         warn!("[execution] Manual trade: Bybit gateway not yet wired to execution router");
-                        gateway.as_ref() // Fallback to Gate.io
+                        gateway.as_ref()
                     },
-                    _ => gateway.as_ref(), // Default to Gate.io
+                    _ => gateway.as_ref(),
                 };
                 
                 if let Some(gw) = target_gw {
-                    // Step 1: Set leverage
+                    // Step 1: Convert USDT amount to contracts using exchange contract specs.
+                    // The gateway fetches quanto_multiplier and last_price to calculate:
+                    //   contracts = usdt_amount / (quanto_multiplier * last_price)
+                    let contract_size = match gw.usdt_to_contracts(&sym_upper, manual_req.size_usdt).await {
+                        Ok(contracts) => contracts,
+                        Err(e) => {
+                            warn!("[execution] Manual trade: USDT→contracts conversion failed: {}", e);
+                            continue;
+                        }
+                    };
+
+                    info!("[execution] Manual trade: {:.2} USDT → {} contracts for {}",
+                        manual_req.size_usdt, contract_size, sym_upper);
+
+                    // Step 2: Set leverage
                     if let Err(e) = gw.set_leverage(&sym_upper, manual_req.leverage as i32).await {
                         warn!("[execution] Manual trade: failed to set leverage: {}", e);
                     }
                     
-                    // Step 2: Set margin mode (from request, default "cross")
+                    // Step 3: Set margin mode (from request, default "cross")
                     let margin_mode = manual_req.margin_mode.as_deref().unwrap_or("cross");
                     if let Err(e) = gw.set_margin_mode(&sym_upper, margin_mode).await {
                         warn!("[execution] Manual trade: failed to set margin mode to '{}': {}", margin_mode, e);
                     }
                     
-                    // Step 3: Build and submit the order
+                    // Step 4: Build and submit the order
                     let side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
                     let order_type = if manual_req.price.is_some() {
                         execution_gateway::OrderType::Limit
@@ -2549,7 +2565,7 @@ fn execution_router_loop(
                     let intent = execution_gateway::OrderIntent {
                         symbol: sym_upper.clone(),
                         side: side.clone(),
-                        size: manual_req.size,
+                        size: contract_size,
                         order_type,
                         price: manual_req.price,
                         reduce_only: false,
@@ -2557,15 +2573,15 @@ fn execution_router_loop(
                         time_in_force: tif.to_string(),
                         slippage_cap_pct: Some(0.005),
                         placement: execution_state::PlacementType::AtBest,
-                        stop_loss: Some(manual_req.stop_loss),
-                        take_profit: Some(manual_req.take_profit),
+                        stop_loss: manual_req.stop_loss,
+                        take_profit: manual_req.take_profit,
                         confidence: 1.0,
                         signal_tag: "manual_dashboard".to_string(),
                     };
                     
                     match execution_gateway::submit_with_retry(&**gw, intent).await {
                         Ok(res) => {
-                            info!("[execution] Manual trade filled: {} {} {} @ {:.4} (order_id={})",
+                            info!("[execution] Manual trade filled: {} {} {} contracts @ {:.4} (order_id={})",
                                 manual_req.side, sym_upper, res.filled_size, res.avg_fill_price, res.order_id);
                             
                             orders_submitted += 1;
@@ -2575,7 +2591,7 @@ fn execution_router_loop(
                             // Track position entry for PnL calculation
                             position_entries.insert(sym_id, (res.avg_fill_price, res.filled_size, is_buy));
                             
-                            // Submit SL/TP conditional orders
+                            // Submit SL/TP conditional orders (only if provided)
                             let parent_side = if is_buy { execution_gateway::OrderSide::Buy } else { execution_gateway::OrderSide::Sell };
                             let gw_clone = gw.clone();
                             let sym_clone = sym_upper.clone();
@@ -2583,22 +2599,25 @@ fn execution_router_loop(
                             let tp = manual_req.take_profit;
                             let filled = res.filled_size;
                             tokio::spawn(async move {
-                                if sl > 0.0 {
-                                    match gw_clone.submit_conditional_sl(&sym_clone, &parent_side, filled, sl).await {
-                                        Ok(()) => info!("[execution] Manual trade SL placed: {} @ {:.4}", sym_clone, sl),
-                                        Err(e) => warn!("[execution] Manual trade SL failed: {}", e),
+                                if let Some(sl_price) = sl {
+                                    if sl_price > 0.0 {
+                                        match gw_clone.submit_conditional_sl(&sym_clone, &parent_side, filled, sl_price).await {
+                                            Ok(()) => info!("[execution] Manual trade SL placed: {} @ {:.4}", sym_clone, sl_price),
+                                            Err(e) => warn!("[execution] Manual trade SL failed: {}", e),
+                                        }
                                     }
                                 }
-                                if tp > 0.0 {
-                                    match gw_clone.submit_conditional_tp(&sym_clone, &parent_side, filled, tp).await {
-                                        Ok(()) => info!("[execution] Manual trade TP placed: {} @ {:.4}", sym_clone, tp),
-                                        Err(e) => warn!("[execution] Manual trade TP failed: {}", e),
+                                if let Some(tp_price) = tp {
+                                    if tp_price > 0.0 {
+                                        match gw_clone.submit_conditional_tp(&sym_clone, &parent_side, filled, tp_price).await {
+                                            Ok(()) => info!("[execution] Manual trade TP placed: {} @ {:.4}", sym_clone, tp_price),
+                                            Err(e) => warn!("[execution] Manual trade TP failed: {}", e),
+                                        }
                                     }
                                 }
                             });
                             
                             // Send position tracking info to strategy thread
-                            // so exit_evaluator and lifecycle_mgr can monitor this position
                             let track = dashboard_server::ManualPositionTrack {
                                 symbol_id: sym_id,
                                 is_long: is_buy,
