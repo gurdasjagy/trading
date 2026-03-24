@@ -1,0 +1,201 @@
+# Trading Bot Bug Report - Complete Diagnosis
+**Date:** March 24, 2026  
+**Branch analyzed:** `main` (after PR #16 merge)  
+**Logs analyzed:** `logs.txt` (1122 lines, session from 14:28 - 14:37 UTC)  
+**No fixes applied - analysis only**
+---
+## Summary
+The bot has **10 critical bugs** across three subsystems: stat-arb trading, manual trading, and funding arbitrage. The root causes explain why the user is losing ~$100 on demo: the stat-arb engine enters and exits trades within seconds (incurring fees each time), uses wrong prices for all non-BTC symbols, records positions with size=0, and sends orders that are too large for the account balance. Meanwhile, manual trading fails on Gate.io due to a trait dispatch bug that bypasses the quanto-aware contract conversion.
+---
+## BUG 1: `usdt_to_contracts()` trait dispatch bypasses Gate.io's quanto-aware implementation
+**Severity:** CRITICAL  
+**Subsystem:** Manual trading + all automated trading on Gate.io  
+**Log evidence:** Line 118-119: `buy ETH_USDT 50.00 USDT lev=25x` -> `Order below minimum size (min: 1)`
+**Root cause:**  
+Gate.io's `usdt_to_contracts()` method (gateio_gateway.rs:514-571) correctly fetches the `quanto_multiplier` from the Gate.io REST API and computes:
+```
+contracts = usdt_amount / (quanto_multiplier * last_price)
+```
+For ETH_USDT with `quanto_multiplier = 0.01`, one contract = 0.01 ETH * $2000 = $20. So $1250 / $20 = 62 contracts.
+**However**, this method is defined on `impl GateIoGateway` (an inherent method), NOT as an override of the `ExecutionGateway` trait method. When called through `Arc<dyn ExecutionGateway>` (which is how all gateways are accessed in the execution router), Rust dispatches to the **default trait implementation** in execution_gateway.rs:456-469, which does simple division:
+```rust
+let contracts = (usdt_amount / ticker.last).floor() as i64;
+// For $1250 / $2000 = 0.625 -> floor to 0 -> MinimumOrderSize error
+```
+The Gate.io quanto-multiplier logic is **dead code** — it exists but is never called through the trait interface.
+**Why $500 works but $50 doesn't:**
+- $500 * 25x = $12,500 / ~$2500 (ETH price) = 5 contracts -> OK
+- $50 * 25x = $1,250 / ~$2500 = 0.5 -> floor to 0 -> error
+**Impact:** Small manual trades on Gate.io always fail. The user reports being able to open $10 BTC trades on Gate.io's web UI (because Gate.io uses quanto contracts where 1 BTC contract = 0.0001 BTC = ~$8.70), but the bot treats 1 contract = 1 BTC = ~$87,000. Fix this. Firstly bot should treat it like gate io and nextly according to the btc live price ( not the harcoded one like 87000$ . the live price must be fetched from the exchange bot must do all these on startup and than adjust the contracts accordingle like if live price is 71000$ than 10$ contract at 1x leverage should be equal to 7.1$ like that . Use proler knowledge here.
+---
+## BUG 2: Stat-arb uses hardcoded fallback `mid_price = 50000.0` for ALL symbols
+**Severity:** CRITICAL  
+**Subsystem:** Stat-arb trading  
+**Log evidence:** All stat-arb entries show `mid_price=50000.00` regardless of symbol (ETH, SOL, BTC)
+**Root cause:** main.rs:4146-4149:
+```rust
+let raw_price = shared_prices.get(0)   // <-- ALWAYS index 0 (first symbol only)
+    .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+    .unwrap_or(0.0);
+let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };  // <-- hardcoded fallback
+```
+Two problems:1. **Always reads index 0** (`shared_prices.get(0)`) regardless of which symbol is being traded. Index 0 is typically BTC. ETH and SOL prices are stored at different indices but are never read.
+2. **Fallback is `50000.0`** which is only approximately correct for BTC. ETH is ~$2000, SOL is ~$130. If the price at index 0 isn't populated yet, all symbols get priced at $50,000.
+**Impact:** Position sizes are wildly wrong for non-BTC symbols. The same fallback is also used for exit orders (main.rs:4282-4284), meaning exit prices are also wrong.
+---
+## BUG 3: Stat-arb position size `.max(1.0) as i64` creates $87,000 BTC orders on $3,000 accounts
+**Severity:** CRITICAL  
+**Subsystem:** Stat-arb trading  
+**Log evidence:** Lines 413-414: `[stat-arb] Both legs failed: Invalid price / Insufficient balance` for BTC_USDT
+**Root cause:** main.rs:4163:
+```rust
+let position_size = (position_notional / mid_price).max(1.0) as i64;
+```
+For Bybit/Binance linear contracts, quantity is in **base currency units** (e.g., 0.001 BTC, 0.01 ETH), not integer contracts like Gate.io. The code:
+1. Calculates notional: `$2966 * 0.02 * 3 = $178`
+2. Divides by mid_price: `$178 / $50000 = 0.00356`
+3. Applies `.max(1.0)` -> **1.0** (minimum 1 unit)
+4. Casts to i64 -> **1**
+For BTC on Bybit, `qty = "1.000"` means **1 BTC = ~$87,000**. At 3x leverage, that requires ~$29,000 margin. The Bybit account only has ~$2,966 -> **Insufficient balance**.
+For ETH on Bybit, `qty = "1.000"` means 1 ETH = ~$2,000. At 3x, that's $667 margin, which fits. But the position is much larger than the intended 2% sizing ($178 notional vs $2,000 actual).
+**Impact:** BTC stat-arb always fails due to insufficient balance. ETH stat-arb opens positions ~11x larger than intended.
+---
+## BUG 4: Stat-arb records positions with `size=0` and `fill_price=0.0` (no fill confirmation)
+**Severity:** CRITICAL  
+**Subsystem:** Stat-arb trading  
+**Log evidence:** Every entry shows `(0.0000) short@Binance (0.0000) size=0`
+**Root cause:** main.rs:4198-4209:
+```rust
+stat_arb_engine.record_entry(
+    symbol,
+    *long_ex, *short_ex,
+    lr.avg_fill_price,   // <-- always 0.0
+    sr.avg_fill_price,   // <-- always 0.0
+    lr.filled_size.min(sr.filled_size),  // <-- 0.min(0) = 0
+    ...
+);
+```
+Bybit's `submit_order()` returns immediately with `filled_size: 0` and `avg_fill_price: 0.0` (bybit_gateway.rs:296-297) because it only confirms order submission, not fill. The actual fill comes asynchronously via WebSocket. The bot **never waits for fill confirmation** before recording the entry.
+**Impact:**
+- Position tracking is completely broken (`size=0`)
+- PnL calculations are meaningless (entry prices are 0.0)
+- Exit orders use `pos.size` which is 0, gets `.max(1)` in the gateway -> exits 1 unit instead of the actual position
+---
+## BUG 5: Stat-arb rapid entry/exit cycle - trades last 0-7 seconds
+**Severity:** CRITICAL  
+**Subsystem:** Stat-arb trading  
+**Log evidence:**
+- Entry at 14:34:40 -> Exit at 14:34:47 (7 seconds, MeanReversion)
+- Entry at 14:34:54 -> Exit at 14:34:55 (1 second!)
+- Entry at 14:35:13 -> Exit at 14:35:13 (0 seconds!)
+- Entry at 14:36:40 -> Exit at 14:36:41 (1 second!)
+- Entry at 14:36:48 -> Exit at 14:36:49 (1 second!)
+**Root cause:** Multiple design flaws combine:
+1. **No cooldown between entry and exit:** The stat-arb check runs every 1 second (main.rs:4071). In the same iteration, the bot enters a position AND immediately checks exit conditions. Since z-score fluctuates naturally around the threshold, a z-score of 2.5 at entry can revert to <0.5 within the same data update window.
+2. **No minimum hold period:** `StatArbConfig` has `max_hold_hours: 4.0` (maximum), but no `min_hold_seconds`. The `check_exits()` function (stat_arb.rs:500-540) checks MeanReversion exit (`z_score.abs() < 0.5`) with no minimum time requirement.
+3. **Entry threshold too low:** The default `entry_threshold_sigma: 2.0` triggers on relatively common spread fluctuations. Institutional stat-arb typically uses 2.5-3.0 sigma or higher, and requires the signal to persist for multiple consecutive observations.
+4. **No position "pending" state:** The bot enters immediately when z-score exceeds threshold. There's no confirmation period where the signal must persist for N seconds before entry.
+**Impact:** Each round trip costs ~$5-15 in fees/slippage. With 5+ round trips in 4 minutes, the user loses $25-75 just in transaction costs, with no chance for the spread to converge profitably. This is the PRIMARY cause of the ~$100 loss.
+**Comparison to institutional approach:**
+- Institutional bots require signals to persist for multiple sampling periods (e.g., 30+ seconds)
+- They enforce minimum hold periods (5-60 minutes for stat-arb)
+- They use higher entry thresholds (2.5-3.0+ sigma)
+- They implement entry cooldowns (no re-entry for N minutes after an exit)
+- They confirm fills before recording positions and definitely before evaluating exits
+---
+## BUG 6: Stat-arb sends SAME price for BOTH legs of different exchanges
+**Severity:** HIGH  
+**Subsystem:** Stat-arb trading  
+**Log evidence:** `Bybit order: Buy 1.000 ETHUSDT @ Some(50000.0)` AND `Binance order: SELL 1.000 SOLUSDT @ Some(50000.0)`
+**Root cause:** main.rs:4179-4181:
+```rust
+let (long_intent, short_intent) = build_stat_arb_entry_intents(
+    symbol, *long_ex, *short_ex, position_size, mid_price, mid_price  // same price for both legs
+);
+```
+Both `long_ref_price` and `short_ref_price` are set to the same `mid_price` (which is already wrong per Bug 2). Proper stat-arb should use the actual best bid/ask from each exchange respectively.
+Additionally, `build_stat_arb_entry_intents()` creates IOC market orders with `price: Some(mid_price)` — the price field is used as a limit/slippage cap. Sending $50,000 as the price for a $130 SOL order means there's effectively no slippage protection.
+**Impact:** Orders either get rejected (if exchange validates price reasonableness) or filled at market with no slippage protection.
+---
+## BUG 7: Stat-arb exit orders use `price: Some(0.0)` for close positions
+
+h**Severity:** HIGH  
+**Subsystem:** Stat-arb trading  
+**Log evidence:** Lines 388-389, 1054-1056: `Sell 1.000 ETHUSDT @ Some(0.0)`, `BUY 1.000 ETHUSDT @ Some(0.0)`
+**Root cause:** When exits trigger, the exit order prices are derived from position entry prices, which are 0.0 (Bug 4):
+```rust
+let (close_long, close_short) = build_stat_arb_exit_intents(
+    &pos, mid_price, mid_price  // mid_price from shared_prices.get(0)
+);
+```
+But `build_stat_arb_exit_intents()` (stat_arb.rs:670-712) uses `long_current_price` and `short_current_price`, which come from the same broken `shared_prices.get(0)` fallback. When the fallback returns 0.0 or incorrect values, exit orders go out with `price: Some(0.0)`.
+**Impact:** Exit orders with price=0 are executed as market orders at whatever price is available, potentially at terrible prices with maximum slippage.
+---
+## BUG 8: Gate.io leverage error - "cross_leverage_limit only for cross-margin"
+**Severity:** MEDIUM  
+**Subsystem:** Manual trading (Gate.io)  
+**Log evidence:** Lines 165-166: `failed to set leverage: Unknown error INVALID_ARGUMENT: cross_leverage_limit only for cross-margin`
+**Root cause:** Gate.io's `set_leverage()` (gateio_gateway.rs:2003-2038) sends a POST to `/futures/usdt/positions/{contract}/leverage` with `cross_leverage_limit` parameter. This parameter is ONLY valid when the position is in cross-margin mode. If the account/position is in isolated margin mode, Gate.io rejects with `INVALID_ARGUMENT`.
+The Gate.io API requires:
+- **Cross-margin:** Use `cross_leverage_limit` parameter
+- **Isolated-margin:** Use `leverage` parameter (different field)
+The bot doesn't check the current margin mode before setting leverage and uses the wrong parameter for isolated mode.
+**Subsequent failure chain:** After the leverage error, the bot still tries to place the order via WebSocket. All 5 retries timeout (5000ms each = 25 seconds wasted), and the manual trade fails completely.
+---
+## BUG 9: Funding arb engine finds opportunities but PreTradeValidator rejects all of them
+**Severity:** MEDIUM  
+**Subsystem:** Funding arbitrage  
+**Log evidence:** `[funding-arb-engine] Found 2 actionable opportunities` every 30 seconds, but no "PRE-TRADE APPROVED" log ever appears.
+**Root cause:** The `PreTradeValidator::validate()` (funding_arb_risk.rs) checks multiple conditions that likely fail on testnet:
+- `min_annualized_apr: 0.10` (10% minimum APR) - testnet funding rates are often zero or random
+- `max_entry_slippage_bps: 5.0` (5 bps max) - testnet order books are thin with wide spreads
+- `min_entry_margin_ratio: 0.40` (40% margin ratio) - may not be met with small balances
+- `max_breakeven_periods: 3.0` - unlikely met with testnet's random rates
+The validator correctly gates execution, but the thresholds are calibrated for mainnet conditions. On testnet, no opportunity ever passes validation, so the funding arb engine is effectively dead.
+Additionally, the engine logs "Found N actionable opportunities" but never logs WHY validation fails. There's no diagnostic output showing which specific check rejected the opportunity.
+---
+## BUG 10: Ghost position tracking - local state diverges from exchange
+**Severity:** LOW  
+**Subsystem:** Gate.io position management  
+**Log evidence:** Lines 172-173, 280-281, 577-578: `[gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cleaning up`
+h
+**Root cause:** The Gate.io gateway creates local position tracking when WebSocket orders are submitted, before fill confirmation. When orders timeout or fail (Bug 8), no position exists on the exchange but local tracking shows a position. The reconciliation loop (every 60 seconds) detects and cleans these up.
+**Impact:** During the 60-second window between ghost creation and cleanup, the bot may make incorrect decisions based on phantom positions (e.g., refusing to open new positions because it thinks one already exists).
+---
+## How Institutional Bots Handle This Differently
+Based on research into institutional-grade funding arbitrage and stat-arb systems:
+1. **Fill confirmation before position recording:** Institutional bots wait for confirmed fills (via WebSocket fill events or REST order status polling) before recording positions. They NEVER record `size=0` or `price=0.0`.
+2. **Signal persistence requirements:** Entry signals must persist for a configurable number of consecutive observations (e.g., z-score > 2.5 for 30 seconds) before triggering. This prevents entering on momentary spikes.
+3. **Minimum hold periods:** Even after exit conditions are met, positions are held for a minimum duration (e.g., 5-60 minutes for stat-arb, 8+ hours for funding arb) to avoid churning fees.
+4. **Entry cooldown:** After exiting a position on a symbol, a cooldown prevents re-entry for N minutes. This avoids the rapid enter/exit/re-enter cycle seen in the logs.
+5. **Per-symbol pricing:** Each symbol has its own price feed. There's never a hardcoded fallback price like `50000.0`.
+6. **Exchange-aware sizing:** Position sizes are calculated using exchange-specific contract specifications (quanto multipliers, lot sizes, tick sizes). The same $178 notional is translated differently for each exchange's contract format.
+7. **Atomic dual-leg execution with fill-or-kill:** Both legs of an arb trade are submitted simultaneously, and if one leg doesn't fill within a timeout, the other is immediately cancelled/unwound. The bot should never have a "half position" lingering.
+8. **Pre-trade cost analysis:** Before entry, the bot estimates round-trip costs (2x maker/taker fees + estimated slippage on both legs) and only enters if expected profit exceeds costs by a margin of safety.
+---
+## Priority Order for Fixes
+1. **Bug 2 + Bug 3** (wrong price for all symbols + wrong position sizing) - These cause the most direct financial harm
+2. **Bug 5** (rapid entry/exit) - This is the primary cause of fee-based losses
+3. **Bug 4** (size=0, no fill confirmation) - Position tracking is completely broken
+4. **Bug 1** (Gate.io trait dispatch) - Manual trading on Gate.io is broken for small amounts
+5. **Bug 6 + Bug 7** (wrong order prices) - Orders go out at absurd prices
+6. **Bug 8** (leverage mode) - Gate.io manual trades fail entirely
+7. **Bug 9** (funding arb never trades) - Feature is dead on testnet
+8. **Bug 10** (ghost positions) - Low severity, self-healing
+---
+## Code Locations Reference
+| Bug | File | Lines |
+|-----|------|-------|
+| 1 | `gateio_gateway.rs` | 514-571 (inherent method, not trait override) |
+| 1 | `execution_gateway.rs` | 456-469 (default trait impl used instead) |
+| 2 | `main.rs` | 4146-4149 (hardcoded `shared_prices.get(0)`) |
+| 3 | `main.rs` | 4163 (`.max(1.0) as i64`) |
+| 4 | `bybit_gateway.rs` | 296-297 (`filled_size: 0, avg_fill_price: 0.0`) |
+| 4 | `main.rs` | 4198-4209 (records without fill confirmation) |
+| 5 | `main.rs` | 4071 (1-second check interval, no cooldown) |
+| 5 | `stat_arb.rs` | 500-540 (no min hold time in `check_exits`) |
+| 6 | `main.rs` | 4179-4181 (same price both legs) |
+| 7 | `main.rs` | 4282-4288 (exit price from broken `shared_prices`) |
+| 8 | `gateio_gateway.rs` | 2003-2038 (`cross_leverage_limit` only) |
+| 9 | `funding_arb_engine.rs` | 397-402 (PreTradeValidator rejects all) |
+| 10 | `gateio_gateway.rs` | 325-404 (reconciliation loop) |
