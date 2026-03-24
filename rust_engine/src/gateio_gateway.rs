@@ -2091,7 +2091,9 @@ impl ExecutionGateway for GateIoGateway {
             let err_str = format!("{}", err);
 
             // BUG 8 FIX: If cross-margin parameter failed, retry with isolated-margin parameter
-            if err_str.contains("cross_leverage_limit") || err_str.contains("cross-margin") {
+            // Also catch MISSING_REQUIRED_PARAM which Gate.io returns when isolated margin
+            // mode is active but we sent cross_leverage_limit parameter
+            if err_str.contains("cross_leverage_limit") || err_str.contains("cross-margin") || err_str.contains("MISSING_REQUIRED_PARAM") {
                 warn!("[gateio-ws] Cross-margin leverage failed for {}, retrying with isolated margin param", normalized);
                 let iso_query = format!("leverage={}", leverage);
                 let iso_signature = Self::rest_sign("POST", &full_path, &iso_query, body, timestamp, &self.api_secret);

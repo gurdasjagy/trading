@@ -98,12 +98,15 @@ impl PreTradeValidator {
             .map(|h| h.available_balance)
             .unwrap_or(0.0);
 
+        // BUG 2 FIX: Default to 1.0 (100% health) when margin monitor hasn't
+        // completed its first API pull or exchange is disconnected.
+        // Previously defaulted to 0.0 which caused immediate rejection.
         let short_margin_ratio = margin_monitor.get_health(opp.short_exchange)
             .map(|h| h.margin_ratio)
-            .unwrap_or(0.0);
+            .unwrap_or(1.0);
         let long_margin_ratio = margin_monitor.get_health(opp.long_exchange)
             .map(|h| h.margin_ratio)
-            .unwrap_or(0.0);
+            .unwrap_or(1.0);
 
         if short_margin_ratio < config.min_entry_margin_ratio
             || long_margin_ratio < config.min_entry_margin_ratio
@@ -198,10 +201,16 @@ impl PreTradeValidator {
             }
         }
 
-        // Fallback heuristic: base slippage from fees + size impact
-        let base_slippage = (opp.short_exchange.taker_fee_bps() + opp.long_exchange.taker_fee_bps()) as f64 / 2.0;
-        let size_impact = (notional_usdt / 100_000.0).min(5.0); // ~1 bps per $100k
-        base_slippage + size_impact
+        // GAP 3 FIX: Improved heuristic when real book data is unavailable.
+        // Uses a non-linear impact model: slippage grows with sqrt(size) relative
+        // to typical market depth, matching the square-root market impact law
+        // (Almgren & Chriss 2005, widely used by institutional desks).
+        let base_fee_slippage = (opp.short_exchange.taker_fee_bps() + opp.long_exchange.taker_fee_bps()) as f64 / 2.0;
+        // Square-root impact: ~1 bps per sqrt($10k notional)
+        let sqrt_impact = (notional_usdt / 10_000.0).sqrt().min(10.0);
+        // Spread cost: estimate half-spread on each side (~0.5-1.0 bps per side)
+        let estimated_half_spread_bps = 1.0;
+        base_fee_slippage + sqrt_impact + estimated_half_spread_bps * 2.0
     }
 
     /// Calculate VWAP slippage in basis points by walking order book levels.
