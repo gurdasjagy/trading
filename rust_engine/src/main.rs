@@ -4528,6 +4528,79 @@ fn main() {
             thread_handles.push(handle);
         }
         
+        // ── Spawn Funding Rate Arbitrage Engine ──────────────────────────────
+        // Runs as a tokio task inside the gateway runtime. Monitors funding rates
+        // across exchanges, validates opportunities, and executes delta-neutral
+        // arb positions with full lifecycle management.
+        //
+        // FIX: Reuse the shared multi_gateways map (Arc clones) instead of
+        // creating duplicate BinanceGateway/BybitGateway instances that would
+        // open separate WebSocket connections and risk exchange rate limiting.
+        //
+        // FIX: Share a single CrossVenueMarginMonitor instance so the engine
+        // sees the same margin health data as the rest of the system.
+        {
+            let fab_gbr = registry_me.clone();
+            let fab_symbols = config.symbols.clone();
+            let fab_gateio_testnet = config.exchanges.iter()
+                .find(|e| e.name == "gateio")
+                .map(|e| e.testnet)
+                .unwrap_or(false);
+            let fab_binance_testnet = config.multi_exchange.binance_testnet;
+            let fab_bybit_testnet = config.multi_exchange.bybit_testnet;
+
+            // Share the existing gateway instances instead of creating duplicates.
+            // multi_gateways was built above at initialization — clone the Arc
+            // references so all subsystems share the same connections.
+            let fab_gateways = multi_gateways.clone();
+
+            // Shared margin monitor — same instance used by execution router
+            let fab_margin_monitor = Arc::new(
+                parking_lot::RwLock::new(
+                    multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
+                )
+            );
+
+            // Dashboard state for operator visibility
+            let fab_dashboard = dashboard_state.clone();
+
+            // Shutdown signal — set by Ctrl+C handler to gracefully stop the engine
+            let fab_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let fab_shutdown_clone = fab_shutdown.clone();
+
+            info!("[funding-arb] Spawning engine with {} gateways, {} symbols",
+                  fab_gateways.len(), fab_symbols.len());
+
+            let handle = thread::Builder::new()
+                .name("funding-arb".into())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to build tokio runtime for funding-arb");
+
+                    rt.block_on(async {
+                        let mut engine = multi_exchange::FundingArbEngine::new(
+                            multi_exchange::FundingArbEngineConfig::default(),
+                            fab_shutdown_clone,
+                        );
+
+                        engine.run(
+                            fab_gateways,
+                            fab_gbr,
+                            fab_margin_monitor,
+                            Some(fab_dashboard),
+                            fab_symbols,
+                            fab_gateio_testnet,
+                            fab_binance_testnet,
+                            fab_bybit_testnet,
+                        ).await;
+                    });
+                })
+                .expect("Failed to spawn funding arb engine thread");
+            thread_handles.push(handle);
+        }
+
         Some(registry_me)
     } else {
         info!("Multi-Exchange mode DISABLED - Gate.io only");
