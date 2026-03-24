@@ -2845,9 +2845,11 @@ fn execution_router_loop(
                 
                 if let Some(gw) = target_gw {
                     // Step 1: Convert USDT amount to contracts using exchange contract specs.
-                    // The gateway fetches quanto_multiplier and last_price to calculate:
-                    //   contracts = usdt_amount / (quanto_multiplier * last_price)
-                    let contract_size = match gw.usdt_to_contracts(&sym_upper, manual_req.size_usdt).await {
+                    // With leverage, the effective notional is usdt_amount * leverage.
+                    // e.g. $100 at 20x leverage = $2000 effective notional.
+                    let leverage = manual_req.leverage.max(1) as f64;
+                    let effective_notional = manual_req.size_usdt * leverage;
+                    let contract_size = match gw.usdt_to_contracts(&sym_upper, effective_notional).await {
                         Ok(contracts) => contracts,
                         Err(e) => {
                             warn!("[execution] Manual trade: USDT→contracts conversion failed: {}", e);
@@ -2855,8 +2857,8 @@ fn execution_router_loop(
                         }
                     };
 
-                    info!("[execution] Manual trade: {:.2} USDT → {} contracts for {}",
-                        manual_req.size_usdt, contract_size, sym_upper);
+                    info!("[execution] Manual trade: {:.2} USDT × {}x leverage = {:.2} notional → {} contracts for {}",
+                        manual_req.size_usdt, manual_req.leverage, effective_notional, contract_size, sym_upper);
 
                     // Step 2: Set leverage
                     if let Err(e) = gw.set_leverage(&sym_upper, manual_req.leverage as i32).await {
@@ -3694,10 +3696,23 @@ fn execution_router_loop(
                         let short_gw = short_gw.unwrap().clone();
                         let long_gw = long_gw.unwrap().clone();
                         
-                        // Calculate position size (2% of total equity) with proper USDT→contract conversion
-                        let total_equity = margin_monitor.total_equity();
-                        let safe_equity = if total_equity > 0.0 { total_equity } else { 100.0 };
-                        let position_notional = safe_equity * 0.02;
+                        // Fetch per-exchange balances to size positions correctly.
+                        // Each leg must fit within its own exchange's balance.
+                        let short_balance = short_gw.get_balance().await.unwrap_or(0.0);
+                        let long_balance = long_gw.get_balance().await.unwrap_or(0.0);
+                        let min_exchange_balance = short_balance.min(long_balance);
+                        
+                        if min_exchange_balance < 10.0 {
+                            warn!(
+                                "[execution] Funding arb: insufficient balance for {} — short {}=${:.2}, long {}=${:.2}",
+                                opp.symbol, opp.short_exchange.name(), short_balance, opp.long_exchange.name(), long_balance
+                            );
+                            continue;
+                        }
+                        
+                        // Position notional = 2% of the MINIMUM single-exchange balance × leverage.
+                        let leverage = 3;
+                        let position_notional = min_exchange_balance * 0.02 * leverage as f64;
 
                         // Fetch real mid price from the long exchange ticker (most reliable)
                         let mid_price = match long_gw.get_ticker(&opp.symbol).await {
@@ -3722,10 +3737,8 @@ fn execution_router_loop(
                             continue;
                         }
 
-                        // Pre-flight balance check: ensure both exchanges have enough margin
-                        let required_margin = position_notional / 3.0; // leverage=3
-                        let short_balance = short_gw.get_balance().await.unwrap_or(0.0);
-                        let long_balance = long_gw.get_balance().await.unwrap_or(0.0);
+                        // Pre-flight margin check: ensure each exchange can cover the required margin
+                        let required_margin = position_notional / leverage as f64;
                         if short_balance < required_margin * 1.1 || long_balance < required_margin * 1.1 {
                             warn!(
                                 "[execution] Funding arb: insufficient margin for {} — need ${:.2}, short_bal=${:.2}, long_bal=${:.2}",
@@ -3734,7 +3747,7 @@ fn execution_router_loop(
                             continue;
                         }
 
-                        // Use usdt_to_contracts() for proper exchange-specific contract sizing
+                        // Use usdt_to_contracts() with leveraged notional for proper contract sizing
                         let position_size = match long_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
                             Ok(size) if size > 0 => size,
                             _ => {
@@ -3744,10 +3757,10 @@ fn execution_router_loop(
                         };
                         
                         // Set leverage on both exchanges before placing orders
-                        if let Err(e) = short_gw.set_leverage(&opp.symbol, 3).await {
+                        if let Err(e) = short_gw.set_leverage(&opp.symbol, leverage).await {
                             warn!("[execution] Funding arb: failed to set leverage on {}: {}", opp.short_exchange.name(), e);
                         }
-                        if let Err(e) = long_gw.set_leverage(&opp.symbol, 3).await {
+                        if let Err(e) = long_gw.set_leverage(&opp.symbol, leverage).await {
                             warn!("[execution] Funding arb: failed to set leverage on {}: {}", opp.long_exchange.name(), e);
                         }
                         
@@ -3759,7 +3772,7 @@ fn execution_router_loop(
                             order_type: execution_gateway::OrderType::Market,
                             price: Some(mid_price),
                             reduce_only: false,
-                            leverage: Some(3),
+                            leverage: Some(leverage),
                             time_in_force: "ioc".to_string(),
                             slippage_cap_pct: Some(0.002),
                             placement: execution_state::PlacementType::AtBest,
@@ -3777,7 +3790,7 @@ fn execution_router_loop(
                             order_type: execution_gateway::OrderType::Market,
                             price: Some(mid_price),
                             reduce_only: false,
-                            leverage: Some(3),
+                            leverage: Some(leverage),
                             time_in_force: "ioc".to_string(),
                             slippage_cap_pct: Some(0.002),
                             placement: execution_state::PlacementType::AtBest,
@@ -4104,35 +4117,57 @@ fn execution_router_loop(
                             short_ex.name()
                         );
                         
-                        // Calculate position size (2% of total equity)
-                        // Guard against uninitialized equity/prices: use balance
-                        // from margin monitor, falling back to a safe default.
-                        let total_equity = margin_monitor.total_equity();
-                        let safe_equity = if total_equity > 0.0 { total_equity } else { 100.0 };
-                        let position_notional = safe_equity * 0.02;
-                        
-                        // Get mid price from shared prices, skipping uninitialized (0.0) values
-                        let raw_price = shared_prices.get(0)
-                            .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
-                            .unwrap_or(0.0);
-                        let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
-                        
-                        // Calculate position size in base currency units.
-                        // For Binance/Bybit this represents the amount of base asset (e.g. ETH).
-                        let position_size = (position_notional / mid_price).max(1.0) as i64;
-                        
-                        info!(
-                            "[stat-arb] Position sizing: equity=${:.2} notional=${:.2} mid_price={:.2} size={}",
-                            safe_equity, position_notional, mid_price, position_size
-                        );
-                        
-                        // Get gateways
+                        // Get gateways first so we can check per-exchange balances
                         let long_gw = multi_gateways.get(long_ex);
                         let short_gw = multi_gateways.get(short_ex);
                         
                         if let (Some(lg), Some(sg)) = (long_gw, short_gw) {
-                            // Set leverage on both exchanges before placing orders
                             let leverage = 3i32;
+                            
+                            // Fetch per-exchange available balance to size positions correctly.
+                            // Each leg must fit within its own exchange's balance, not total equity.
+                            let long_balance = lg.get_balance().await.unwrap_or(0.0);
+                            let short_balance = sg.get_balance().await.unwrap_or(0.0);
+                            let min_exchange_balance = long_balance.min(short_balance);
+                            
+                            if min_exchange_balance < 10.0 {
+                                warn!(
+                                    "[stat-arb] Skipping: insufficient per-exchange balance (long {}=${:.2}, short {}=${:.2})",
+                                    long_ex.name(), long_balance, short_ex.name(), short_balance
+                                );
+                                continue;
+                            }
+                            
+                            // Position notional = 2% of the MINIMUM single-exchange balance × leverage.
+                            // This ensures neither leg exceeds its exchange's available margin.
+                            let position_notional = min_exchange_balance * 0.02 * leverage as f64;
+                            
+                            // Get mid price from shared prices, skipping uninitialized (0.0) values
+                            let raw_price = shared_prices.get(0)
+                                .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                                .unwrap_or(0.0);
+                            let mid_price = if raw_price > 0.0 { raw_price } else { 50000.0 };
+                            
+                            // Pre-flight margin check: ensure each exchange can cover the required margin
+                            let required_margin = position_notional / leverage as f64;
+                            if long_balance < required_margin * 1.1 || short_balance < required_margin * 1.1 {
+                                warn!(
+                                    "[stat-arb] Skipping: margin insufficient — need ${:.2}, long {}=${:.2}, short {}=${:.2}",
+                                    required_margin, long_ex.name(), long_balance, short_ex.name(), short_balance
+                                );
+                                continue;
+                            }
+                            
+                            // Calculate position size in base currency units.
+                            // For Binance/Bybit this represents the amount of base asset (e.g. ETH).
+                            let position_size = (position_notional / mid_price).max(1.0) as i64;
+                            
+                            info!(
+                                "[stat-arb] Position sizing: long_bal=${:.2} short_bal=${:.2} notional=${:.2} mid_price={:.2} size={} lev={}x",
+                                long_balance, short_balance, position_notional, mid_price, position_size, leverage
+                            );
+                            
+                            // Set leverage on both exchanges before placing orders
                             if let Err(e) = lg.set_leverage(symbol, leverage).await {
                                 warn!("[stat-arb] Failed to set leverage on {}: {}", long_ex.name(), e);
                             }
