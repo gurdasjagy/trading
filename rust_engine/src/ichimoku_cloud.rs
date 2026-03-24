@@ -89,6 +89,12 @@ impl IchimokuCloud {
         Some(self.candles.back()?.close)
     }
 
+    /// Returns true if enough candles have been ingested for Ichimoku to produce
+    /// meaningful cloud values (needs at least `senkou_b_period` = 52 candles).
+    pub fn is_warmed_up(&self) -> bool {
+        self.candles.len() >= self.senkou_b_period
+    }
+
     pub fn get_cloud_position(&self, price: f64) -> CloudPosition {
         let span_a = match self.senkou_span_a() {
             Some(v) => v,

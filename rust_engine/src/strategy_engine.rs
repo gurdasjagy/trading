@@ -72,10 +72,11 @@ const VPIN_TOXIC_THRESHOLD: f64 = 0.65;
 const VPIN_SAFE_THRESHOLD: f64 = 0.35;
 
 /// Minimum imbalance magnitude to generate a signal (in basis points / 10000).
-/// Reduced from 0.15 (15%) to 0.03 (3%) for liquid pairs like BTC/USDT.
-/// A 3% depth skew is significant enough to indicate directional pressure
-/// without being so high that signals are rare.
-const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.03;
+/// Reduced from 0.15 (15%) to 0.015 (1.5%) for testnet compatibility.
+/// Testnet orderbooks are typically thinner than mainnet, producing different
+/// imbalance distributions. A 1.5% depth skew is significant enough to
+/// indicate directional pressure on thin testnet books.
+const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.015;
 
 /// Minimum spread in bps to avoid trading in tight spreads.
 const MIN_SPREAD_BPS: f64 = 1.0;
@@ -90,7 +91,8 @@ const BASE_POSITION_SIZE: f64 = 1.0;
 const MAX_POSITION_SIZE: f64 = 50.0;
 
 /// Minimum depth in USD on both sides to consider orderbook valid.
-const MIN_DEPTH_USD: f64 = 1000.0;
+/// Lowered from 1000 to 100 for testnet compatibility where books are thinner.
+const MIN_DEPTH_USD: f64 = 100.0;
 
 // ---------------------------------------------------------------------------
 // Microstructure Metrics — Fed from BookSnapshot
@@ -493,12 +495,17 @@ impl StrategyEngine {
     ) -> Option<OrderIntent> {
         // ── Sanity gates ──
         if metrics.mid_price <= 0.0 {
+            debug!("[strategy] Gate: mid_price <= 0 — skipping");
             return None;
         }
         if metrics.spread_bps < MIN_SPREAD_BPS || metrics.spread_bps > MAX_SPREAD_BPS {
+            debug!("[strategy] Gate: spread_bps={:.1} outside [{:.1}, {:.1}] — skipping",
+                metrics.spread_bps, MIN_SPREAD_BPS, MAX_SPREAD_BPS);
             return None;
         }
         if metrics.bid_depth_usdt < MIN_DEPTH_USD || metrics.ask_depth_usdt < MIN_DEPTH_USD {
+            debug!("[strategy] Gate: depth too low bid=${:.0} ask=${:.0} (min=${:.0}) — skipping",
+                metrics.bid_depth_usdt, metrics.ask_depth_usdt, MIN_DEPTH_USD);
             return None;
         }
 
@@ -592,6 +599,7 @@ impl StrategyEngine {
             .unwrap_or(base_threshold);
         
         if abs_imbalance < threshold {
+            debug!("[strategy] Gate: imbalance {:.4} < threshold {:.4} — skipping", abs_imbalance, threshold);
             return None; // Not enough signal
         }
 
