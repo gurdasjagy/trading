@@ -8,12 +8,15 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::RwLock;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
+
+use crate::dashboard_server::DashboardState;
 
 use crate::execution_gateway::{
     ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType,
@@ -270,17 +273,19 @@ pub struct FundingArbEngine {
     /// HTTP client for REST API calls.
     http_client: Client,
     /// Is the engine paused.
-    paused: bool,
+    pub paused: bool,
     /// Pause reason.
     pause_reason: Option<String>,
     /// Total realized PnL across all closed positions.
     total_realized_pnl: f64,
     /// Total funding collected across all positions.
     total_funding_collected: f64,
+    /// Shutdown signal — engine exits its run() loop when set to true.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl FundingArbEngine {
-    pub fn new(config: FundingArbEngineConfig) -> Self {
+    pub fn new(config: FundingArbEngineConfig, shutdown: Arc<AtomicBool>) -> Self {
         let rate_monitor = CrossExchangeFundingArb::new(
             config.min_net_rate,
             config.min_annualized_apr,
@@ -301,6 +306,7 @@ impl FundingArbEngine {
             pause_reason: None,
             total_realized_pnl: 0.0,
             total_funding_collected: 0.0,
+            shutdown,
         }
     }
 
@@ -318,6 +324,7 @@ impl FundingArbEngine {
         gateways: HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
         global_book_registry: Arc<GlobalBookRegistry>,
         margin_monitor: Arc<RwLock<CrossVenueMarginMonitor>>,
+        dashboard_state: Option<Arc<DashboardState>>,
         symbols: Vec<String>,
         gateio_testnet: bool,
         binance_testnet: bool,
@@ -340,6 +347,12 @@ impl FundingArbEngine {
         );
 
         loop {
+            // Check shutdown signal
+            if self.shutdown.load(Ordering::Relaxed) {
+                info!("[funding-arb-engine] Shutdown signal received, stopping engine");
+                break;
+            }
+
             tokio::select! {
                 // --- Rate Check Tick ---
                 _ = rate_interval.tick() => {
@@ -424,18 +437,34 @@ impl FundingArbEngine {
                                     }
                                     DualLegResult::PartialFill { filled_leg, unfilled_exchange, filled_size } => {
                                         // LEGGING RISK: One leg filled, other didn't
-                                        // Immediately close the filled leg with a market order
+                                        // Retry emergency close up to 3 times with exponential backoff
                                         warn!("[funding-arb-engine] LEGGING RISK: {} filled on {} but failed on {}. Emergency closing filled leg.",
                                             opp.symbol, filled_leg.exchange().name(), unfilled_exchange.name());
 
-                                        match DualLegExecutor::emergency_close_leg(
-                                            &opp.symbol,
-                                            &filled_leg,
-                                            filled_size,
-                                            &gateways,
-                                        ).await {
-                                            Ok(_) => info!("[funding-arb-engine] Legging risk resolved: closed filled leg"),
-                                            Err(e) => error!("[funding-arb-engine] CRITICAL: Failed to close legged position: {:?}", e),
+                                        let mut closed = false;
+                                        for attempt in 1..=3u32 {
+                                            match DualLegExecutor::emergency_close_leg(
+                                                &opp.symbol,
+                                                &filled_leg,
+                                                filled_size,
+                                                &gateways,
+                                            ).await {
+                                                Ok(_) => {
+                                                    info!("[funding-arb-engine] Legging risk resolved: closed filled leg (attempt {})", attempt);
+                                                    closed = true;
+                                                    break;
+                                                }
+                                                Err(e) => {
+                                                    error!("[funding-arb-engine] Emergency close attempt {}/3 failed: {:?}", attempt, e);
+                                                    if attempt < 3 {
+                                                        tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(attempt - 1))).await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !closed {
+                                            error!("[funding-arb-engine] CRITICAL: All 3 emergency close attempts failed for {}! Pausing engine.", opp.symbol);
+                                            self.pause(&format!("Unresolved legging risk on {}", opp.symbol));
                                         }
                                     }
                                     DualLegResult::BothFailed { short_error, long_error } => {
@@ -455,6 +484,12 @@ impl FundingArbEngine {
 
                     // 5. Check exits for active positions
                     self.check_exits(&gateways, &margin_monitor.read()).await;
+
+                    // 6. Update dashboard state
+                    if let Some(ref dash) = dashboard_state {
+                        let json = serde_json::to_string(&self.to_json()).unwrap_or_else(|_| "[]".to_string());
+                        dash.set_funding_arb_json(json);
+                    }
                 }
 
                 // --- Margin Check Tick ---
@@ -526,9 +561,18 @@ impl FundingArbEngine {
                             pos.symbol, pos.funding_periods_collected,
                             net_rate * 100.0, funding_this_period, pos.net_funding_accumulated);
                     }
+
+                    // Update dashboard after funding collection
+                    if let Some(ref dash) = dashboard_state {
+                        let json = serde_json::to_string(&self.to_json()).unwrap_or_else(|_| "[]".to_string());
+                        dash.set_funding_arb_json(json);
+                    }
                 }
             }
         }
+
+        info!("[funding-arb-engine] Engine stopped. Realized PnL: ${:.4}, Funding collected: ${:.4}",
+            self.total_realized_pnl, self.total_funding_collected);
     }
 
     /// Check all active positions for exit conditions.
@@ -907,7 +951,8 @@ mod tests {
     #[test]
     fn test_engine_creation() {
         let config = FundingArbEngineConfig::default();
-        let engine = FundingArbEngine::new(config);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let engine = FundingArbEngine::new(config, shutdown);
         assert_eq!(engine.active_position_count(), 0);
         assert_eq!(engine.total_realized_pnl(), 0.0);
         assert_eq!(engine.total_funding_collected(), 0.0);
@@ -917,7 +962,8 @@ mod tests {
     #[test]
     fn test_engine_pause_resume() {
         let config = FundingArbEngineConfig::default();
-        let mut engine = FundingArbEngine::new(config);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let mut engine = FundingArbEngine::new(config, shutdown);
 
         engine.pause("test pause");
         assert!(engine.paused);
@@ -931,7 +977,8 @@ mod tests {
     #[test]
     fn test_engine_to_json() {
         let config = FundingArbEngineConfig::default();
-        let engine = FundingArbEngine::new(config);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let engine = FundingArbEngine::new(config, shutdown);
         let json = engine.to_json();
 
         assert_eq!(json["paused"], false);

@@ -203,6 +203,17 @@ impl PreTradeValidator {
     /// Walks the sorted levels (asks ascending or bids descending) and accumulates
     /// quantity until the target notional is filled. Returns the VWAP deviation
     /// from the best level price in basis points.
+    ///
+    /// # Fixed-point encoding (GlobalLevel)
+    ///
+    /// - `raw_price_fp`: i64 scaled by 1e8 (FixedPrice precision).
+    ///   E.g. $50,000.12345678 → 5_000_012_345_678.
+    /// - `qty`: i64 scaled by 1e8 (contracts).
+    ///   E.g. 1.5 contracts → 150_000_000.
+    ///
+    /// All arithmetic below stays in consistent units so the final
+    /// slippage ratio (VWAP / best_price) cancels the scaling factor
+    /// and produces a dimensionless basis-point value.
     fn calculate_vwap_slippage(
         levels: &[crate::multi_exchange::global_book::GlobalLevel],
         target_notional_usdt: f64,
@@ -211,7 +222,7 @@ impl PreTradeValidator {
             return 2.0; // Default 2 bps if no book data
         }
 
-        let best_price = levels[0].raw_price_fp as f64;
+        let best_price = levels[0].raw_price_fp as f64; // fp-scaled
         if best_price <= 0.0 {
             return 2.0;
         }
@@ -224,9 +235,11 @@ impl PreTradeValidator {
             if remaining_notional <= 0.0 {
                 break;
             }
+            // price is raw_price_fp (i64 * 1e8); qty is also i64 * 1e8.
             let price = level.raw_price_fp as f64;
-            let qty = level.qty as f64 / 1e8; // qty is scaled by 1e8
-            let level_notional = price * qty / 1e8; // price is also fixed-point
+            let qty = level.qty as f64 / 1e8; // → actual contract qty
+            // notional = (price / 1e8) * qty  =  price * qty / 1e8  (in USD)
+            let level_notional = price * qty / 1e8;
 
             let fill_notional = remaining_notional.min(level_notional);
             let fill_qty = if level_notional > 0.0 {
@@ -235,6 +248,8 @@ impl PreTradeValidator {
                 0.0
             };
 
+            // total_cost stays in fp-scaled price * actual qty — same
+            // domain as best_price * qty, so VWAP / best_price is correct.
             total_cost += fill_qty * price;
             total_qty += fill_qty;
             remaining_notional -= fill_notional;
@@ -244,7 +259,7 @@ impl PreTradeValidator {
             return 5.0; // High slippage if we can't fill
         }
 
-        let vwap = total_cost / total_qty;
+        let vwap = total_cost / total_qty; // fp-scaled price
         let slippage_bps = ((vwap - best_price).abs() / best_price) * 10000.0;
         slippage_bps
     }

@@ -4532,6 +4532,13 @@ fn main() {
         // Runs as a tokio task inside the gateway runtime. Monitors funding rates
         // across exchanges, validates opportunities, and executes delta-neutral
         // arb positions with full lifecycle management.
+        //
+        // FIX: Reuse the shared multi_gateways map (Arc clones) instead of
+        // creating duplicate BinanceGateway/BybitGateway instances that would
+        // open separate WebSocket connections and risk exchange rate limiting.
+        //
+        // FIX: Share a single CrossVenueMarginMonitor instance so the engine
+        // sees the same margin health data as the rest of the system.
         {
             let fab_gbr = registry_me.clone();
             let fab_symbols = config.symbols.clone();
@@ -4542,35 +4549,24 @@ fn main() {
             let fab_binance_testnet = config.multi_exchange.binance_testnet;
             let fab_bybit_testnet = config.multi_exchange.bybit_testnet;
 
-            // Build a separate set of gateways for the funding arb engine
-            let mut fab_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = HashMap::new();
-            if let Some(ref gw) = gateway {
-                fab_gateways.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
-            }
-            {
-                let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
-                let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
-                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    fab_gateways.insert(
-                        multi_exchange::ExchangeId::Binance,
-                        Arc::new(binance_gateway::BinanceGateway::new(
-                            ak.to_string(), sk.to_string(), fab_binance_testnet,
-                        )) as Arc<dyn ExecutionGateway + Send + Sync>,
-                    );
-                }
-            }
-            {
-                let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
-                let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
-                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    fab_gateways.insert(
-                        multi_exchange::ExchangeId::Bybit,
-                        Arc::new(bybit_gateway::BybitGateway::new(
-                            ak.to_string(), sk.to_string(), fab_bybit_testnet,
-                        )) as Arc<dyn ExecutionGateway + Send + Sync>,
-                    );
-                }
-            }
+            // Share the existing gateway instances instead of creating duplicates.
+            // multi_gateways was built above at initialization — clone the Arc
+            // references so all subsystems share the same connections.
+            let fab_gateways = multi_gateways.clone();
+
+            // Shared margin monitor — same instance used by execution router
+            let fab_margin_monitor = Arc::new(
+                parking_lot::RwLock::new(
+                    multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
+                )
+            );
+
+            // Dashboard state for operator visibility
+            let fab_dashboard = dashboard_state.clone();
+
+            // Shutdown signal — set by Ctrl+C handler to gracefully stop the engine
+            let fab_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let fab_shutdown_clone = fab_shutdown.clone();
 
             info!("[funding-arb] Spawning engine with {} gateways, {} symbols",
                   fab_gateways.len(), fab_symbols.len());
@@ -4584,20 +4580,16 @@ fn main() {
                         .expect("Failed to build tokio runtime for funding-arb");
 
                     rt.block_on(async {
-                        let margin_monitor = Arc::new(
-                            parking_lot::RwLock::new(
-                                multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
-                            )
-                        );
-
                         let mut engine = multi_exchange::FundingArbEngine::new(
                             multi_exchange::FundingArbEngineConfig::default(),
+                            fab_shutdown_clone,
                         );
 
                         engine.run(
                             fab_gateways,
                             fab_gbr,
-                            margin_monitor,
+                            fab_margin_monitor,
+                            Some(fab_dashboard),
                             fab_symbols,
                             fab_gateio_testnet,
                             fab_binance_testnet,

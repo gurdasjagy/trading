@@ -30,6 +30,6 @@ pub use funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity, FundingRat
 pub use margin_monitor::{CrossVenueMarginMonitor, ExchangeMarginHealth, MarginImbalanceAlert};
 pub use cross_exchange_mm::{CrossExchangeMarketMaker, CrossExchangeMMConfig, MakerOrder, HedgePosition, MakerOrderStatus};
 pub use stat_arb::{StatArbEngine, StatArbConfig, StatArbPosition, StatArbExitReason};
-pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig, FundingArbPosition as FundingArbPositionV2, FundingArbState};
+pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig, FundingArbState};
 pub use funding_arb_executor::{DualLegExecutor, DualLegResult, LegStatus};
 pub use funding_arb_risk::{PreTradeValidator, PreTradeResult, ExitReason};
