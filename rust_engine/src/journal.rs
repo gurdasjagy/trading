@@ -259,7 +259,7 @@ impl JournalWriter {
                 if last_seq > 0 {
                     // Resume sequence numbering after the last written entry
                     // (global_sequence is assigned below before the return)
-                    max_segment = max_segment; // segment stays the same
+                    // segment stays the same (max_segment unchanged)
                     let segment = Self::create_segment(journal_dir, max_segment)?;
                     return Ok(Self {
                         current_segment: segment,

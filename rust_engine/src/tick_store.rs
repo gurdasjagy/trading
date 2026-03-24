@@ -15,7 +15,7 @@
 //! Files are preallocated to 480MB (~10M ticks) to minimize fragmentation.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::PathBuf;
 use memmap2::{MmapMut, MmapOptions};
 use tracing::{debug, error, info};

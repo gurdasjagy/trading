@@ -25,6 +25,8 @@
 //!   Core 6:     Telemetry/Journaling (append-only event log)
 //!   Core 7-10:  Microstructure Analytics (VPIN, Kyle Lambda, QPE)
 
+#![allow(dead_code)]
+
 mod config;
 mod execution_gateway;
 mod gateio_gateway;
@@ -2358,7 +2360,7 @@ fn strategy_evaluator_loop(
                             }
 
                             // Step 1b: Correlation-based exposure check (FEATURE 6)
-                            let mut position_notional = FixedPrice(cmd.price).to_f64()
+                            let position_notional = FixedPrice(cmd.price).to_f64()
                                 * fixed_point::FixedQty(cmd.qty).to_f64();
                             let mut cmd = cmd; // Make cmd mutable for potential resizing
                             if let Err(reason) = correlation_limiter.check_position_limit(symbol_name, position_notional) {
@@ -2376,7 +2378,6 @@ fn strategy_evaluator_loop(
                                             fixed_point::FixedQty(cmd.qty).to_f64(), reduced_qty
                                         );
                                         cmd = cmd_resized;
-                                        position_notional = max_allowed; // Update for subsequent checks
                                     } else {
                                         continue;
                                     }

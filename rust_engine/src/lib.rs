@@ -16,6 +16,8 @@
 //! **Institutional Upgrade**: Added pre_trade_risk, position_slot_manager,
 //! exit_evaluator, event_sequencer, and dust_tracker modules.
 
+#![allow(dead_code)]
+
 // Modules shared between binary and library
 pub mod config;
 pub mod execution_gateway;
