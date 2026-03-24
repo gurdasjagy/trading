@@ -1691,6 +1691,50 @@ fn strategy_evaluator_loop(
                 }
             }
 
+            // ── Auto-Detection of Unprotected Trades ──
+            // Scan tracked positions for missing SL/TP every 50 snapshots.
+            // When found, auto-apply default SL/TP based on a percentage of entry price.
+            // Default: SL = 2% adverse move, TP = 3% favorable move.
+            // This protects manual trades opened without SL/TP from the dashboard.
+            static UNPROTECTED_SCAN_COUNTER: AtomicU64 = AtomicU64::new(0);
+            {
+                let scan_count = UNPROTECTED_SCAN_COUNTER.fetch_add(1, Ordering::Relaxed);
+                if scan_count % 50 == 0 {
+                    let unprotected = exit_evaluator.get_unprotected_positions();
+                    for (sym_id, is_long, entry_price, has_sl, has_tp) in &unprotected {
+                        // Default SL: 2% adverse move from entry
+                        let default_sl = if !has_sl {
+                            if *is_long {
+                                entry_price * 0.98 // 2% below entry for longs
+                            } else {
+                                entry_price * 1.02 // 2% above entry for shorts
+                            }
+                        } else {
+                            0.0 // already has SL, don't overwrite
+                        };
+
+                        // Default TP: 3% favorable move from entry (1.5:1 R:R)
+                        let default_tp = if !has_tp {
+                            if *is_long {
+                                entry_price * 1.03 // 3% above entry for longs
+                            } else {
+                                entry_price * 0.97 // 3% below entry for shorts
+                            }
+                        } else {
+                            0.0 // already has TP, don't overwrite
+                        };
+
+                        exit_evaluator.update_sl_tp(*sym_id, default_sl, default_tp);
+                        info!(
+                            "[strategy] 🛡️ Auto-protection applied to {} position sym={}: SL={:.4} TP={:.4}",
+                            if *is_long { "LONG" } else { "SHORT" },
+                            registry.get_name(*sym_id),
+                            default_sl, default_tp
+                        );
+                    }
+                }
+            }
+
             // Task 19: Periodic logging of Phase 2 Feature 7-10 metrics (every 100 snapshots)
             static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
             {
