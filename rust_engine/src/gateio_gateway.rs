@@ -313,7 +313,11 @@ impl GateIoGateway {
                 info!("[gateio-reconcile] REST reconciliation thread started (60s interval)");
                 let mut cycle: u64 = 0;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    // BUG 10 FIX: Reduced from 60s to 15s to minimize the window
+                    // where ghost positions can cause incorrect decisions (e.g.,
+                    // refusing to open new positions because local state thinks
+                    // one already exists).
+                    tokio::time::sleep(Duration::from_secs(15)).await;
                     cycle += 1;
 
                     if !reconcile_ready.load(Ordering::Acquire) {
@@ -363,69 +367,94 @@ impl GateIoGateway {
                                 match response.json::<serde_json::Value>().await {
                                     Ok(positions) => {
                                         if let Some(arr) = positions.as_array() {
-                                            let state = reconcile_state.write();
                                             let mut discrepancies = 0u64;
-                                            for pos in arr {
-                                                let symbol = pos.get("contract")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                let rest_size = pos.get("size")
-                                                    .and_then(|v| v.as_i64())
-                                                    .unwrap_or(0);
+                                            // BUG 10 FIX: Collect ghost tracking keys during
+                                            // the read pass, then remove them in a separate
+                                            // write pass. This avoids borrow conflicts.
+                                            let mut ghost_keys_to_remove: Vec<String> = Vec::new();
 
-                                                // Check if any tracked order for this symbol
-                                                // has a state mismatch
-                                                let has_tracking = state.values().any(|t| {
-                                                    t.symbol == symbol
-                                                });
-
-                                                // FEATURE 9: Fix position desync
-                                                if rest_size != 0 && !has_tracking {
-                                                    discrepancies += 1;
-                                                    warn!(
-                                                        "[gateio-reconcile] DESYNC: REST shows position \
-                                                         {} size={} but no local tracking exists! Creating emergency tracking.",
-                                                        symbol, rest_size
-                                                    );
-                                                    
-                                                    // Get entry price from REST
-                                                    let entry_price = pos.get("entry_price")
+                                            {
+                                                let state = reconcile_state.read();
+                                                for pos in arr {
+                                                    let symbol = pos.get("contract")
                                                         .and_then(|v| v.as_str())
-                                                        .and_then(|s| s.parse::<f64>().ok())
-                                                        .or_else(|| pos.get("entry_price").and_then(|v| v.as_f64()))
-                                                        .unwrap_or(0.0);
-                                                    
-                                                    if entry_price > 0.0 {
-                                                        // Create synthetic emergency stop-loss at 3% from entry
-                                                        let emergency_sl = if rest_size > 0 {
-                                                            entry_price * 0.97 // Long: SL 3% below entry
-                                                        } else {
-                                                            entry_price * 1.03 // Short: SL 3% above entry
-                                                        };
-                                                        
-                                                        info!(
-                                                            "[gateio-reconcile] 🚨 Created emergency SL for {} @ {:.4} (entry={:.4})",
-                                                            symbol, emergency_sl, entry_price
+                                                        .unwrap_or("");
+                                                    let rest_size = pos.get("size")
+                                                        .and_then(|v| v.as_i64())
+                                                        .unwrap_or(0);
+
+                                                    // Check if any tracked order for this symbol
+                                                    // has a state mismatch
+                                                    let has_tracking = state.values().any(|t| {
+                                                        t.symbol == symbol
+                                                    });
+
+                                                    // FEATURE 9: Fix position desync
+                                                    if rest_size != 0 && !has_tracking {
+                                                        discrepancies += 1;
+                                                        warn!(
+                                                            "[gateio-reconcile] DESYNC: REST shows position \
+                                                             {} size={} but no local tracking exists! Creating emergency tracking.",
+                                                            symbol, rest_size
                                                         );
                                                         
-                                                        // Note: We can't directly call exit_evaluator.track_position() here
-                                                        // because it's owned by the strategy thread. Instead, we log the
-                                                        // discrepancy and rely on the next health check to sync state.
-                                                        // A full implementation would use a channel to notify the strategy thread.
+                                                        // Get entry price from REST
+                                                        let entry_price = pos.get("entry_price")
+                                                            .and_then(|v| v.as_str())
+                                                            .and_then(|s| s.parse::<f64>().ok())
+                                                            .or_else(|| pos.get("entry_price").and_then(|v| v.as_f64()))
+                                                            .unwrap_or(0.0);
+                                                        
+                                                        if entry_price > 0.0 {
+                                                            // Create synthetic emergency stop-loss at 3% from entry
+                                                            let emergency_sl = if rest_size > 0 {
+                                                                entry_price * 0.97 // Long: SL 3% below entry
+                                                            } else {
+                                                                entry_price * 1.03 // Short: SL 3% above entry
+                                                            };
+                                                            
+                                                            info!(
+                                                                "[gateio-reconcile] Created emergency SL for {} @ {:.4} (entry={:.4})",
+                                                                symbol, emergency_sl, entry_price
+                                                            );
+                                                            
+                                                            // Note: We can't directly call exit_evaluator.track_position() here
+                                                            // because it's owned by the strategy thread. Instead, we log the
+                                                            // discrepancy and rely on the next health check to sync state.
+                                                            // A full implementation would use a channel to notify the strategy thread.
+                                                        }
+                                                    }
+                                                    
+                                                    // BUG 10 FIX: Detect ghost positions and collect
+                                                    // their keys for removal after the read pass.
+                                                    if rest_size == 0 && has_tracking {
+                                                        warn!(
+                                                            "[gateio-reconcile] GHOST: Local tracking for {} but REST shows no position — cleaning up",
+                                                            symbol
+                                                        );
+                                                        let keys: Vec<String> = state.iter()
+                                                            .filter(|(_, t)| t.symbol == symbol)
+                                                            .map(|(k, _)| k.clone())
+                                                            .collect();
+                                                        ghost_keys_to_remove.extend(keys);
                                                     }
                                                 }
-                                                
-                                                // FEATURE 9: Detect ghost positions (local tracking but no REST position)
-                                                if rest_size == 0 && has_tracking {
-                                                    warn!(
-                                                        "[gateio-reconcile] GHOST: Local tracking for {} but REST shows no position — cleaning up",
-                                                        symbol
+                                            } // read lock released here
+
+                                            // BUG 10 FIX: Actually remove ghost tracking entries
+                                            // now that the read lock is released.
+                                            if !ghost_keys_to_remove.is_empty() {
+                                                let mut state_w = reconcile_state.write();
+                                                for key in &ghost_keys_to_remove {
+                                                    state_w.remove(key);
+                                                    info!(
+                                                        "[gateio-reconcile] Removed ghost tracking entry: {}",
+                                                        key
                                                     );
-                                                    // Note: We can't directly call position_slots.release() here
-                                                    // because it's owned by the strategy thread. The execution thread's
-                                                    // periodic reconciliation (every 30s) will detect and fix this.
                                                 }
+                                                discrepancies += ghost_keys_to_remove.len() as u64;
                                             }
+
                                             if discrepancies > 0 {
                                                 warn!(
                                                     "[gateio-reconcile] Cycle {}: {} discrepancies found",
