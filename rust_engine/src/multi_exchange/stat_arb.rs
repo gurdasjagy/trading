@@ -104,7 +104,7 @@ pub enum StatArbExitReason {
 pub struct StatArbConfig {
     /// Rolling window size for spread history (default: 1000 samples).
     pub window_size: usize,
-    /// Entry threshold in standard deviations (default: 2.0).
+    /// Entry threshold in standard deviations (default: 2.5).
     pub entry_threshold_sigma: f64,
     /// Exit threshold in standard deviations (default: 0.5).
     pub exit_threshold_sigma: f64,
@@ -116,18 +116,28 @@ pub struct StatArbConfig {
     pub position_size_pct: f64,
     /// Minimum samples before trading (default: 100).
     pub min_samples: usize,
+    /// BUG 5 FIX: Minimum hold time in seconds before exit is allowed.
+    /// Prevents rapid entry/exit cycles that churn fees.
+    pub min_hold_seconds: f64,
+    /// BUG 5 FIX: Cooldown in seconds after exiting before re-entry on same symbol.
+    pub entry_cooldown_seconds: f64,
+    /// BUG 5 FIX: Number of consecutive observations the signal must persist before entry.
+    pub signal_persistence_count: usize,
 }
 
 impl Default for StatArbConfig {
     fn default() -> Self {
         Self {
             window_size: 1000,
-            entry_threshold_sigma: 2.0,
+            entry_threshold_sigma: 2.5,  // BUG 5 FIX: raised from 2.0 to reduce noise entries
             exit_threshold_sigma: 0.5,
             stop_loss_sigma: 4.0,
             max_hold_hours: 4.0,
             position_size_pct: 0.02,
             min_samples: 100,
+            min_hold_seconds: 300.0,         // BUG 5 FIX: 5 minute minimum hold
+            entry_cooldown_seconds: 600.0,   // BUG 5 FIX: 10 minute cooldown after exit
+            signal_persistence_count: 5,     // BUG 5 FIX: signal must persist 5 consecutive ticks
         }
     }
 }
@@ -266,6 +276,10 @@ pub struct StatArbEngine {
     paused: bool,
     /// Pause reason.
     pause_reason: Option<String>,
+    /// BUG 5 FIX: Cooldown tracking — maps symbol to the timestamp (ns) when last exit occurred.
+    exit_cooldowns: HashMap<String, u64>,
+    /// BUG 5 FIX: Signal persistence counter — maps symbol to consecutive tick count above threshold.
+    signal_persistence: HashMap<String, usize>,
 }
 
 impl StatArbEngine {
@@ -278,6 +292,8 @@ impl StatArbEngine {
             last_update_ns: 0,
             paused: false,
             pause_reason: None,
+            exit_cooldowns: HashMap::new(),
+            signal_persistence: HashMap::new(),
         }
     }
 
@@ -341,7 +357,7 @@ impl StatArbEngine {
     ///
     /// Returns Some((long_exchange, short_exchange)) if an opportunity exists.
     pub fn check_entry_opportunity(
-        &self,
+        &mut self,
         symbol: &str,
         exchange_a: ExchangeId,
         exchange_b: ExchangeId,
@@ -353,6 +369,18 @@ impl StatArbEngine {
         // Check if we already have a position for this symbol
         if self.active_positions.iter().any(|p| p.symbol == symbol) {
             return None;
+        }
+
+        // BUG 5 FIX: Check entry cooldown — skip if we exited this symbol recently
+        if let Some(&exit_ns) = self.exit_cooldowns.get(symbol) {
+            let elapsed_secs = (self.last_update_ns.saturating_sub(exit_ns)) as f64 / 1_000_000_000.0;
+            if elapsed_secs < self.config.entry_cooldown_seconds {
+                debug!(
+                    "[stat-arb] Cooldown active for {} ({:.0}s / {:.0}s)",
+                    symbol, elapsed_secs, self.config.entry_cooldown_seconds
+                );
+                return None;
+            }
         }
 
         let pair_key = ExchangePairKey::new(exchange_a, exchange_b);
@@ -372,6 +400,8 @@ impl StatArbEngine {
 
         // Check entry condition: |z_score| > entry_threshold
         if z_score.abs() < self.config.entry_threshold_sigma {
+            // BUG 5 FIX: Reset persistence counter if signal drops below threshold
+            self.signal_persistence.remove(symbol);
             return None;
         }
 
@@ -390,10 +420,22 @@ impl StatArbEngine {
             (exchange_a, exchange_b)
         };
 
+        // BUG 5 FIX: Require signal to persist for N consecutive observations
+        let count = self.signal_persistence.entry(symbol.to_string()).or_insert(0);
+        *count += 1;
+        if *count < self.config.signal_persistence_count {
+            debug!(
+                "[stat-arb] Signal persistence {}/{} for {} z={:.2}",
+                count, self.config.signal_persistence_count, symbol, z_score
+            );
+            return None;
+        }
+
         debug!(
-            "[stat-arb] Entry opportunity: {} z={:.2} (long={}, short={})",
+            "[stat-arb] Entry opportunity: {} z={:.2} persistence={} (long={}, short={})",
             symbol,
             z_score,
+            count,
             long_ex.name(),
             short_ex.name()
         );
@@ -426,16 +468,26 @@ impl StatArbEngine {
                     };
 
                     // Don't include if we already have a position
-                    if !self.active_positions.iter().any(|p| p.symbol == *symbol) {
-                        opportunities.push((
-                            symbol.clone(),
-                            long_ex,
-                            short_ex,
-                            latest,
-                            mean,
-                            std_dev,
-                        ));
+                    if self.active_positions.iter().any(|p| p.symbol == *symbol) {
+                        continue;
                     }
+
+                    // BUG 5 FIX: Respect cooldown in scan as well
+                    if let Some(&exit_ns) = self.exit_cooldowns.get(symbol.as_str()) {
+                        let elapsed_secs = (self.last_update_ns.saturating_sub(exit_ns)) as f64 / 1_000_000_000.0;
+                        if elapsed_secs < self.config.entry_cooldown_seconds {
+                            continue;
+                        }
+                    }
+
+                    opportunities.push((
+                        symbol.clone(),
+                        long_ex,
+                        short_ex,
+                        latest,
+                        mean,
+                        std_dev,
+                    ));
                 }
             }
         }
@@ -497,13 +549,17 @@ impl StatArbEngine {
     /// Check exit conditions for all active positions.
     ///
     /// Returns list of positions to close with their exit reasons.
-    pub fn check_exits(&self, now_ns: u64) -> Vec<(StatArbPosition, StatArbExitReason)> {
+    pub fn check_exits(&mut self, now_ns: u64) -> Vec<(StatArbPosition, StatArbExitReason)> {
         let mut exits = Vec::new();
 
         for pos in &self.active_positions {
             // Get current spread stats
             let pair_key = ExchangePairKey::new(pos.long_exchange, pos.short_exchange);
             let key = (pair_key, pos.symbol.clone());
+
+            // BUG 5 FIX: Enforce minimum hold period before allowing any exit
+            // (except stop loss, which always fires for risk protection)
+            let hold_secs = (now_ns.saturating_sub(pos.entry_timestamp_ns)) as f64 / 1_000_000_000.0;
 
             if let Some(stats) = self.spread_history.get(&key) {
                 if let Some(z_score) = stats.z_score() {
@@ -515,8 +571,7 @@ impl StatArbEngine {
                     }
 
                     // Check stop loss (4 sigma against position)
-                    // If we entered because spread was high (z > 2) and now z > 4, stop out
-                    // If we entered because spread was low (z < -2) and now z < -4, stop out
+                    // Stop loss always fires regardless of min hold period
                     if pos.spread_was_high && z_score > self.config.stop_loss_sigma {
                         exits.push((pos.clone(), StatArbExitReason::StopLoss));
                         continue;
@@ -526,8 +581,16 @@ impl StatArbEngine {
                         continue;
                     }
 
+                    // BUG 5 FIX: Only allow mean reversion exit after minimum hold period
+                    if hold_secs < self.config.min_hold_seconds {
+                        debug!(
+                            "[stat-arb] {} held {:.0}s < min {:.0}s, skipping mean reversion check",
+                            pos.symbol, hold_secs, self.config.min_hold_seconds
+                        );
+                        continue;
+                    }
+
                     // Check mean reversion exit
-                    // If spread reverted to within exit_threshold_sigma of mean
                     if z_score.abs() < self.config.exit_threshold_sigma {
                         exits.push((pos.clone(), StatArbExitReason::MeanReversion));
                         continue;
@@ -536,12 +599,21 @@ impl StatArbEngine {
             }
         }
 
+        // BUG 5 FIX: Record cooldown timestamps for exited symbols
+        for (pos, _reason) in &exits {
+            self.exit_cooldowns.insert(pos.symbol.clone(), now_ns);
+            // Reset signal persistence so re-entry requires fresh signal buildup
+            self.signal_persistence.remove(&pos.symbol);
+        }
+
         exits
     }
 
     /// Remove a closed position from tracking.
     pub fn remove_position(&mut self, symbol: &str) {
         self.active_positions.retain(|p| p.symbol != symbol);
+        // BUG 5 FIX: Reset signal persistence on position removal
+        self.signal_persistence.remove(symbol);
     }
 
     /// Get active position count.
