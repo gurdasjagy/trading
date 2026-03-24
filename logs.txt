@@ -1,0 +1,1116 @@
+ rust-engine-1      | 2026-03-24T14:32:17.025534Z  INFO trading_engine: [execution] Fou
+nd 0 open positions on exchange
+ rust-engine-1      | 2026-03-24T14:32:17.025603Z  INFO trading_engine: [execution] 🔄
+Position reconciliation complete (0 positions synced)
+ rust-engine-1      | 2026-03-24T14:32:17.281094Z  INFO trading_engine::multi_exchange:
+:funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:32:18.421266Z  INFO trading_engine::multi_exchange:
+:ws_ingestion_multi: [ws-bybit] Connected
+ rust-engine-1      | 2026-03-24T14:32:18.421496Z  INFO trading_engine::multi_exchange:
+:ws_ingestion_multi: [ws-bybit] Subscribed to 3 symbols
+ rust-engine-1      | 2026-03-24T14:32:18.426057Z  INFO trading_engine::multi_exchange:
+:ws_ingestion_multi: [ws-bybit] Subscription confirmed
+ rust-engine-1      | 2026-03-24T14:32:18.493443Z  INFO trading_engine: [ws-gateio] Con
+nected, subscribing to 3 symbols
+ rust-engine-1      | 2026-03-24T14:32:18.553588Z  INFO trading_engine::multi_exchange:
+:ws_ingestion_multi: [ws-binance] Connected, subscribed to 3 symbols
+ python-services-1  | 2026-03-24 14:32:23.716 | INFO     | __main__:start:59 - ========
+====================================================
+ python-services-1  | 2026-03-24 14:32:23.740 | INFO     | __main__:start:60 - Cold Pat
+h Orchestrator starting (4vCPU VPS mode)
+ python-services-1  | 2026-03-24 14:32:23.798 | INFO     | __main__:start:61 - ========
+====================================================
+ python-services-1  | 2026-03-24 14:32:23.979 | INFO     | core.graceful_degradation:__
+init__:164 - GracefulDegradationManager initialized: check_interval=5.0s
+ python-services-1  | 2026-03-24 14:32:24.017 | INFO     | core.graceful_degradation:st
+art:188 - GracefulDegradationManager started
+ python-services-1  | 2026-03-24 14:32:24.018 | INFO     | __main__:_start_degradation_
+manager:154 - Graceful Degradation Manager started
+ rust-engine-1      | 2026-03-24T14:32:24.605089Z  INFO trading_engine::gateio_gateway:
+ [gateio-liq] Liquidation monitoring thread started (30s interval)
+ rust-engine-1      | 2026-03-24T14:32:24.605128Z  INFO trading_engine::gateio_gateway:
+ [gateio-reconcile] REST reconciliation thread started (60s interval)
+ python-services-1  | 2026-03-24 14:32:29.070 | INFO     | __main__:_start_fallback_hea
+lth_server:181 - Fallback health server listening on :8081
+ python-services-1  | 2026-03-24 14:32:29.281 | INFO     | analytics.pnl_attribution:__
+init__:197 - PnLAttributionEngine initialized
+ python-services-1  | 2026-03-24 14:32:29.281 | INFO     | __main__:_start_pnl_engine:1
+90 - PnL Attribution Engine initialized
+ python-services-1  | 2026-03-24 14:32:29.281 | INFO     | __main__:_init_ai_brain:572
+- AI Brain disabled (USE_AI=off)
+ python-services-1  | 2026-03-24 14:32:29.495 | INFO     | core.alpha_oracle:open:201 -
+ Signal queue initialized at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+ python-services-1  | 2026-03-24 14:32:29.495 | INFO     | core.alpha_oracle:start:518
+- Alpha Oracle started (confluence=75%, min_rr=2.0)
+ python-services-1  | 2026-03-24 14:32:29.495 | INFO     | __main__:_start_alpha_oracle
+:557 - Alpha Oracle initialized — ready to emit signals to SHM queue
+ python-services-1  | 2026-03-24 14:32:29.495 | INFO     | __main__:start:114 - All col
+d-path services started (5 tasks)
+ python-services-1  | 2026-03-24 14:32:29.496 | INFO     | __main__:_regime_detection_l
+oop:259 - Regime detection loop starting (interval=300s)
+ python-services-1  | 2026-03-24 14:32:29.497 | INFO     | __main__:_sentiment_analysis
+_loop:292 - Sentiment analysis loop starting (interval=900s)
+ python-services-1  | 2026-03-24 14:32:29.497 | INFO     | __main__:_alert_dispatcher_l
+oop:368 - Alert dispatcher starting
+ python-services-1  | 2026-03-24 14:32:30.395 | INFO     | __main__:_journal_sync_loop:
+423 - Trade journal sync starting (reading binary segment_*.dat files)
+ python-services-1  | 2026-03-24 14:32:30.397 | INFO     | __main__:_alpha_oracle_loop:
+722 - Alpha Oracle loop starting (60s evaluation cycle)
+ python-services-1  | 2026-03-24 14:32:30.397 | INFO     | __main__:_alpha_oracle_loop:
+725 - Alpha Oracle trading pairs: ['BTC_USDT', 'ETH_USDT', 'SOL_USDT']
+ rust-engine-1      | 2026-03-24T14:32:35.214500Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:32:38.111314Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:32:39.373565Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:32:40.893693Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:32:41.701155Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:32:46.861244Z  INFO trading_engine: [execution] Hea
+lth: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-24T14:32:46.930881Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930941Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930947Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930963Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930968Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930972Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:32:46.930981Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:32:47.193204Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:32:47.193267Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2973.93 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:32:47.271001Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:32:47.455811Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4978.17 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:32:47.476358Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:32:48.254905Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8893.25, exchanges=3, positions=0
+ python-services-1  | 2026-03-24 14:32:51.110 | INFO     | __main__:_init_strategy_ense
+mble:857 - Strategy ensemble initialized: 37/39 strategies loaded
+ python-services-1  | 2026-03-24 14:32:59.506 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 10 strategies fired for BTC_USDT (long=5, short=5)
+ python-services-1  | 2026-03-24 14:33:00.648 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=4, short=5)
+ python-services-1  | 2026-03-24 14:33:01.838 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 11 strategies fired for SOL_USDT (long=6, short=5)
+ rust-engine-1      | 2026-03-24T14:33:05.192902Z  INFO trading_engine::dashboard_serve
+r: [dashboard] Manual trade submitted: buy ETH_USDT 50.00 USDT SL=None TP=None
+ rust-engine-1      | 2026-03-24T14:33:05.194394Z  INFO trading_engine: [execution] Man
+ual trade received: buy ETH_USDT 50.00 USDT lev=25x SL=None TP=None
+ rust-engine-1      | 2026-03-24T14:33:05.293336Z  WARN trading_engine: [execution] Man
+ual trade: USDT→contracts conversion failed: Order below minimum size (min: 1)
+ rust-engine-1      | 2026-03-24T14:33:16.991338Z  INFO trading_engine::multi_exchange:
+:funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:33:17.227652Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227701Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227769Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227778Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227783Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227788Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:17.227800Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:33:17.227821Z  INFO trading_engine: [telemetry] Bri
+dge Health: status=healthy, metrics={"status":"healthy","uptime_secs":60,"channels":[]}
+ rust-engine-1      | 2026-03-24T14:33:18.545578Z  INFO trading_engine: [execution] Hea
+lth: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-24T14:33:18.637535Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:33:18.637590Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2973.93 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:18.720594Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:18.808297Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4978.17 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:18.823390Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:33:19.202431Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8893.25, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:33:24.370218Z  INFO trading_engine::dashboard_serve
+r: [dashboard] Manual trade submitted: buy ETH_USDT 500.00 USDT SL=None TP=None
+ rust-engine-1      | 2026-03-24T14:33:24.370483Z  INFO trading_engine: [execution] Man
+ual trade received: buy ETH_USDT 500.00 USDT lev=25x SL=None TP=None
+ rust-engine-1      | 2026-03-24T14:33:24.449047Z  INFO trading_engine: [execution] Man
+ual trade: 500.00 USDT × 25x leverage = 12500.00 notional → 5 contracts for ETH_USDT
+ rust-engine-1      | 2026-03-24T14:33:24.530168Z  WARN trading_engine: [execution] Man
+ual trade: failed to set leverage: Unknown error INVALID_ARGUMENT: cross_leverage_limit
+ only for cross-margin
+ rust-engine-1      | 2026-03-24T14:33:24.609449Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:24.688403Z  WARN trading_engine::gateio_gateway:
+ [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cle
+aning up
+ rust-engine-1      | 2026-03-24T14:33:29.610659Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r1 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:29.610739Z  WARN trading_engine::execution_gatew
+ay: Retryable error on attempt 1/5: Request timeout. Retrying in 120ms
+ rust-engine-1      | 2026-03-24T14:33:29.817609Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:34.818589Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r2 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:34.818636Z  WARN trading_engine::execution_gatew
+ay: Retryable error on attempt 2/5: Request timeout. Retrying in 240ms
+ rust-engine-1      | 2026-03-24T14:33:35.146908Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:40.148488Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r3 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:40.148534Z  WARN trading_engine::execution_gatew
+ay: Retryable error on attempt 3/5: Request timeout. Retrying in 480ms
+ rust-engine-1      | 2026-03-24T14:33:40.711730Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:45.713065Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r4 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:45.713101Z  WARN trading_engine::execution_gatew
+ay: Retryable error on attempt 4/5: Request timeout. Retrying in 960ms
+ rust-engine-1      | 2026-03-24T14:33:46.757093Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:47.312808Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312844Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312857Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312868Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312878Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312890Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:33:47.312900Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:33:51.757924Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r5 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:51.758018Z  WARN trading_engine::execution_gatew
+ay: Retryable error on attempt 5/5: Request timeout. Retrying in 1920ms
+ rust-engine-1      | 2026-03-24T14:33:53.783034Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Failed to set leverage 25x for ETH_USDT: Unknown error INVALID_ARGUMENT: c
+ross_leverage_limit only for cross-margin (continuing)
+ rust-engine-1      | 2026-03-24T14:33:58.783529Z  WARN trading_engine::gateio_gateway:
+ [gateio-ws] Timeout waiting for order r6 ACK (5000ms)
+ rust-engine-1      | 2026-03-24T14:33:58.783586Z  WARN trading_engine: [execution] Man
+ual trade failed: Request timeout
+ rust-engine-1      | 2026-03-24T14:33:58.783686Z  INFO trading_engine: [execution] Hea
+lth: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-24T14:33:58.875549Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:33:58.875594Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2973.93 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:58.957007Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:59.038694Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4978.17 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:33:59.050196Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:33:59.486471Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8893.25, exchanges=3, positions=0
+ python-services-1  | 2026-03-24 14:34:03.000 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=7, short=2)
+ python-services-1  | 2026-03-24 14:34:04.140 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 7 strategies fired for ETH_USDT (long=6, short=1)
+ python-services-1  | 2026-03-24 14:34:05.224 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 11 strategies fired for SOL_USDT (long=7, short=4)
+ rust-engine-1      | 2026-03-24T14:34:16.999349Z  INFO trading_engine::multi_exchange:
+:funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:34:17.411160Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411200Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411206Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411214Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411222Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411230Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:17.411240Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:34:17.411250Z  INFO trading_engine: [telemetry] Bri
+dge Health: status=healthy, metrics={"status":"healthy","uptime_secs":120,"channels":[]
+}
+ rust-engine-1      | 2026-03-24T14:34:24.770626Z  WARN trading_engine::gateio_gateway:
+ [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cle
+aning up
+ rust-engine-1      | 2026-03-24T14:34:29.569698Z  INFO trading_engine: [execution] Hea
+lth: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-24T14:34:29.683371Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:34:29.683413Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2973.93 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:34:29.764145Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:34:29.858019Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4978.17 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:34:29.967906Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:34:30.482028Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8893.25, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:34:40.572621Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.53 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:34:40.684591Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2973.93
+ rust-engine-1      | 2026-03-24T14:34:40.867832Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2973.93 short_bal=$4978.17 notional=$178.44 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:34:40.902254Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:34:40.977633Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:34:41.101369Z  INFO trading_engine::bybit_gateway:
+Bybit order b4d3f429-d347-4732-a82b-1b0350ca39dd submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 123690µs
+ rust-engine-1      | 2026-03-24T14:34:41.204920Z  INFO trading_engine::binance_gateway
+: Binance order 8612073673 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 227176us
+ rust-engine-1      | 2026-03-24T14:34:41.204964Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.0400
+ rust-engine-1      | 2026-03-24T14:34:41.204978Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:34:41.574041Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:34:41.608066Z  INFO trading_engine::bybit_gateway:
+Bybit order a776e599-1e93-4b84-8e1a-49032bb9c48e submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 33735µs
+ rust-engine-1      | 2026-03-24T14:34:41.683456Z  INFO trading_engine::binance_gateway
+: Binance order 8612073711 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 109000us
+ rust-engine-1      | 2026-03-24T14:34:46.577342Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.52 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:34:46.688364Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2971.65
+ rust-engine-1      | 2026-03-24T14:34:46.868066Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2971.65 short_bal=$4976.40 notional=$178.30 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:34:46.876284Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:34:46.951798Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:34:47.063919Z  INFO trading_engine::bybit_gateway:
+Bybit order 194b6c38-07c0-4162-b9e4-9c10369e7310 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 112074µs
+ rust-engine-1      | 2026-03-24T14:34:47.172164Z  INFO trading_engine::binance_gateway
+: Binance order 8612074245 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 220299us
+ rust-engine-1      | 2026-03-24T14:34:47.172209Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.2300
+ rust-engine-1      | 2026-03-24T14:34:47.172279Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:34:47.446590Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446628Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446633Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446637Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446642Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446646Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:34:47.446652Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:34:47.578362Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:34:47.606058Z  INFO trading_engine::bybit_gateway:
+Bybit order 1cd9ad66-3ee4-4ba0-9cf2-5bf0226f167a submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 27569µs
+ rust-engine-1      | 2026-03-24T14:34:47.699124Z  INFO trading_engine::binance_gateway
+: Binance order 8612074267 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 120528us
+ rust-engine-1      | 2026-03-24T14:34:54.583779Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.52 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:34:54.694343Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2968.99
+ rust-engine-1      | 2026-03-24T14:34:54.873645Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2968.99 short_bal=$4974.63 notional=$178.14 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:34:54.882018Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:34:54.956109Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:34:55.065374Z  INFO trading_engine::bybit_gateway:
+Bybit order 8fdc06e8-98b5-4f64-8297-4488fbdb2940 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 109194µs
+ rust-engine-1      | 2026-03-24T14:34:55.172627Z  INFO trading_engine::binance_gateway
+: Binance order 8612074587 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 216429us
+ rust-engine-1      | 2026-03-24T14:34:55.172672Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.7550
+ rust-engine-1      | 2026-03-24T14:34:55.172683Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:34:55.583787Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:34:55.591082Z  INFO trading_engine::bybit_gateway:
+Bybit order f77867d7-89b4-4583-8da1-d5f4989c8eac submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 7155µs
+ rust-engine-1      | 2026-03-24T14:34:55.698502Z  INFO trading_engine::binance_gateway
+: Binance order 8612074655 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 114484us
+ rust-engine-1      | 2026-03-24T14:34:59.585131Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.51 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:34:59.695271Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2966.78
+ rust-engine-1      | 2026-03-24T14:34:59.874631Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2966.78 short_bal=$4972.86 notional=$178.01 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:34:59.883603Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:34:59.958285Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:35:00.140438Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:35:00.565550Z  INFO trading_engine: [execution] Hea
+lth: submitted=6, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-24T14:35:00.673109Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2966.78
+ rust-engine-1      | 2026-03-24T14:35:00.673167Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2966.78 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:00.754389Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:00.832805Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4972.86 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:00.948566Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2966.78
+ rust-engine-1      | 2026-03-24T14:35:01.562437Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8880.78, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:35:03.654329Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.45 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:03.771118Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2966.78
+ rust-engine-1      | 2026-03-24T14:35:03.950314Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2966.78 short_bal=$4972.86 notional=$178.01 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:03.959960Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:04.044925Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:35:04.227618Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ python-services-1  | 2026-03-24 14:35:06.402 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 8 strategies fired for BTC_USDT (long=8, short=0)
+ python-services-1  | 2026-03-24 14:35:07.436 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 7 strategies fired for ETH_USDT (long=6, short=1)
+ python-services-1  | 2026-03-24 14:35:08.623 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=7, short=3)
+ rust-engine-1      | 2026-03-24T14:35:10.072944Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:35:10.366281Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:35:10.635049Z  INFO trading_engine::dashboard_serve
+r: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:35:12.663021Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.63 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:12.674012Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2966.78
+ rust-engine-1      | 2026-03-24T14:35:12.764886Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2966.78 short_bal=$4972.86 notional=$178.01 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:12.879664Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:13.057900Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:35:13.073828Z  INFO trading_engine::bybit_gateway:
+Bybit order 9bf20f6d-644c-49c2-a7be-d0ef5824bd09 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 15878µs
+ rust-engine-1      | 2026-03-24T14:35:13.227953Z  INFO trading_engine::binance_gateway
+: Binance order 8612075780 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 169929us
+ rust-engine-1      | 2026-03-24T14:35:13.228197Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.1200
+ rust-engine-1      | 2026-03-24T14:35:13.228280Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:13.663586Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:13.791879Z  INFO trading_engine::bybit_gateway:
+Bybit order 516b554a-ae6c-4aad-b099-af9a6fce180d submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 117058µs
+ rust-engine-1      | 2026-03-24T14:35:13.910041Z  INFO trading_engine::binance_gateway
+: Binance order 8612075822 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 235202us
+ rust-engine-1      | 2026-03-24T14:35:17.001736Z  INFO trading_engine::multi_exchange:
+:funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:35:17.533840Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533895Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533901Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533906Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533910Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533915Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:17.533921Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:35:17.533930Z  INFO trading_engine: [telemetry] Bri
+dge Health: status=healthy, metrics={"status":"healthy","uptime_secs":180,"channels":[]
+}
+ rust-engine-1      | 2026-03-24T14:35:17.671777Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.76 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:17.682874Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.43
+ rust-engine-1      | 2026-03-24T14:35:17.764328Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2964.43 short_bal=$4970.67 notional=$177.87 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:17.879729Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:18.053504Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:18.069399Z  INFO trading_engine::bybit_gateway:
+Bybit order 6ea94242-925d-4b48-91ae-9036c7e42c89 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 15802µs
+ rust-engine-1      | 2026-03-24T14:35:18.179822Z  INFO trading_engine::binance_gateway
+: Binance order 1822138899 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 126140us
+ rust-engine-1      | 2026-03-24T14:35:18.179855Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.8400
+ rust-engine-1      | 2026-03-24T14:35:18.179866Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:18.675386Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:18.790422Z  INFO trading_engine::bybit_gateway:
+Bybit order 01af855f-5ff9-46cf-9d40-727fbf58f470 submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 114872µs
+ rust-engine-1      | 2026-03-24T14:35:18.884877Z  INFO trading_engine::binance_gateway
+: Binance order 1822138999 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 209316us
+ rust-engine-1      | 2026-03-24T14:35:20.677168Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.68 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:20.686556Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.38
+ rust-engine-1      | 2026-03-24T14:35:20.767209Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2964.38 short_bal=$4970.58 notional=$177.86 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:20.876132Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:21.049278Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:21.057636Z  INFO trading_engine::bybit_gateway:
+Bybit order 6ed5f6ce-ff82-4b1f-9546-019dcd3bcc16 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 8306µs
+ rust-engine-1      | 2026-03-24T14:35:21.159997Z  INFO trading_engine::binance_gateway
+: Binance order 1822139269 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 110590us
+ rust-engine-1      | 2026-03-24T14:35:21.160400Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.8450
+ rust-engine-1      | 2026-03-24T14:35:21.160427Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:21.677769Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:21.802552Z  INFO trading_engine::bybit_gateway:
+Bybit order 8e91b208-9736-4bd7-9741-c3e2d822956a submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 124037µs
+ rust-engine-1      | 2026-03-24T14:35:21.852785Z  INFO trading_engine::binance_gateway
+: Binance order 1822139279 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 174257us
+ rust-engine-1      | 2026-03-24T14:35:22.678667Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.59 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:22.692191Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.10
+ rust-engine-1      | 2026-03-24T14:35:22.774876Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2964.10 short_bal=$4970.49 notional=$177.85 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:22.884434Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:23.067306Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:35:23.143285Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:35:24.852098Z  WARN trading_engine::gateio_gateway:
+ [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cle
+aning up
+ rust-engine-1      | 2026-03-24T14:35:26.694775Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.62 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:26.809687Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.17
+ rust-engine-1      | 2026-03-24T14:35:26.999652Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2964.17 short_bal=$4970.49 notional=$177.85 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:27.009159Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:27.085020Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:27.202534Z  INFO trading_engine::bybit_gateway:
+Bybit order b2a2e158-b8bd-47e4-b40f-0659f18f9460 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 117473µs
+ rust-engine-1      | 2026-03-24T14:35:27.333190Z  INFO trading_engine::binance_gateway
+: Binance order 1822139429 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 248112us
+ rust-engine-1      | 2026-03-24T14:35:27.333243Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.9000
+ rust-engine-1      | 2026-03-24T14:35:27.333255Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:27.695293Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:27.705421Z  INFO trading_engine::bybit_gateway:
+Bybit order a717356a-4333-4f41-9350-1c464d280c13 submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 10019µs
+ rust-engine-1      | 2026-03-24T14:35:27.815913Z  INFO trading_engine::binance_gateway
+: Binance order 1822139452 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 120449us
+ rust-engine-1      | 2026-03-24T14:35:31.650066Z  INFO trading_engine: [execution] Hea
+lth: submitted=14, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+ slots=0/5
+ rust-engine-1      | 2026-03-24T14:35:31.842447Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.13
+ rust-engine-1      | 2026-03-24T14:35:31.842484Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2964.13 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:31.923311Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:32.106356Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4970.41 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:35:32.116209Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.13
+ rust-engine-1      | 2026-03-24T14:35:32.939842Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8875.67, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:35:34.030850Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.74 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:34.042792Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2964.06
+ rust-engine-1      | 2026-03-24T14:35:34.123039Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2964.06 short_bal=$4970.41 notional=$177.84 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:34.233510Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:34.408404Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:35:34.417263Z  INFO trading_engine::bybit_gateway:
+Bybit order a7119a54-fd73-4fa3-a37e-9dd1ee4028e8 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 8812µs
+ rust-engine-1      | 2026-03-24T14:35:34.610044Z  INFO trading_engine::binance_gateway
+: Binance order 8612078060 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 201489us
+ rust-engine-1      | 2026-03-24T14:35:34.610088Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.0450
+ rust-engine-1      | 2026-03-24T14:35:34.610100Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:35.030870Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:35.141331Z  INFO trading_engine::bybit_gateway:
+Bybit order dcaef3da-9e5f-421d-96df-93a2204c4296 submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 110323µs
+ rust-engine-1      | 2026-03-24T14:35:35.219430Z  INFO trading_engine::binance_gateway
+: Binance order 8612078070 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 188408us
+ rust-engine-1      | 2026-03-24T14:35:42.033867Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.61 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:42.044611Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2962.03
+ rust-engine-1      | 2026-03-24T14:35:42.126861Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2962.03 short_bal=$4967.70 notional=$177.72 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:42.237112Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:42.413911Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:35:42.507571Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:35:46.036818Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.77 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:46.150571Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2962.03
+ rust-engine-1      | 2026-03-24T14:35:46.371205Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2962.03 short_bal=$4967.70 notional=$177.72 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:46.379299Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:46.456662Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:35:46.565652Z  INFO trading_engine::bybit_gateway:
+Bybit order 9da96437-4fe7-4ef2-a660-f1e5ba19e236 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 108888µs
+ rust-engine-1      | 2026-03-24T14:35:46.683915Z  INFO trading_engine::binance_gateway
+: Binance order 8612078967 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 227125us
+ rust-engine-1      | 2026-03-24T14:35:46.683964Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.3800
+ rust-engine-1      | 2026-03-24T14:35:46.683976Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:47.037914Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:47.046600Z  INFO trading_engine::bybit_gateway:
+Bybit order 9caa488e-b0d2-44bd-87d2-ac0edf6db15c submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 8550µs
+ rust-engine-1      | 2026-03-24T14:35:47.162384Z  INFO trading_engine::binance_gateway
+: Binance order 8612079003 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 124260us
+ rust-engine-1      | 2026-03-24T14:35:47.598861Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598892Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598901Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598909Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598917Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598926Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:35:47.598935Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:35:48.039483Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.54 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:48.156373Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2959.65
+ rust-engine-1      | 2026-03-24T14:35:48.339154Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2959.65 short_bal=$4964.57 notional=$177.58 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:48.350582Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:48.426238Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:48.547502Z  INFO trading_engine::bybit_gateway:
+Bybit order 37ed1f4e-8d0b-4dcb-bc2d-9e02b6306516 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 121109µs
+ rust-engine-1      | 2026-03-24T14:35:48.620639Z  INFO trading_engine::binance_gateway
+: Binance order 1822139944 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 194230us
+ rust-engine-1      | 2026-03-24T14:35:48.620694Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.9000
+ rust-engine-1      | 2026-03-24T14:35:48.620729Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:49.040301Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.71 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:49.049362Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2929.71
+ rust-engine-1      | 2026-03-24T14:35:49.131749Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2929.71 short_bal=$4934.65 notional=$175.78 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:49.240369Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:49.415764Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:35:49.423944Z  INFO trading_engine::bybit_gateway:
+Bybit order beebda70-b2ae-4c6d-ad5a-3c53e4fca7ef submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 7783µs
+ rust-engine-1      | 2026-03-24T14:35:49.533687Z  INFO trading_engine::binance_gateway
+: Binance order 8612079046 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 117449us
+ rust-engine-1      | 2026-03-24T14:35:49.534293Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.4600
+ rust-engine-1      | 2026-03-24T14:35:49.535040Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:50.040451Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.54 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:50.163784Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2214.95
+ rust-engine-1      | 2026-03-24T14:35:50.345958Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2214.95 short_bal=$4216.97 notional=$132.90 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:50.354925Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:50.432835Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:35:50.614522Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:35:50.614560Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:50.622243Z  INFO trading_engine::bybit_gateway:
+Bybit order 07fbedd4-d118-47e7-ba2f-fd66d7aae5fd submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 7588µs
+ rust-engine-1      | 2026-03-24T14:35:50.744807Z  INFO trading_engine::binance_gateway
+: Binance order 8612079053 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 130056us
+ rust-engine-1      | 2026-03-24T14:35:52.041067Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:52.151244Z  INFO trading_engine::bybit_gateway:
+Bybit order dbdbede0-861e-45b1-b1e0-b7695e469605 submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 110054µs
+ rust-engine-1      | 2026-03-24T14:35:52.233420Z  INFO trading_engine::binance_gateway
+: Binance order 1822139951 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 192220us
+ rust-engine-1      | 2026-03-24T14:35:53.041296Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.41 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:53.051952Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2957.45
+ rust-engine-1      | 2026-03-24T14:35:53.131051Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2957.45 short_bal=$4961.63 notional=$177.45 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:53.240146Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:53.417383Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:53.426052Z  INFO trading_engine::bybit_gateway:
+Bybit order 827aedac-91c6-4733-aca0-2120b3092e66 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 8614µs
+ rust-engine-1      | 2026-03-24T14:35:53.534611Z  INFO trading_engine::binance_gateway
+: Binance order 1822139952 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 117070us
+ rust-engine-1      | 2026-03-24T14:35:53.534653Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.9000
+ rust-engine-1      | 2026-03-24T14:35:53.534668Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:54.041739Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:54.161323Z  INFO trading_engine::bybit_gateway:
+Bybit order ebc5c36c-6034-47ee-b664-d6c4c8e7f6a9 submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 119462µs
+ rust-engine-1      | 2026-03-24T14:35:54.248611Z  INFO trading_engine::binance_gateway
+: Binance order 1822139972 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 206732us
+ rust-engine-1      | 2026-03-24T14:35:57.043807Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.70 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:57.058060Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2957.38
+ rust-engine-1      | 2026-03-24T14:35:57.137033Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2957.38 short_bal=$4961.55 notional=$177.44 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:57.252762Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:57.429491Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:35:57.438921Z  INFO trading_engine::bybit_gateway:
+Bybit order 92f2eb21-7fc3-48d7-b395-39f7b98d5064 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 9383µs
+ rust-engine-1      | 2026-03-24T14:35:57.551349Z  INFO trading_engine::binance_gateway
+: Binance order 8612079587 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 121736us
+ rust-engine-1      | 2026-03-24T14:35:57.551409Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.3400
+ rust-engine-1      | 2026-03-24T14:35:57.551423Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:35:58.043897Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:35:58.152940Z  INFO trading_engine::bybit_gateway:
+Bybit order 62f37cf0-3696-4157-812e-7ce0056032db submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 108907µs
+ rust-engine-1      | 2026-03-24T14:35:58.239271Z  INFO trading_engine::binance_gateway
+: Binance order 8612079665 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 195227us
+ rust-engine-1      | 2026-03-24T14:35:59.044298Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.33 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:35:59.054696Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2954.66
+ rust-engine-1      | 2026-03-24T14:35:59.133576Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2954.66 short_bal=$4958.54 notional=$177.28 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:35:59.244691Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:35:59.420390Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:35:59.429211Z  INFO trading_engine::bybit_gateway:
+Bybit order 485c014e-63d3-46c3-aec0-dbf00bc3c20b submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 8759µs
+ rust-engine-1      | 2026-03-24T14:35:59.552437Z  INFO trading_engine::binance_gateway
+: Binance order 1822140097 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 131904us
+ rust-engine-1      | 2026-03-24T14:35:59.552485Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.8750
+ rust-engine-1      | 2026-03-24T14:35:59.552497Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:01.049829Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:01.167160Z  INFO trading_engine::bybit_gateway:
+Bybit order c7d0554e-cad9-4a93-ae93-d6f94b777bc9 submitted: Sell 1.000 SOLUSDT @ Some(0
+w Enable Watch
+ rust-engine-1      | 2026-03-24T14:36:01.331317Z  INFO trading_engine::binance_gateway
+: Binance order 1822140145 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 279972us
+ rust-engine-1      | 2026-03-24T14:36:03.030036Z  INFO trading_engine: [execution] Hea
+lth: submitted=28, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+ slots=0/5
+ rust-engine-1      | 2026-03-24T14:36:03.125197Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2954.51
+ rust-engine-1      | 2026-03-24T14:36:03.125234Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Bybit balance: $2954.51 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:03.206386Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:03.290762Z  INFO trading_engine::multi_exchange:
+:margin_monitor: [margin] Binance balance: $4958.45 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:03.402085Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2954.51
+ rust-engine-1      | 2026-03-24T14:36:03.921020Z  INFO trading_engine: [execution] Mul
+ti-exchange health: total_balance=$8854.10, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:36:04.006238Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.69 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:04.116661Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2954.40
+ rust-engine-1      | 2026-03-24T14:36:04.297012Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2954.40 short_bal=$4958.45 notional=$177.26 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:04.307308Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:04.383529Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:36:04.494918Z  INFO trading_engine::bybit_gateway:
+Bybit order 15bb0cbc-f936-4861-acb9-d46f26572bad submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 111340µs
+ rust-engine-1      | 2026-03-24T14:36:04.591606Z  INFO trading_engine::binance_gateway
+: Binance order 8612080239 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 208007us
+ rust-engine-1      | 2026-03-24T14:36:04.591646Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.9600
+ rust-engine-1      | 2026-03-24T14:36:04.591658Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:05.006424Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:05.015429Z  INFO trading_engine::bybit_gateway:
+Bybit order 63f9e997-ec3f-46ac-989a-e4b0e6097415 submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 8887µs
+ rust-engine-1      | 2026-03-24T14:36:05.104014Z  INFO trading_engine::binance_gateway
+: Binance order 8612080245 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 97377us
+ rust-engine-1      | 2026-03-24T14:36:06.006601Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: SOL_USDT z=2.32 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:06.121309Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2952.78
+ rust-engine-1      | 2026-03-24T14:36:06.309411Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2952.78 short_bal=$4955.31 notional=$177.17 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:06.319852Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for SOLUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:06.405537Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for SOLUSDT
+ rust-engine-1      | 2026-03-24T14:36:06.554539Z  INFO trading_engine::bybit_gateway:
+Bybit order 97b1bc7b-537d-46c8-acc9-e9cb6f2f3340 submitted: Buy 1.000 SOLUSDT @ Some(50
+000.0) | 148947µs
+ rust-engine-1      | 2026-03-24T14:36:06.642337Z  INFO trading_engine::binance_gateway
+: Binance order 1822140269 submitted: SELL 1.000 SOLUSDT @ Some(50000.0) | 236728us
+ rust-engine-1      | 2026-03-24T14:36:06.642383Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=44.9450
+ rust-engine-1      | 2026-03-24T14:36:06.642397Z  INFO trading_engine: [stat-arb] ENTR
+Y: SOL_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:07.006965Z  INFO trading_engine: [stat-arb] EXIT
+: SOL_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:07.016365Z  INFO trading_engine::bybit_gateway:
+Bybit order 62a02d5e-babe-4432-b38e-d67353f1734b submitted: Sell 1.000 SOLUSDT @ Some(0
+.0) | 9269µs
+ rust-engine-1      | 2026-03-24T14:36:07.123123Z  INFO trading_engine::binance_gateway
+: Binance order 1822140278 submitted: BUY 1.000 SOLUSDT @ Some(0.0) | 115935us
+ rust-engine-1      | 2026-03-24T14:36:09.008338Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: ETH_USDT z=2.65 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:09.171913Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2952.79
+ rust-engine-1      | 2026-03-24T14:36:09.357267Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2952.79 short_bal=$4955.19 notional=$177.17 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:09.366242Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:09.446241Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:36:09.558073Z  INFO trading_engine::bybit_gateway:
+Bybit order 40b7538b-acb7-4e6d-9665-f0aadd27a445 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 111698µs
+ rust-engine-1      | 2026-03-24T14:36:09.635986Z  INFO trading_engine::binance_gateway
+: Binance order 8612080284 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 189591us
+ rust-engine-1      | 2026-03-24T14:36:09.636030Z  INFO trading_engine::multi_exchange:
+:stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1066.7850
+ rust-engine-1      | 2026-03-24T14:36:09.636098Z  INFO trading_engine: [stat-arb] ENTR
+Y: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ python-services-1  | 2026-03-24 14:36:09.814 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 8 strategies fired for BTC_USDT (long=7, short=1)
+ rust-engine-1      | 2026-03-24T14:36:10.009096Z  INFO trading_engine: [stat-arb] EXIT
+: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:10.024447Z  INFO trading_engine::bybit_gateway:
+Bybit order 0ddea37d-9f7c-4fe8-9753-fc73c48a5cac submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 15234µs
+ rust-engine-1      | 2026-03-24T14:36:10.100070Z  INFO trading_engine::binance_gateway
+: Binance order 8612080309 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 90767us
+ python-services-1  | 2026-03-24 14:36:10.929 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=6, short=2)
+ python-services-1  | 2026-03-24 14:36:12.053 | INFO     | __main__:_evaluate_strategie
+s_for_symbol:1008 - Alpha Oracle: 11 strategies fired for SOL_USDT (long=7, short=4)
+ rust-engine-1      | 2026-03-24T14:36:16.991432Z  INFO trading_engine::multi_exchange:
+:funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:36:17.683091Z  INFO trading_engine::latency_tracker
+: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683123Z  INFO trading_engine::latency_tracker
+: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683128Z  INFO trading_engine::latency_tracker
+: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683134Z  INFO trading_engine::latency_tracker
+: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683139Z  INFO trading_engine::latency_tracker
+: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683144Z  INFO trading_engine::latency_tracker
+: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:17.683149Z  INFO trading_engine: [telemetry] Lif
+ecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:36:17.683158Z  INFO trading_engine: [telemetry] Bri
+dge Health: status=healthy, metrics={"status":"healthy","uptime_secs":240,"channels":[]
+}
+ rust-engine-1      | 2026-03-24T14:36:24.934438Z  WARN trading_engine::gateio_gateway:
+ [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cle
+aning up
+ rust-engine-1      | 2026-03-24T14:36:26.361899Z  INFO trading_engine: [stat-arb] Entr
+y opportunity: BTC_USDT z=2.69 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:26.480644Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2950.40
+ rust-engine-1      | 2026-03-24T14:36:26.692551Z  INFO trading_engine: [stat-arb] Posi
+tion sizing: long_bal=$2950.40 short_bal=$4952.14 notional=$177.02 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:26.704914Z  INFO trading_engine::bybit_gateway:
+Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:26.781175Z  INFO trading_engine::binance_gateway
+: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:36:26.958861Z  WARN trading_engine: [stat-arb] Both
+ legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:36:34.006144Z  INFO trading_engine: [execution] Health: submitted=34, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+ slots=0/5
+ rust-engine-1      | 2026-03-24T14:36:34.096447Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2950.40
+ rust-engine-1      | 2026-03-24T14:36:34.096490Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $2950.40 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:34.177477Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:34.257866Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $4952.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-24T14:36:34.372940Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2950.40
+ rust-engine-1      | 2026-03-24T14:36:34.954818Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$8843.68, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-24T14:36:37.040868Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=2.78 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:37.184541Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2950.40
+ rust-engine-1      | 2026-03-24T14:36:37.367346Z  INFO trading_engine: [stat-arb] Position sizing: long_bal=$2950.40 short_bal=$4952.14 notional=$177.02 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:37.375203Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:37.457369Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:36:37.573433Z  INFO trading_engine::bybit_gateway: Bybit order c3d921e2-fd18-495c-81ad-7d0e951635b0 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 116006µs
+ rust-engine-1      | 2026-03-24T14:36:37.678957Z  INFO trading_engine::binance_gateway: Binance order 8612082882 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 221509us
+ rust-engine-1      | 2026-03-24T14:36:37.679004Z  INFO trading_engine::multi_exchange::stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.6800
+ rust-engine-1      | 2026-03-24T14:36:37.679020Z  INFO trading_engine: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:38.040963Z  INFO trading_engine: [stat-arb] EXIT: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:38.049484Z  INFO trading_engine::bybit_gateway: Bybit order 6194f14d-4ed9-4b32-9300-92347b267672 submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 8378µs
+ rust-engine-1      | 2026-03-24T14:36:38.182455Z  INFO trading_engine::binance_gateway: Binance order 8612082926 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 141025us
+ rust-engine-1      | 2026-03-24T14:36:40.047920Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=2.74 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:40.204373Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2948.78
+ rust-engine-1      | 2026-03-24T14:36:40.392933Z  INFO trading_engine: [stat-arb] Position sizing: long_bal=$2948.78 short_bal=$4949.09 notional=$176.93 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:40.407573Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:40.484616Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:36:40.596503Z  INFO trading_engine::bybit_gateway: Bybit order 458507ea-6123-48c4-9174-085a934a47cf submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 111832µs
+ rust-engine-1      | 2026-03-24T14:36:40.695488Z  INFO trading_engine::binance_gateway: Binance order 8612083229 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 210779us
+ rust-engine-1      | 2026-03-24T14:36:40.695537Z  INFO trading_engine::multi_exchange::stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.2400
+ rust-engine-1      | 2026-03-24T14:36:40.695552Z  INFO trading_engine: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:41.048425Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=2.67 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:41.058156Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2234.87
+ rust-engine-1      | 2026-03-24T14:36:41.136967Z  INFO trading_engine: [stat-arb] Position sizing: long_bal=$2234.87 short_bal=$4233.86 notional=$134.09 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:41.251030Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:41.426461Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+ rust-engine-1      | 2026-03-24T14:36:41.503291Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+ rust-engine-1      | 2026-03-24T14:36:41.503331Z  INFO trading_engine: [stat-arb] EXIT: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:41.614839Z  INFO trading_engine::bybit_gateway: Bybit order 5fb7ff82-deae-44ed-a8c2-6ef027baf8d7 submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 111419µs
+ rust-engine-1      | 2026-03-24T14:36:41.755074Z  INFO trading_engine::binance_gateway: Binance order 8612083306 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 251643us
+ rust-engine-1      | 2026-03-24T14:36:47.740423Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740460Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740466Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740470Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740475Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740480Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0
+µs
+ rust-engine-1      | 2026-03-24T14:36:47.740485Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:36:48.053295Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=2.74 (long=Bybit, short=Binance)
+ rust-engine-1      | 2026-03-24T14:36:48.063284Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $2946.55
+ rust-engine-1      | 2026-03-24T14:36:48.282702Z  INFO trading_engine: [stat-arb] Position sizing: long_bal=$2946.55 short_bal=$4946.03 notional=$176.79 mid_price=50000.00 s
+ize=1 lev=3x
+ rust-engine-1      | 2026-03-24T14:36:48.391526Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+ rust-engine-1      | 2026-03-24T14:36:48.568410Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+ rust-engine-1      | 2026-03-24T14:36:48.576354Z  INFO trading_engine::bybit_gateway: Bybit order b165ab70-9dc4-44c9-a9c1-91449300e344 submitted: Buy 1.000 ETHUSDT @ Some(50
+000.0) | 7900µs
+ rust-engine-1      | 2026-03-24T14:36:48.671944Z  INFO trading_engine::binance_gateway: Binance order 8612083733 submitted: SELL 1.000 ETHUSDT @ Some(50000.0) | 103422us
+ rust-engine-1      | 2026-03-24T14:36:48.671994Z  INFO trading_engine::multi_exchange::stat_arb: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000) size=0
+ spread=1067.3050
+ rust-engine-1      | 2026-03-24T14:36:48.672012Z  INFO trading_engine: [stat-arb] ENTRY: ETH_USDT long@Bybit (0.0000) short@Binance (0.0000)
+ rust-engine-1      | 2026-03-24T14:36:49.054227Z  INFO trading_engine: [stat-arb] EXIT: ETH_USDT reason=MeanReversion hours_open=0.0
+ rust-engine-1      | 2026-03-24T14:36:49.164601Z  INFO trading_engine::bybit_gateway: Bybit order e19b38db-5b86-40c2-b55f-a9ad6a730e06 submitted: Sell 1.000 ETHUSDT @ Some(0
+.0) | 110246µs
+ rust-engine-1      | 2026-03-24T14:36:49.254189Z  INFO trading_engine::binance_gateway: Binance order 8612083740 submitted: BUY 1.000 ETHUSDT @ Some(0.0) | 199823us
+ rust-engine-1      | 2026-03-24T14:37:01.661983Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:37:01.664849Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:37:01.993022Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:37:03.528746Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-24T14:37:03.812052Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-24T14:37:04.100437Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ python-services-1  | 2026-03-24 14:37:13.139 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 6 strategies fired for BTC_USDT (long=3, short=3)
+ python-services-1  | 2026-03-24 14:37:14.201 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=6, short=2)
+ python-services-1  | 2026-03-24 14:37:15.235 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 12 strategies fired for SOL_USDT (long=7, short=5)
+ postgres-1         | 2026-03-24 14:37:15.619 UTC [27] LOG:  checkpoint starting: time
+ postgres-1         | 2026-03-24 14:37:15.681 UTC [27] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.012 s, sync=0.005 s, total=0.062 s; sync files=2, longest=0.003 s, average=0.003 s; distance=0 kB, estimate=0 kB; lsn=0/19A35C8, redo lsn=0/19A3590
+ rust-engine-1      | 2026-03-24T14:37:16.991350Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-24T14:37:17.799341Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799377Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799386Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799394Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799402Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799411Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:17.799420Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-24T14:37:17.799431Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":301,"channels":[]}
+ rust-engine-1      | 2026-03-24T14:37:25.025577Z  WARN trading_engine::gateio_gateway: [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cleaning up
+ rust-engine-1      | 2026-03-24T14:37:47.833161Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833299Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833329Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833354Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833374Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833409Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-24T14:37:47.833438Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ Gracefully stopping... (press Ctrl+C again to force)
+ [+] Stopping 4/4
+ ✔ Container crypto_trading_bot-python-services-1  Stopped                                                                                                                                                                         2.3s  ✔ Container crypto_trading_bot-postgres-1         Stopped                                                                                                                                                                         0.5s  ✔ Container crypto_trading_bot-rust-engine-1      Stopped                                                                                                                                                                        10.3s  ✔ Container crypto_trading_bot-redis-1            Stopped                                                                                                                                                                         0.4s root@ubuntu-s-4vcpu-8gb-sgp1-01:~/tradings/crypto_trading_bot#
