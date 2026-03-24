@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::execution_gateway::{
     AdaptiveRateLimiter, ExchangeError, ExecutionGateway, OrderIntent, OrderResult, 
-    OrderSide, OrderType, Position,
+    OrderSide, OrderType, Position, RustTicker,
 };
 
 const BINANCE_FUTURES_BASE_URL: &str = "https://fapi.binance.com";
@@ -362,6 +362,25 @@ impl ExecutionGateway for BinanceGateway {
         Ok(None)
     }
     
+    async fn get_ticker(&self, symbol: &str) -> Result<RustTicker, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        // Binance public endpoint — no signature needed, use raw GET
+        let url = format!("{}/fapi/v1/ticker/bookTicker?symbol={}", self.base_url(), normalized);
+        let response = self.client.get(&url).send().await
+            .map_err(|_| ExchangeError::Timeout)?;
+        let body: Value = response.json().await.map_err(|e| ExchangeError::Unknown {
+            code: "JSON_PARSE".into(), message: e.to_string(),
+        })?;
+
+        let bid = body.get("bidPrice").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+        let ask = body.get("askPrice").and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+        let last = if bid > 0.0 && ask > 0.0 { (bid + ask) / 2.0 } else { bid.max(ask) };
+
+        Ok(RustTicker { last, bid, ask, volume_24h: 0.0 })
+    }
+
     async fn set_leverage(&self, symbol: &str, leverage: i32) -> Result<(), ExchangeError> {
         let normalized = Self::normalize_symbol(symbol);
         let params = format!("symbol={}&leverage={}", normalized, leverage);

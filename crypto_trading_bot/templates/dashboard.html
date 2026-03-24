@@ -274,11 +274,21 @@
               <label class="btn btn-outline-danger btn-sm" for="mt-side-sell">Sell / Short</label>
             </div>
           </div>
-          <!-- Size + Leverage row -->
+          <!-- Exchange selector -->
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Exchange</label>
+            <select id="mt-exchange" class="form-select form-select-sm bg-dark text-light border-secondary">
+              <option value="" selected>Default (Gate.io)</option>
+              <option value="gateio">Gate.io</option>
+              <option value="binance">Binance</option>
+              <option value="bybit">Bybit</option>
+            </select>
+          </div>
+          <!-- Size (USDT) + Leverage row -->
           <div class="row g-2 mb-2">
             <div class="col-6">
-              <label class="form-label small text-muted mb-1">Size (contracts)</label>
-              <input type="number" id="mt-size" class="form-control form-control-sm bg-dark text-light border-secondary" min="1" value="1" required>
+              <label class="form-label small text-muted mb-1">Size (USDT)</label>
+              <input type="number" id="mt-size" class="form-control form-control-sm bg-dark text-light border-secondary" min="1" step="0.01" value="50" placeholder="e.g. 50" required>
             </div>
             <div class="col-6">
               <label class="form-label small text-muted mb-1">Leverage</label>
@@ -319,15 +329,15 @@
             <label class="form-label small text-muted mb-1">Limit Price (USDT)</label>
             <input type="number" id="mt-limit-price" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" placeholder="Enter limit price">
           </div>
-          <!-- SL + TP row -->
+          <!-- SL + TP row (optional) -->
           <div class="row g-2 mb-2">
             <div class="col-6">
-              <label class="form-label small text-muted mb-1">Stop Loss (USDT)</label>
-              <input type="number" id="mt-sl" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" required placeholder="SL price">
+              <label class="form-label small text-muted mb-1">Stop Loss <span class="text-secondary">(optional)</span></label>
+              <input type="number" id="mt-sl" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" placeholder="SL price">
             </div>
             <div class="col-6">
-              <label class="form-label small text-muted mb-1">Take Profit (USDT)</label>
-              <input type="number" id="mt-tp" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" required placeholder="TP price">
+              <label class="form-label small text-muted mb-1">Take Profit <span class="text-secondary">(optional)</span></label>
+              <input type="number" id="mt-tp" class="form-control form-control-sm bg-dark text-light border-secondary" step="0.01" min="0" placeholder="TP price">
             </div>
           </div>
           <!-- Submit -->
@@ -1442,32 +1452,36 @@ function toggleLimitPrice() {
 function placeManualTrade(event) {
   if (event) event.preventDefault();
   const btn = document.getElementById('mt-submit-btn');
-  const statusDiv = document.getElementById('mt-status');
 
   const symbol = document.getElementById('mt-symbol').value;
   const side = document.querySelector('input[name="mt-side"]:checked').value;
-  const size = parseInt(document.getElementById('mt-size').value, 10);
+  const sizeUsdt = parseFloat(document.getElementById('mt-size').value);
   const leverage = parseInt(document.getElementById('mt-leverage').value, 10);
   const orderType = document.getElementById('mt-order-type').value;
   const marginMode = document.getElementById('mt-margin-mode').value;
-  const sl = parseFloat(document.getElementById('mt-sl').value);
-  const tp = parseFloat(document.getElementById('mt-tp').value);
+  const exchangeEl = document.getElementById('mt-exchange');
+  const exchange = exchangeEl ? exchangeEl.value : '';
+  const slVal = parseFloat(document.getElementById('mt-sl').value);
+  const tpVal = parseFloat(document.getElementById('mt-tp').value);
 
-  if (!size || size <= 0) { showMtStatus('Size must be positive', 'danger'); return false; }
-  if (isNaN(sl) || sl <= 0) { showMtStatus('Stop Loss is required', 'danger'); return false; }
-  if (isNaN(tp) || tp <= 0) { showMtStatus('Take Profit is required', 'danger'); return false; }
+  if (!sizeUsdt || sizeUsdt <= 0) { showMtStatus('USDT size must be positive', 'danger'); return false; }
 
+  // Build payload — size_usdt instead of contracts, SL/TP are optional
   const payload = {
     symbol: symbol,
     side: side,
-    size: size,
+    size_usdt: sizeUsdt,
     leverage: leverage,
-    stop_loss: sl,
-    take_profit: tp,
     margin_mode: marginMode,
-    exchange: null,
     note: 'dashboard_manual'
   };
+
+  // Only include exchange if selected
+  if (exchange) payload.exchange = exchange;
+
+  // SL/TP are optional — only include if valid
+  if (!isNaN(slVal) && slVal > 0) payload.stop_loss = slVal;
+  if (!isNaN(tpVal) && tpVal > 0) payload.take_profit = tpVal;
 
   if (orderType === 'limit') {
     const limitPrice = parseFloat(document.getElementById('mt-limit-price').value);
@@ -1484,7 +1498,10 @@ function placeManualTrade(event) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   })
-  .then(r => r.json())
+  .then(r => {
+    if (!r.ok) return r.text().then(t => { throw new Error(t || 'HTTP ' + r.status); });
+    return r.json();
+  })
   .then(data => {
     if (data.success) {
       showMtStatus('Trade submitted: ' + data.message, 'success');
@@ -1493,7 +1510,7 @@ function placeManualTrade(event) {
     }
   })
   .catch(err => {
-    showMtStatus('Network error: ' + err.message, 'danger');
+    showMtStatus('Error: ' + err.message, 'danger');
   })
   .finally(() => {
     btn.disabled = false;
