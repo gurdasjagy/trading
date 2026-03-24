@@ -4528,6 +4528,87 @@ fn main() {
             thread_handles.push(handle);
         }
         
+        // ── Spawn Funding Rate Arbitrage Engine ──────────────────────────────
+        // Runs as a tokio task inside the gateway runtime. Monitors funding rates
+        // across exchanges, validates opportunities, and executes delta-neutral
+        // arb positions with full lifecycle management.
+        {
+            let fab_gbr = registry_me.clone();
+            let fab_symbols = config.symbols.clone();
+            let fab_gateio_testnet = config.exchanges.iter()
+                .find(|e| e.name == "gateio")
+                .map(|e| e.testnet)
+                .unwrap_or(false);
+            let fab_binance_testnet = config.multi_exchange.binance_testnet;
+            let fab_bybit_testnet = config.multi_exchange.bybit_testnet;
+
+            // Build a separate set of gateways for the funding arb engine
+            let mut fab_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = HashMap::new();
+            if let Some(ref gw) = gateway {
+                fab_gateways.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
+            }
+            {
+                let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
+                let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                    fab_gateways.insert(
+                        multi_exchange::ExchangeId::Binance,
+                        Arc::new(binance_gateway::BinanceGateway::new(
+                            ak.to_string(), sk.to_string(), fab_binance_testnet,
+                        )) as Arc<dyn ExecutionGateway + Send + Sync>,
+                    );
+                }
+            }
+            {
+                let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
+                let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
+                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                    fab_gateways.insert(
+                        multi_exchange::ExchangeId::Bybit,
+                        Arc::new(bybit_gateway::BybitGateway::new(
+                            ak.to_string(), sk.to_string(), fab_bybit_testnet,
+                        )) as Arc<dyn ExecutionGateway + Send + Sync>,
+                    );
+                }
+            }
+
+            info!("[funding-arb] Spawning engine with {} gateways, {} symbols",
+                  fab_gateways.len(), fab_symbols.len());
+
+            let handle = thread::Builder::new()
+                .name("funding-arb".into())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to build tokio runtime for funding-arb");
+
+                    rt.block_on(async {
+                        let margin_monitor = Arc::new(
+                            parking_lot::RwLock::new(
+                                multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
+                            )
+                        );
+
+                        let mut engine = multi_exchange::FundingArbEngine::new(
+                            multi_exchange::FundingArbEngineConfig::default(),
+                        );
+
+                        engine.run(
+                            fab_gateways,
+                            fab_gbr,
+                            margin_monitor,
+                            fab_symbols,
+                            fab_gateio_testnet,
+                            fab_binance_testnet,
+                            fab_bybit_testnet,
+                        ).await;
+                    });
+                })
+                .expect("Failed to spawn funding arb engine thread");
+            thread_handles.push(handle);
+        }
+
         Some(registry_me)
     } else {
         info!("Multi-Exchange mode DISABLED - Gate.io only");

@@ -19,6 +19,9 @@ pub mod margin_monitor;
 pub mod ws_ingestion_multi;
 pub mod cross_exchange_mm;
 pub mod stat_arb;
+pub mod funding_arb_engine;
+pub mod funding_arb_executor;
+pub mod funding_arb_risk;
 
 // Re-export commonly used types
 pub use global_book::{ExchangeId, GlobalBookRegistry, GlobalOrderBook, SharedGlobalBook};
@@ -27,3 +30,6 @@ pub use funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity, FundingRat
 pub use margin_monitor::{CrossVenueMarginMonitor, ExchangeMarginHealth, MarginImbalanceAlert};
 pub use cross_exchange_mm::{CrossExchangeMarketMaker, CrossExchangeMMConfig, MakerOrder, HedgePosition, MakerOrderStatus};
 pub use stat_arb::{StatArbEngine, StatArbConfig, StatArbPosition, StatArbExitReason};
+pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig, FundingArbPosition as FundingArbPositionV2, FundingArbState};
+pub use funding_arb_executor::{DualLegExecutor, DualLegResult, LegStatus};
+pub use funding_arb_risk::{PreTradeValidator, PreTradeResult, ExitReason};
