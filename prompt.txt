@@ -1,0 +1,55 @@
+Note : Most of the work is already done in one of your previous session. Here is the list . You check once if you want for proper implementation.
+Your execution plan from previous session for this prompt.
+
+**Devin's execution plan**
+
+* [x] Explore repo structure and understand codebase architecture
+* [x] Fix leverage MISSING_REQUIRED_PARAM error in GateIO gateway (query params, not body)
+* [x] Fix trade size: change from contracts to USDT amount (bot should calculate contracts)
+* [x] Make SL and TP optional during trade opening (dashboard + execution)
+* [x] Fix strategy thread integration with optional SL/TP
+* [ ] Ensure auto-detection of unprotected trades and SL/TP application works
+* [ ] Check automated mode for same issues (leverage, size, etc.)
+* [ ] Deep dive: find all bugs preventing bot from opening trades in testnet mode
+* [ ] Run lint/build checks (cargo check, cargo clippy)
+* [ ] Create PR with all fixes
+* [ ] Provide bot rating and audit report
+
+*(Note: `[x]` represents the tasks marked with a green checkmark, and `[ ]` represents the pending/upcoming tasks).*
+
+Original prompt : 
+Hey found issue in your changes .  I merged your pull request and tested but manual trade opening is getting failed. And also instead of placing trades in contracts you must add size in usdt not contracts ( rest calculation according to he exchange ( gate io ) muste be done by the bot before submitting the order. I found this error on the logs when placing a trade  it's for the manual trade opened front he dashboard. You must check this for automated mode also and if you find that they are wrong there also you must properly fix them.[ 2026-03-24T07:28:19.928547Z  WARN trading_engine: [execution] Manual trade: failed to set leverage: Unknown error MISSING_REQUIRED_PARAM: Missing required parameter: leverage2026-03-24T07:28:20.011887Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:25.015144Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r1 ACK (5000ms)
+2026-03-24T07:28:25.015190Z  WARN trading_engine::execution_gateway: Retryable error on attempt 1/5: Request timeout. Retrying in 120ms
+2026-03-24T07:28:25.212619Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:30.214377Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r2 ACK (5000ms)
+2026-03-24T07:28:30.214429Z  WARN trading_engine::execution_gateway: Retryable error on attempt 2/5: Request timeout. Retrying in 240ms
+2026-03-24T07:28:30.533499Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:35.534877Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r3 ACK (5000ms)
+2026-03-24T07:28:35.534919Z  WARN trading_engine::execution_gateway: Retryable error on attempt 3/5: Request timeout. Retrying in 480ms
+2026-03-24T07:28:36.093244Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:41.094563Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r4 ACK (5000ms)
+2026-03-24T07:28:41.094602Z  WARN trading_engine::execution_gateway: Retryable error on attempt 4/5: Request timeout. Retrying in 960ms
+2026-03-24T07:28:42.133024Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:42.174842Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174870Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174877Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174884Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174890Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174897Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-24T07:28:42.174905Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-24T07:28:42.174921Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":179,"channels":[]}
+2026-03-24T07:28:42.556752Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-24T07:28:47.133448Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r5 ACK (5000ms)
+2026-03-24T07:28:47.133494Z  WARN trading_engine::execution_gateway: Retryable error on attempt 5/5: Request timeout. Retrying in 1920ms
+2026-03-24T07:28:49.132143Z  WARN trading_engine::gateio_gateway: [gateio-ws] Failed to set leverage 10x for BTC_USDT: Unknown error MISSING_REQUIRED_PARAM: Missing required
+parameter: leverage (continuing)
+2026-03-24T07:28:51.080423Z  WARN trading_engine::gateio_gateway: [gateio-reconcile] GHOST: Local tracking for BTC_USDT but REST shows no position — cleaning up
+2026-03-24T07:28:54.135417Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r6 ACK (5000ms)
+2026-03-24T07:28:54.135468Z  WARN trading_engine: [execution] Manual trade failed: Request timeout ] . Fix this in your changes and create new pull request. Make evrything read by reviewing the working system of the bot. Also the sl and tp during opening a trade must be optional . I want the bot to automatically detects unprotected trade and apply sl and tp to it . I think this system is already there in the rust engine check once if not add properly with implementd along with other features. And check whether everything is properly implemented in the code ( main in the rust_engine ). If you find any bugs or issues that are stopping the bot to make or open trades fix them. Make a very deep dive into the bot code ( rust_engine [ hot path ] and crypto_trading_bot [ cold path ]. I am testing bot from last some of the days but no trades has been opened by the bot ( testing in testnet mode with USE_AI off and multi exchange on with all exchanges at testnet mode true in the .env ) . Found if there is or are any bugs that causing bot to make trades or open trades. And also check that is the bot is properly ready ? Like to go into the live mode or not there are still needed to add some important features to bot ( for futures automated trading for profit maximization in comparison to top institutional level bots ( highly paid ones ) except for fix and physical server support. Give my current bot code a strict rating out of 10 in comparison to top paid institutional bot and list evrything that bot is lacking or that are partially implemented or are just simulation in current code. 
