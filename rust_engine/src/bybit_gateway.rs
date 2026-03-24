@@ -242,19 +242,28 @@ impl ExecutionGateway for BybitGateway {
             OrderType::Limit => "GTC",
         };
 
+        // Ensure quantity is at least 1 and properly formatted as a decimal string.
+        // Bybit v5 linear contracts require qty as a string in base currency units
+        // (e.g. "0.01" for ETH). Sending "0" causes error 10001 (Parameter error).
+        let qty = intent.size.max(1);
+        let qty_str = format!("{:.3}", qty as f64);
+        
         let mut body = json!({
             "category": "linear",
             "symbol": symbol,
             "side": side_str,
             "orderType": order_type_str,
-            "qty": intent.size.to_string(),
+            "qty": qty_str,
             "timeInForce": tif,
             "reduceOnly": intent.reduce_only,
             "positionIdx": 0,  // one-way mode
         });
 
-        if let Some(price) = intent.price {
-            body["price"] = json!(format!("{:.8}", price));
+        // Only send price for non-MARKET orders
+        if intent.order_type != OrderType::Market {
+            if let Some(price) = intent.price {
+                body["price"] = json!(format!("{:.8}", price));
+            }
         }
 
         let response = self.post_signed("/v5/order/create", &body).await?;
@@ -277,7 +286,7 @@ impl ExecutionGateway for BybitGateway {
 
         info!(
             "Bybit order {} submitted: {} {} {} @ {:?} | {}µs",
-            order_id, side_str, intent.size, symbol, intent.price, latency_us
+            order_id, side_str, qty_str, symbol, intent.price, latency_us
         );
 
         Ok(OrderResult {
