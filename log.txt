@@ -1,0 +1,18 @@
+INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=2.01 (long=Bybit, short=Binance)
+2026-03-24T12:08:32.316302Z  INFO trading_engine: [stat-arb] Position sizing: equity=$8940.65 notional=$178.81 mid_price=50000.00 size=1
+2026-03-24T12:08:32.325386Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+2026-03-24T12:08:32.400165Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+2026-03-24T12:08:32.576843Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid
+price / Insufficient balance
+2026-03-24T12:08:33.316649Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=2.01 (long=Bybit, short=Binance)
+2026-03-24T12:08:33.316682Z  INFO trading_engine: [stat-arb] Position sizing: equity=$8940.65 notional=$178.81 mid_price=50000.00 size=1
+2026-03-24T12:08:33.324902Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+2026-03-24T12:08:33.403354Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+2026-03-24T12:08:33.577991Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid
+price / Insufficient balance
+
+#Manual trade fail error logs : 
+INFO trading_engine::dashboard_server: [dashboard] Manual
+trade submitted: buy BTC_USDT 100.00 USDT SL=None TP=None
+2026-03-24T12:09:01.067937Z  INFO trading_engine: [execution] Manual trade received: buy BTC_USDT 100.00 USDT lev=20x SL=None TP=None
+2026-03-24T12:09:01.148066Z  WARN trading_engine: [execution] Manual trade: USDT→contracts conversion failed: Order below minimum size (min: 1)
