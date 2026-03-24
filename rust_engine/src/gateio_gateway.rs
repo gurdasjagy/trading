@@ -2092,6 +2092,18 @@ impl ExecutionGateway for GateIoGateway {
         Ok(positions)
     }
 
+    /// BUG 1 FIX: Override usdt_to_contracts as a trait method so that Gate.io's
+    /// quanto-aware conversion is dispatched correctly through Arc<dyn ExecutionGateway>.
+    /// Previously this was only defined as an inherent method on GateIoGateway,
+    /// meaning trait dispatch always fell through to the default implementation
+    /// which does simple `usdt_amount / last_price` — producing 0 contracts for
+    /// small orders on quanto contracts like BTC_USDT (where 1 contract = 0.0001 BTC).
+    async fn usdt_to_contracts(&self, symbol: &str, usdt_amount: f64) -> Result<i64, ExchangeError> {
+        // Delegate to the inherent quanto-aware implementation
+        // which fetches the quanto_multiplier from the Gate.io REST API.
+        GateIoGateway::usdt_to_contracts(self, symbol, usdt_amount).await
+    }
+
     async fn get_order_status(&self, order_id: &str, symbol: &str)
         -> Result<Option<OrderResult>, ExchangeError>
     {

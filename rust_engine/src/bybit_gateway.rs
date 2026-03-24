@@ -497,6 +497,60 @@ impl ExecutionGateway for BybitGateway {
         Ok(0.0)
     }
 
+    /// BUG 4 FIX: Implement get_order_status for Bybit to enable fill confirmation polling.
+    /// Bybit's submit_order returns filled_size=0 immediately; actual fill data comes from
+    /// querying /v5/order/realtime with the orderId.
+    async fn get_order_status(&self, order_id: &str, symbol: &str)
+        -> Result<Option<OrderResult>, ExchangeError>
+    {
+        let normalized = Self::normalize_symbol(symbol);
+        let query = format!("category=linear&symbol={}&orderId={}", normalized, order_id);
+        match self.get_signed("/v5/order/realtime", &query).await {
+            Ok(response) => {
+                let order = response
+                    .pointer("/result/list/0")
+                    .ok_or_else(|| ExchangeError::OrderNotFound)?;
+
+                let status = order.get("orderStatus")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+
+                let cum_exec_qty = order.get("cumExecQty")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                let avg_price = order.get("avgPrice")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                let cum_exec_fee = order.get("cumExecFee")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                // Convert cumExecQty (float string like "0.001") to milli-units i64
+                // to match our position_size encoding from Bug 3 fix
+                let filled_size = (cum_exec_qty * 1000.0).round() as i64;
+
+                Ok(Some(OrderResult {
+                    order_id: order_id.to_string(),
+                    status,
+                    filled_size,
+                    avg_fill_price: avg_price,
+                    fee: cum_exec_fee,
+                    latency_us: 0,
+                    exchange_timestamp: now_ms(),
+                    rejection_reason: None,
+                }))
+            }
+            Err(ExchangeError::OrderNotFound) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     async fn get_positions(&self) -> Result<Vec<Position>, ExchangeError> {
         let query = "category=linear&settleCoin=USDT";
         let response = self.get_signed("/v5/position/list", query).await?;

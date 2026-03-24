@@ -4218,9 +4218,20 @@ fn execution_router_loop(
                                 warn!("[stat-arb] Failed to set leverage on {}: {}", short_ex.name(), e);
                             }
                             
-                            // Build entry intents
+                            // BUG 6 FIX: Fetch per-exchange prices from each gateway's ticker
+                            // instead of sending the same mid_price for both legs.
+                            // For the long leg, use the ask price (what we'll pay to buy).
+                            // For the short leg, use the bid price (what we'll receive to sell).
+                            let long_ref_price = lg.get_ticker(symbol).await
+                                .map(|t| if t.ask > 0.0 { t.ask } else { t.last })
+                                .unwrap_or(mid_price);
+                            let short_ref_price = sg.get_ticker(symbol).await
+                                .map(|t| if t.bid > 0.0 { t.bid } else { t.last })
+                                .unwrap_or(mid_price);
+
+                            // Build entry intents with per-exchange prices
                             let (long_intent, short_intent) = multi_exchange::stat_arb::build_stat_arb_entry_intents(
-                                symbol, *long_ex, *short_ex, position_size, mid_price, mid_price
+                                symbol, *long_ex, *short_ex, position_size, long_ref_price, short_ref_price
                             );
                             
                             // Execute both legs in parallel
@@ -4233,18 +4244,107 @@ fn execution_router_loop(
                             
                             match (&long_res, &short_res) {
                                 (Ok(lr), Ok(sr)) => {
+                                    // BUG 4 FIX: Poll for fill confirmation instead of using
+                                    // the immediate submit_order response (which returns
+                                    // filled_size=0 and avg_fill_price=0.0 on Bybit).
+                                    // Poll up to 10 times with 500ms delay for each leg.
+                                    let mut long_fill_price = lr.avg_fill_price;
+                                    let mut short_fill_price = sr.avg_fill_price;
+                                    let mut long_fill_size = lr.filled_size;
+                                    let mut short_fill_size = sr.filled_size;
+
+                                    if long_fill_size == 0 || short_fill_size == 0 {
+                                        for poll_attempt in 0..10u32 {
+                                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                                            if long_fill_size == 0 {
+                                                if let Ok(Some(status)) = lg.get_order_status(&lr.order_id, symbol).await {
+                                                    if status.filled_size > 0 {
+                                                        long_fill_size = status.filled_size;
+                                                        long_fill_price = status.avg_fill_price;
+                                                        info!("[stat-arb] Long fill confirmed: size={} price={:.4} (poll #{})",
+                                                            long_fill_size, long_fill_price, poll_attempt + 1);
+                                                    }
+                                                }
+                                            }
+
+                                            if short_fill_size == 0 {
+                                                if let Ok(Some(status)) = sg.get_order_status(&sr.order_id, symbol).await {
+                                                    if status.filled_size > 0 {
+                                                        short_fill_size = status.filled_size;
+                                                        short_fill_price = status.avg_fill_price;
+                                                        info!("[stat-arb] Short fill confirmed: size={} price={:.4} (poll #{})",
+                                                            short_fill_size, short_fill_price, poll_attempt + 1);
+                                                    }
+                                                }
+                                            }
+
+                                            if long_fill_size > 0 && short_fill_size > 0 {
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    // Only record entry if both legs actually filled
+                                    if long_fill_size == 0 || short_fill_size == 0 {
+                                        warn!(
+                                            "[stat-arb] Fill confirmation failed for {} — long_fill={} short_fill={}, skipping entry",
+                                            symbol, long_fill_size, short_fill_size
+                                        );
+                                        // Attempt to cancel/unwind any partially filled leg
+                                        if long_fill_size > 0 && short_fill_size == 0 {
+                                            let unwind = execution_gateway::OrderIntent {
+                                                symbol: symbol.clone(),
+                                                side: execution_gateway::OrderSide::Sell,
+                                                size: long_fill_size,
+                                                order_type: execution_gateway::OrderType::Market,
+                                                price: Some(mid_price),
+                                                reduce_only: true,
+                                                leverage: None,
+                                                time_in_force: "ioc".to_string(),
+                                                slippage_cap_pct: Some(0.005),
+                                                placement: execution_state::PlacementType::AtBest,
+                                                stop_loss: None, take_profit: None,
+                                                confidence: 0.0,
+                                                signal_tag: "stat_arb_fill_unwind".to_string(),
+                                            };
+                                            let _ = lg.submit_order(unwind).await;
+                                        } else if short_fill_size > 0 && long_fill_size == 0 {
+                                            let unwind = execution_gateway::OrderIntent {
+                                                symbol: symbol.clone(),
+                                                side: execution_gateway::OrderSide::Buy,
+                                                size: short_fill_size,
+                                                order_type: execution_gateway::OrderType::Market,
+                                                price: Some(mid_price),
+                                                reduce_only: true,
+                                                leverage: None,
+                                                time_in_force: "ioc".to_string(),
+                                                slippage_cap_pct: Some(0.005),
+                                                placement: execution_state::PlacementType::AtBest,
+                                                stop_loss: None, take_profit: None,
+                                                confidence: 0.0,
+                                                signal_tag: "stat_arb_fill_unwind".to_string(),
+                                            };
+                                            let _ = sg.submit_order(unwind).await;
+                                        }
+                                        continue;
+                                    }
+
                                     let now_ns = std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()
                                         .as_nanos() as u64;
                                     
+                                    // Use the smaller fill size for position tracking (matched quantity)
+                                    let matched_size = long_fill_size.min(short_fill_size);
+                                    
                                     stat_arb_engine.record_entry(
                                         symbol,
                                         *long_ex,
                                         *short_ex,
-                                        lr.avg_fill_price,
-                                        sr.avg_fill_price,
-                                        lr.filled_size.min(sr.filled_size),
+                                        long_fill_price,
+                                        short_fill_price,
+                                        matched_size,
                                         *spread,
                                         *mean,
                                         *std_dev,
@@ -4252,9 +4352,9 @@ fn execution_router_loop(
                                     );
                                     
                                     info!(
-                                        "[stat-arb] ENTRY: {} long@{} ({:.4}) short@{} ({:.4})",
-                                        symbol, long_ex.name(), lr.avg_fill_price,
-                                        short_ex.name(), sr.avg_fill_price
+                                        "[stat-arb] ENTRY: {} long@{} ({:.4}) short@{} ({:.4}) size={}",
+                                        symbol, long_ex.name(), long_fill_price,
+                                        short_ex.name(), short_fill_price, matched_size
                                     );
                                     orders_submitted += 2;
                                 }
