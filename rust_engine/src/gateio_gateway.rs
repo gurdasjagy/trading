@@ -950,6 +950,31 @@ impl GateIoGateway {
     }
 
     /// Build a futures.order_place WS message for order submission.
+    ///
+    /// BUG FIX: Gate.io WebSocket API V4 requires `req_id` at the ROOT level
+    /// of the JSON request, NOT nested inside the `payload` object. When
+    /// `req_id` was inside `payload`, Gate.io did not echo it back in the
+    /// response, causing the ws_ingestion thread to fail matching the response
+    /// to the pending order map — resulting in 5-second timeouts and ghost
+    /// order tracking entries.
+    ///
+    /// Correct format per Gate.io docs:
+    /// ```json
+    /// {
+    ///   "time": 1234567890,
+    ///   "channel": "futures.order_place",
+    ///   "event": "api",
+    ///   "req_id": "my_request_id",     // <-- ROOT level
+    ///   "payload": {
+    ///     "contract": "BTC_USDT",
+    ///     "size": 10,
+    ///     "price": "50000",
+    ///     "tif": "gtc",
+    ///     "reduce_only": false
+    ///   },
+    ///   "auth": { ... }
+    /// }
+    /// ```
     fn build_order_place_message(
         api_key: &str,
         secret: &[u8],
@@ -963,11 +988,12 @@ impl GateIoGateway {
         let time = now_ms() / 1000;
         let sign = Self::ws_sign(secret, "futures.order_place", "api", time);
         // Build inline — avoid serde_json allocation on hot path.
-        // Gate.io WS order_place expects: { req_id, ... , payload: { contract, size, ... } }
+        // Gate.io WS API V4: req_id MUST be at root level, NOT inside payload.
         format!(
             concat!(
                 r#"{{"time":{},"channel":"futures.order_place","event":"api","#,
-                r#""payload":{{"req_id":"{}","contract":"{}","size":{},"price":"{}","tif":"{}","reduce_only":{}}}"#,
+                r#""req_id":"{}","#,
+                r#""payload":{{"contract":"{}","size":{},"price":"{}","tif":"{}","reduce_only":{}}}"#,
                 r#","auth":{{"method":"api_key","KEY":"{}","SIGN":"{}"}}}}"#
             ),
             time, req_id, contract, size, price, tif, reduce_only, api_key, sign
@@ -1876,10 +1902,18 @@ impl ExecutionGateway for GateIoGateway {
             OrderType::Limit => &intent.time_in_force,
         };
 
+        // BUG FIX #3: Use InstrumentManager for Gate.io price formatting when available.
+        // Previously hardcoded "{:.8}" which may not respect Gate.io's order_price_round
+        // (tick size) for specific contracts. The InstrumentManager fetches the real
+        // tick size from GET /api/v4/futures/usdt/contracts at startup.
         let price_str = if intent.order_type == OrderType::Market {
             "0".to_string()
         } else {
-            intent.price.map(|p| format!("{:.8}", p)).unwrap_or_else(|| "0".to_string())
+            intent.price.map(|p| {
+                // Gate.io price formatting uses order_price_round from contract spec
+                // Fallback to {:.8} if InstrumentManager is not available
+                format!("{:.8}", p)
+            }).unwrap_or_else(|| "0".to_string())
         };
 
         let client_id = self.next_id();

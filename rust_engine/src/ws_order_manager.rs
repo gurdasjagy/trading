@@ -181,12 +181,16 @@ impl WsOrderManager {
         };
 
         // Build the WS order message (Gate.io futures.order_place)
+        // BUG FIX: Gate.io WS API V4 requires req_id at ROOT level of the JSON
+        // request, NOT nested inside the payload object. When req_id was inside
+        // payload, Gate.io did not echo it back in responses, causing timeout
+        // errors and ghost order tracking entries.
         let payload = serde_json::json!({
             "time": now_secs(),
             "channel": "futures.order_place",
             "event": "api",
+            "req_id": &client_id,
             "payload": {
-                "req_id": &client_id,
                 "contract": symbol_name,
                 "size": size,
                 "price": format!("{:.8}", price_f64),

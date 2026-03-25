@@ -121,6 +121,9 @@ pub mod multi_exchange;  // Global order book, SOR, funding arb, margin monitor
 pub mod bybit_gateway;   // Bybit v5 unified API gateway
 pub mod binance_gateway; // Binance Futures gateway
 
+// ── Dynamic Instrument Manager (real-time contract specs from all exchanges) ──
+pub mod instrument_manager;
+
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;
 mod orderbook;

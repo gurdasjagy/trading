@@ -22,6 +22,7 @@ use crate::execution_gateway::{
     ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType,
 };
 use crate::execution_state::PlacementType;
+use crate::instrument_manager::InstrumentManager;
 use crate::multi_exchange::global_book::{ExchangeId, GlobalBookRegistry};
 use crate::multi_exchange::funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity};
 use crate::multi_exchange::margin_monitor::CrossVenueMarginMonitor;
@@ -321,6 +322,10 @@ pub struct FundingArbEngine {
     total_funding_collected: f64,
     /// Shutdown signal — engine exits its run() loop when set to true.
     shutdown: Arc<AtomicBool>,
+    /// Optional InstrumentManager for real-time contract spec lookups.
+    /// When set, enables proper position sizing (Bug #2 fix) and
+    /// pre-flight margin simulation (Feature #3).
+    instrument_mgr: Option<Arc<InstrumentManager>>,
 }
 
 impl FundingArbEngine {
@@ -346,7 +351,14 @@ impl FundingArbEngine {
             total_realized_pnl: 0.0,
             total_funding_collected: 0.0,
             shutdown,
+            instrument_mgr: None,
         }
+    }
+
+    /// Set the InstrumentManager for real-time contract spec lookups.
+    /// This enables proper position sizing and pre-flight margin simulation.
+    pub fn set_instrument_manager(&mut self, mgr: Arc<InstrumentManager>) {
+        self.instrument_mgr = Some(mgr);
     }
 
     /// Main engine loop. Spawned as a tokio task from main.rs.
@@ -432,12 +444,13 @@ impl FundingArbEngine {
                             continue;
                         }
 
-                        // Pre-trade validation
-                        let validation = PreTradeValidator::validate(
+                        // Pre-trade validation (uses InstrumentManager for proper sizing)
+                        let validation = PreTradeValidator::validate_with_instruments(
                             opp,
                             &global_book_registry,
                             &margin_monitor.read(),
                             &self.config,
+                            self.instrument_mgr.as_deref(),
                         );
 
                         match validation {
