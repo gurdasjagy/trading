@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use hmac::Mac;  // Required for Hmac::new_from_slice, update, finalize
 use parking_lot::RwLock;
 use reqwest::Client;
 use serde_json::Value;

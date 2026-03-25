@@ -73,6 +73,7 @@ mod risk_calculator;
 mod multi_exchange;
 mod binance_gateway;
 mod bybit_gateway;
+mod instrument_manager;
 
 // Feature 4: Persistent State (SQLite)
 mod state_store;

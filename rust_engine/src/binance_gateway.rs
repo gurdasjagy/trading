@@ -259,7 +259,7 @@ impl ExecutionGateway for BinanceGateway {
         //
         // Now we fetch tickSize and stepSize from Binance's /fapi/v1/exchangeInfo
         // via the InstrumentManager and format accordingly.
-        let spec = self.instrument_mgr.as_ref()
+        let spec: Option<crate::instrument_manager::ContractSpec> = self.instrument_mgr.as_ref()
             .and_then(|mgr| mgr.get(Exchange::Binance, &symbol));
 
         let qty_f64 = intent.size as f64;
@@ -291,7 +291,7 @@ impl ExecutionGateway for BinanceGateway {
         // that include a price parameter with error -1102.
         if intent.order_type != OrderType::Market {
             if let Some(price) = intent.price {
-                let price_str = if let Some(ref s) = spec {
+                let price_str: String = if let Some(ref s) = spec {
                     // Use real-time tickSize precision from exchangeInfo PRICE_FILTER
                     s.format_price(price)
                 } else {

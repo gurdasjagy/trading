@@ -273,7 +273,7 @@ impl ExecutionGateway for BybitGateway {
         //
         // Now we fetch tickSize and qtyStep from Bybit's /v5/market/instruments-info
         // via the InstrumentManager and format accordingly.
-        let spec = self.instrument_mgr.as_ref()
+        let spec: Option<crate::instrument_manager::ContractSpec> = self.instrument_mgr.as_ref()
             .and_then(|mgr| mgr.get(Exchange::Bybit, &symbol));
 
         let qty_f64 = intent.size as f64;
@@ -306,7 +306,7 @@ impl ExecutionGateway for BybitGateway {
         // Only send price for non-MARKET orders
         if intent.order_type != OrderType::Market {
             if let Some(price) = intent.price {
-                let price_str = if let Some(ref s) = spec {
+                let price_str: String = if let Some(ref s) = spec {
                     // Use real-time tickSize precision from instruments-info priceFilter
                     s.format_price(price)
                 } else {
