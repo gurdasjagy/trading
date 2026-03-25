@@ -22,6 +22,7 @@ pub mod stat_arb;
 pub mod funding_arb_engine;
 pub mod funding_arb_executor;
 pub mod funding_arb_risk;
+pub mod delta_monitor;
 
 // Re-export commonly used types
 pub use global_book::{ExchangeId, GlobalBookRegistry, GlobalOrderBook, SharedGlobalBook};

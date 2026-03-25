@@ -491,6 +491,42 @@ impl FeeOptimizer {
     }
 }
 
+    /// FEATURE 3: Get the best exchange for a trade based on fee optimization.
+    /// Returns the exchange with lowest effective fee for the given order type.
+    pub fn best_exchange_for_fee(
+        optimizers: &HashMap<String, FeeOptimizer>,
+        is_maker: bool,
+    ) -> Option<String> {
+        let mut best: Option<(String, f64)> = None;
+        for (exchange, opt) in optimizers {
+            let fee = if is_maker { opt.maker_fee_bps() } else { opt.taker_fee_bps() };
+            match &best {
+                None => best = Some((exchange.clone(), fee)),
+                Some((_, best_fee)) if fee < *best_fee => {
+                    best = Some((exchange.clone(), fee));
+                }
+                _ => {}
+            }
+        }
+        best.map(|(name, _)| name)
+    }
+
+    /// FEATURE 3: Calculate net fee savings across all exchanges for a round trip.
+    /// Compares maker entry + taker exit vs taker entry + taker exit.
+    pub fn round_trip_savings_bps(&self) -> f64 {
+        let maker_entry_taker_exit = self.maker_fee_bps() + self.taker_fee_bps();
+        let full_taker = self.taker_fee_bps() * 2.0;
+        full_taker - maker_entry_taker_exit
+    }
+
+    /// FEATURE 3: Estimate annual fee savings based on current daily volume.
+    pub fn estimated_annual_savings_usdt(&self) -> f64 {
+        let daily_vol = self.total_daily_volume();
+        let savings_per_dollar = self.round_trip_savings_bps() / 10000.0;
+        daily_vol * savings_per_dollar * 365.0
+    }
+}
+
 impl Default for FeeOptimizer {
     fn default() -> Self {
         Self::new_gateio()

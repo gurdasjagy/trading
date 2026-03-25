@@ -79,6 +79,18 @@ impl ContractSpec {
         format!("{:.prec$}", rounded, prec = self.qty_precision as usize)
     }
 
+    /// BUG 2 FIX: Snap price to nearest valid tick_size (alias for round_price).
+    /// Ensures orders are never rejected with "invalid price" due to precision.
+    pub fn snap_price(&self, price: f64) -> f64 {
+        self.round_price(price)
+    }
+
+    /// BUG 2 FIX: Snap quantity to nearest valid step_size (alias for round_qty).
+    /// Ensures orders are never rejected with "invalid quantity" due to precision.
+    pub fn snap_qty(&self, qty: f64) -> f64 {
+        self.round_qty(qty)
+    }
+
     /// Clamp quantity to [min_qty, max_qty] and round to step_size.
     pub fn clamp_and_round_qty(&self, qty: f64) -> f64 {
         let clamped = qty.max(self.min_qty).min(self.max_qty);

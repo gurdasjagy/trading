@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::multi_exchange::global_book::ExchangeId;
 use crate::execution_gateway::ExecutionGateway;
@@ -136,6 +136,39 @@ pub struct CrossVenueMarginMonitor {
     min_margin_ratio: f64,
     /// Critical margin ratio threshold (default: 0.15 = 15%).
     critical_margin_ratio: f64,
+    /// BUG 4 FIX: Cached last-known balances per exchange.
+    /// Used as fallback when API calls fail (with staleness timeout).
+    cached_balances: HashMap<ExchangeId, CachedBalance>,
+    /// BUG 4 FIX: Set of exchanges confirmed as ready (have valid gateways).
+    ready_exchanges: HashMap<ExchangeId, bool>,
+}
+
+/// BUG 4 FIX: Cached balance with staleness tracking.
+#[derive(Debug, Clone)]
+pub struct CachedBalance {
+    pub balance: f64,
+    pub cached_at_ns: u64,
+}
+
+impl CachedBalance {
+    /// Maximum age before a cached balance is considered stale (5 minutes).
+    const MAX_STALENESS_NS: u64 = 5 * 60 * 1_000_000_000;
+
+    pub fn new(balance: f64) -> Self {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        Self { balance, cached_at_ns: now_ns }
+    }
+
+    pub fn is_stale(&self) -> bool {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        now_ns.saturating_sub(self.cached_at_ns) > Self::MAX_STALENESS_NS
+    }
 }
 
 impl CrossVenueMarginMonitor {
@@ -145,6 +178,8 @@ impl CrossVenueMarginMonitor {
             health: HashMap::new(),
             min_margin_ratio,
             critical_margin_ratio,
+            cached_balances: HashMap::new(),
+            ready_exchanges: HashMap::new(),
         }
     }
 
@@ -281,17 +316,54 @@ impl CrossVenueMarginMonitor {
         delta_pct <= tolerance_pct
     }
 
+    /// BUG 4 FIX: Mark an exchange gateway as ready/not ready.
+    pub fn set_gateway_ready(&mut self, exchange: ExchangeId, ready: bool) {
+        self.ready_exchanges.insert(exchange, ready);
+        if ready {
+            info!("[margin] {} gateway marked as ready", exchange.name());
+        } else {
+            warn!("[margin] {} gateway marked as NOT ready", exchange.name());
+        }
+    }
+
+    /// BUG 4 FIX: Check if an exchange gateway is ready.
+    pub fn is_gateway_ready(&self, exchange: ExchangeId) -> bool {
+        self.ready_exchanges.get(&exchange).copied().unwrap_or(false)
+    }
+
     /// Fetch and update margin health from all active gateways.
     /// Called every 30 seconds from the execution router loop.
+    ///
+    /// BUG 4 FIX: Skip exchanges with no valid gateway instead of reporting 0%.
+    /// Cache last known balance and use if API call fails (with staleness timeout).
+    /// Log clearly if any exchange has $0 balance at startup.
     pub async fn refresh_all(
         &mut self,
         gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
     ) {
         for (exchange, gateway) in gateways {
+            // BUG 4 FIX: Skip exchanges that are not ready
+            if !self.is_gateway_ready(*exchange) {
+                info!(
+                    "[margin] Skipping {} (gateway not ready, keys may be missing)",
+                    exchange.name()
+                );
+                continue;
+            }
+
             match gateway.get_balance().await {
                 Ok(balance) => {
-                    // For now, use balance as both available and equity
-                    // In production, would also fetch position margin
+                    // BUG 4 FIX: Cache the balance for fallback
+                    self.cached_balances.insert(*exchange, CachedBalance::new(balance));
+
+                    // BUG 4 FIX: Log clearly if balance is $0 (startup check)
+                    if balance <= 0.0 {
+                        warn!(
+                            "[margin] {} reports $0 balance — account may not be funded",
+                            exchange.name()
+                        );
+                    }
+
                     let health = ExchangeMarginHealth::new(
                         *exchange,
                         balance,
@@ -308,7 +380,32 @@ impl CrossVenueMarginMonitor {
                     );
                 }
                 Err(e) => {
-                    warn!("[margin] Failed to fetch {} balance: {:?}", exchange.name(), e);
+                    // BUG 4 FIX: Use cached balance if available and not stale
+                    if let Some(cached) = self.cached_balances.get(exchange) {
+                        if !cached.is_stale() {
+                            warn!(
+                                "[margin] {} API failed ({:?}), using cached balance ${:.2}",
+                                exchange.name(), e, cached.balance
+                            );
+                            let health = ExchangeMarginHealth::new(
+                                *exchange,
+                                cached.balance,
+                                cached.balance,
+                                0.0,
+                            );
+                            self.update_health(health);
+                        } else {
+                            error!(
+                                "[margin] {} API failed ({:?}) and cached balance is stale — skipping",
+                                exchange.name(), e
+                            );
+                        }
+                    } else {
+                        error!(
+                            "[margin] {} API failed ({:?}) and no cached balance available — skipping",
+                            exchange.name(), e
+                        );
+                    }
                 }
             }
         }

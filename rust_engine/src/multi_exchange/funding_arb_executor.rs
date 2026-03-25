@@ -800,6 +800,295 @@ impl DualLegExecutor {
         }
     }
 
+    /// BUG 5 FIX: Maker-Taker Leg Execution Pattern.
+    ///
+    /// Instead of firing two simultaneous market orders (which risks naked
+    /// directional exposure if one leg fails), this method:
+    ///
+    /// 1. Places MAKER (post-only) order on less liquid exchange first
+    /// 2. Polls every 100ms for fill confirmation (timeout 30s)
+    /// 3. Only when leg 1 fills, immediately hedges with IOC taker on liquid exchange
+    /// 4. If leg 1 doesn't fill within timeout, cancels it (no exposure)
+    /// 5. If leg 2 fails after leg 1 filled, immediately closes leg 1 at market
+    pub async fn execute_entry_maker_taker(
+        symbol: &str,
+        maker_exchange: ExchangeId,
+        taker_exchange: ExchangeId,
+        maker_side: OrderSide,
+        taker_side: OrderSide,
+        size: i64,
+        leverage: i32,
+        max_slippage: f64,
+        maker_timeout_ms: u64,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
+    ) -> DualLegResult {
+        let maker_gw = match gateways.get(&maker_exchange) {
+            Some(gw) => gw.clone(),
+            None => return DualLegResult::BothFailed {
+                short_error: ExchangeError::Unknown {
+                    code: "NO_GATEWAY".into(),
+                    message: format!("No gateway for maker {}", maker_exchange.name()),
+                },
+                long_error: ExchangeError::Unknown {
+                    code: "SKIPPED".into(),
+                    message: "Skipped due to maker gateway missing".into(),
+                },
+            },
+        };
+
+        let taker_gw = match gateways.get(&taker_exchange) {
+            Some(gw) => gw.clone(),
+            None => return DualLegResult::BothFailed {
+                short_error: ExchangeError::Unknown {
+                    code: "SKIPPED".into(),
+                    message: "Skipped due to taker gateway missing".into(),
+                },
+                long_error: ExchangeError::Unknown {
+                    code: "NO_GATEWAY".into(),
+                    message: format!("No gateway for taker {}", taker_exchange.name()),
+                },
+            },
+        };
+
+        // Set leverage on both exchanges
+        let _ = tokio::join!(
+            maker_gw.set_leverage(symbol, leverage),
+            taker_gw.set_leverage(symbol, leverage),
+        );
+
+        // Step 1: Place MAKER (post-only) order on less liquid exchange
+        let maker_intent = OrderIntent {
+            symbol: symbol.to_string(),
+            side: maker_side.clone(),
+            size,
+            order_type: OrderType::PostOnly,
+            price: None, // Gateway will use best price
+            reduce_only: false,
+            leverage: Some(leverage),
+            time_in_force: "poc".to_string(),
+            slippage_cap_pct: Some(max_slippage),
+            placement: PlacementType::AtBest,
+            stop_loss: None,
+            take_profit: None,
+            confidence: 1.0,
+            signal_tag: "funding_arb_maker_leg".to_string(),
+        };
+
+        info!(
+            "[dual-leg] BUG5 FIX: Placing MAKER leg on {} ({:?}), size={}",
+            maker_exchange.name(), maker_side, size
+        );
+
+        let maker_result = maker_gw.submit_order(maker_intent.clone()).await;
+        let maker_order_id = match maker_result {
+            Ok(ref r) if !r.order_id.is_empty() => r.order_id.clone(),
+            Ok(ref r) if r.filled_size > 0 => {
+                // Filled immediately (unlikely for post-only but possible)
+                info!("[dual-leg] Maker leg filled immediately: {} contracts", r.filled_size);
+                // Proceed directly to taker leg
+                return Self::execute_taker_hedge(
+                    symbol, taker_exchange, taker_side, size, leverage,
+                    max_slippage, r.clone(), maker_exchange, maker_side.clone(),
+                    gateways,
+                ).await;
+            }
+            Ok(_) => {
+                warn!("[dual-leg] Maker order returned empty order_id with 0 fill");
+                return DualLegResult::BothFailed {
+                    short_error: ExchangeError::Unknown {
+                        code: "MAKER_FAILED".into(),
+                        message: "Maker order returned no order_id".into(),
+                    },
+                    long_error: ExchangeError::Unknown {
+                        code: "SKIPPED".into(),
+                        message: "Taker skipped: maker leg not placed".into(),
+                    },
+                };
+            }
+            Err(e) => {
+                // Maker leg failed - no exposure, safe to abort
+                info!("[dual-leg] Maker leg rejected (no exposure): {:?}", e);
+                return DualLegResult::BothFailed {
+                    short_error: e.clone(),
+                    long_error: ExchangeError::Unknown {
+                        code: "SKIPPED".into(),
+                        message: "Taker skipped: maker leg not placed".into(),
+                    },
+                };
+            }
+        };
+
+        // Step 2: Poll for maker fill (every 100ms, timeout configurable)
+        let poll_interval = tokio::time::Duration::from_millis(100);
+        let timeout = tokio::time::Duration::from_millis(maker_timeout_ms);
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        info!(
+            "[dual-leg] Polling maker order {} for fill (timeout={}ms)",
+            maker_order_id, maker_timeout_ms
+        );
+
+        let mut maker_fill: Option<OrderResult> = None;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(poll_interval).await;
+
+            match maker_gw.get_order_status(&maker_order_id, symbol).await {
+                Ok(Some(status)) if status.filled_size > 0 => {
+                    info!(
+                        "[dual-leg] Maker leg FILLED: {} contracts @ {:.2}",
+                        status.filled_size, status.avg_fill_price
+                    );
+                    maker_fill = Some(status);
+                    break;
+                }
+                Ok(Some(_)) => {
+                    // Order exists but not filled yet - keep waiting
+                    continue;
+                }
+                Ok(None) => {
+                    // Order disappeared (cancelled externally?) - abort
+                    warn!("[dual-leg] Maker order {} disappeared during polling", maker_order_id);
+                    break;
+                }
+                Err(_) => {
+                    // Status check failed - keep trying
+                    continue;
+                }
+            }
+        }
+
+        // Step 3: Handle result
+        match maker_fill {
+            Some(maker_result) => {
+                // Maker filled - immediately hedge with IOC taker
+                Self::execute_taker_hedge(
+                    symbol, taker_exchange, taker_side, size, leverage,
+                    max_slippage, maker_result, maker_exchange, maker_side,
+                    gateways,
+                ).await
+            }
+            None => {
+                // Step 4: Maker didn't fill within timeout - cancel it (no exposure)
+                info!(
+                    "[dual-leg] Maker timeout: cancelling order {} on {}",
+                    maker_order_id, maker_exchange.name()
+                );
+                let _ = maker_gw.cancel_order(&maker_order_id, symbol).await;
+                DualLegResult::BothFailed {
+                    short_error: ExchangeError::Unknown {
+                        code: "MAKER_TIMEOUT".into(),
+                        message: format!(
+                            "Maker leg on {} did not fill within {}ms",
+                            maker_exchange.name(), maker_timeout_ms
+                        ),
+                    },
+                    long_error: ExchangeError::Unknown {
+                        code: "SKIPPED".into(),
+                        message: "Taker skipped: maker leg not filled".into(),
+                    },
+                }
+            }
+        }
+    }
+
+    /// BUG 5 FIX: Execute the taker hedge leg after maker has been filled.
+    ///
+    /// If the taker leg fails, immediately closes the maker leg at market
+    /// to prevent naked directional exposure.
+    async fn execute_taker_hedge(
+        symbol: &str,
+        taker_exchange: ExchangeId,
+        taker_side: OrderSide,
+        size: i64,
+        leverage: i32,
+        max_slippage: f64,
+        maker_result: OrderResult,
+        maker_exchange: ExchangeId,
+        maker_side: OrderSide,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
+    ) -> DualLegResult {
+        let taker_gw = match gateways.get(&taker_exchange) {
+            Some(gw) => gw.clone(),
+            None => {
+                // Taker gateway missing after maker filled - emergency close maker
+                error!(
+                    "[dual-leg] CRITICAL: Taker gateway {} missing after maker filled! Emergency closing maker.",
+                    taker_exchange.name()
+                );
+                let maker_leg = if maker_side == OrderSide::Sell {
+                    LegStatus::ShortFilled { result: maker_result, exchange: maker_exchange }
+                } else {
+                    LegStatus::LongFilled { result: maker_result, exchange: maker_exchange }
+                };
+                return DualLegResult::PartialFill {
+                    filled_leg: maker_leg,
+                    unfilled_exchange: taker_exchange,
+                    filled_size: size,
+                };
+            }
+        };
+
+        let taker_intent = OrderIntent {
+            symbol: symbol.to_string(),
+            side: taker_side.clone(),
+            size,
+            order_type: OrderType::Market,
+            price: None,
+            reduce_only: false,
+            leverage: Some(leverage),
+            time_in_force: "ioc".to_string(),
+            slippage_cap_pct: Some(max_slippage),
+            placement: PlacementType::AtBest,
+            stop_loss: None,
+            take_profit: None,
+            confidence: 1.0,
+            signal_tag: "funding_arb_taker_leg".to_string(),
+        };
+
+        info!(
+            "[dual-leg] Placing TAKER hedge on {} ({:?}), size={}",
+            taker_exchange.name(), taker_side, size
+        );
+
+        match taker_gw.submit_order(taker_intent).await {
+            Ok(taker_result) if taker_result.filled_size > 0 => {
+                info!(
+                    "[dual-leg] BUG5 FIX: Both legs filled via maker-taker pattern. maker={} taker={}",
+                    maker_result.order_id, taker_result.order_id
+                );
+                // Map to BothFilled with correct short/long assignment
+                let (short_result, long_result) = if maker_side == OrderSide::Sell {
+                    (maker_result, taker_result)
+                } else {
+                    (taker_result, maker_result)
+                };
+                DualLegResult::BothFilled { short_result, long_result }
+            }
+            Ok(_) | Err(_) => {
+                // Step 5: Taker failed after maker filled - emergency close maker
+                error!(
+                    "[dual-leg] LEGGING RISK: Taker hedge FAILED on {}. Emergency closing maker on {}.",
+                    taker_exchange.name(), maker_exchange.name()
+                );
+
+                let maker_leg = if maker_side == OrderSide::Sell {
+                    LegStatus::ShortFilled { result: maker_result, exchange: maker_exchange }
+                } else {
+                    LegStatus::LongFilled { result: maker_result, exchange: maker_exchange }
+                };
+
+                // Attempt emergency close
+                let _ = Self::emergency_close_leg(symbol, &maker_leg, size, gateways).await;
+
+                DualLegResult::PartialFill {
+                    filled_leg: maker_leg,
+                    unfilled_exchange: taker_exchange,
+                    filled_size: size,
+                }
+            }
+        }
+    }
+
     /// Emergency close a single filled leg to resolve legging risk.
     ///
     /// When one leg fills but the other fails, this function immediately
