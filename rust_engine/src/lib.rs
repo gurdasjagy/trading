@@ -124,6 +124,10 @@ pub mod binance_gateway; // Binance Futures gateway
 // ── Dynamic Instrument Manager (real-time contract specs from all exchanges) ──
 pub mod instrument_manager;
 
+// ── Comprehensive Upgrade: New modules ──
+pub mod size_normalizer;    // BUG 3: USDT-to-contracts conversion
+pub mod funding_timing;     // FEAT 1: Funding rate timestamp-aware entry/exit
+
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;
 mod orderbook;
