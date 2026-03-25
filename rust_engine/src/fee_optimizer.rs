@@ -214,6 +214,125 @@ impl FeeOptimizer {
         }
     }
     
+    /// Create a fee optimizer for Bybit perpetual futures.
+    /// Bybit VIP fee tiers for USDT Perpetual & Expiry contracts (as of 2026).
+    /// Source: https://www.bybit.com/en/help-center/article/Trading-Fee-Structure
+    pub fn new_bybit() -> Self {
+        let tiers = vec![
+            FeeTier {
+                tier_name: "VIP0".to_string(),
+                volume_threshold_usdt: 0.0,
+                maker_fee_bps: 2.0,   // 0.0200%
+                taker_fee_bps: 5.5,   // 0.0550%
+            },
+            FeeTier {
+                tier_name: "VIP1".to_string(),
+                volume_threshold_usdt: 1_000_000.0,
+                maker_fee_bps: 1.8,   // 0.0180%
+                taker_fee_bps: 4.0,   // 0.0400%
+            },
+            FeeTier {
+                tier_name: "VIP2".to_string(),
+                volume_threshold_usdt: 5_000_000.0,
+                maker_fee_bps: 1.6,   // 0.0160%
+                taker_fee_bps: 3.75,  // 0.0375%
+            },
+            FeeTier {
+                tier_name: "VIP3".to_string(),
+                volume_threshold_usdt: 10_000_000.0,
+                maker_fee_bps: 1.4,   // 0.0140%
+                taker_fee_bps: 3.5,   // 0.0350%
+            },
+            FeeTier {
+                tier_name: "VIP4".to_string(),
+                volume_threshold_usdt: 25_000_000.0,
+                maker_fee_bps: 1.0,   // 0.0100%
+                taker_fee_bps: 3.2,   // 0.0320%
+            },
+            FeeTier {
+                tier_name: "VIP5".to_string(),
+                volume_threshold_usdt: 50_000_000.0,
+                maker_fee_bps: 0.5,   // 0.0050%
+                taker_fee_bps: 3.0,   // 0.0300%
+            },
+            FeeTier {
+                tier_name: "VIP Supreme".to_string(),
+                volume_threshold_usdt: 100_000_000.0,
+                maker_fee_bps: 0.0,   // 0.0000% (zero maker)
+                taker_fee_bps: 3.0,   // 0.0300%
+            },
+        ];
+
+        Self {
+            volume_30d: 0.0,
+            tiers,
+            current_tier: 0,
+            volume_to_next_tier: 1_000_000.0,
+            daily_volume: HashMap::new(),
+            total_fees_paid: 0.0,
+            total_rebates_earned: 0.0,
+            last_volume_update_ns: 0,
+        }
+    }
+
+    /// Fetch the real-time fee rate from Bybit API and return (maker_bps, taker_bps).
+    /// Uses GET /v5/account/fee-rate?category=linear&symbol={symbol}.
+    /// Falls back to VIP0 defaults if the API call fails.
+    pub async fn fetch_bybit_fee_rate(
+        client: &reqwest::Client,
+        api_key: &str,
+        api_secret: &[u8],
+        symbol: &str,
+        testnet: bool,
+    ) -> (f64, f64) {
+        let base = if testnet {
+            "https://api-demo.bybit.com"
+        } else {
+            "https://api.bybit.com"
+        };
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let recv_window = 5000i64;
+        let params = format!("category=linear&symbol={}", symbol);
+        let sign_input = format!("{}{}{}{}", timestamp, api_key, recv_window, params);
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        let mut mac = Hmac::<Sha256>::new_from_slice(api_secret)
+            .expect("HMAC can take key of any size");
+        mac.update(sign_input.as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
+
+        let url = format!("{}/v5/account/fee-rate?{}", base, params);
+        match client.get(&url)
+            .header("X-BAPI-API-KEY", api_key)
+            .header("X-BAPI-SIGN", &signature)
+            .header("X-BAPI-TIMESTAMP", timestamp.to_string())
+            .header("X-BAPI-RECV-WINDOW", recv_window.to_string())
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    if let Some(list) = body["result"]["list"].as_array() {
+                        if let Some(item) = list.first() {
+                            let maker = item["makerFeeRate"].as_str()
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0002) * 10000.0; // to bps
+                            let taker = item["takerFeeRate"].as_str()
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.00055) * 10000.0; // to bps
+                            return (maker, taker);
+                        }
+                    }
+                }
+                (2.0, 5.5) // VIP0 defaults
+            }
+            Err(_) => (2.0, 5.5),
+        }
+    }
+
     /// Update 30-day volume from exchange API.
     pub fn update_volume(&mut self, volume: f64) {
         self.volume_30d = volume;
