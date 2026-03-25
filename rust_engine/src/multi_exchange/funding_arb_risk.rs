@@ -113,6 +113,21 @@ impl PreTradeValidator {
         }
 
         // 3. MARGIN SUFFICIENCY CHECK
+        // FIX (startup gate): Reject if margin monitor hasn't completed its
+        // first balance fetch. Previously, balance defaulted to 0.0, causing
+        // notional_usd=0.0 → qty=0.0 → .max(1) clamp → 1 BTC ($71k) order
+        // with only $4943 balance → InsufficientBalance on both exchanges.
+        if !margin_monitor.has_exchange_data(opp.short_exchange)
+            || !margin_monitor.has_exchange_data(opp.long_exchange)
+        {
+            let reason = format!(
+                "Margin monitor not yet initialized for {} and/or {} — skipping until balances are fetched",
+                opp.short_exchange.name(), opp.long_exchange.name()
+            );
+            warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            return PreTradeResult::Rejected { reason };
+        }
+
         let short_balance = margin_monitor.get_health(opp.short_exchange)
             .map(|h| h.available_balance)
             .unwrap_or(0.0);
@@ -167,9 +182,21 @@ impl PreTradeValidator {
             let short_spec = mgr.get_or_default(short_exchange_type, &opp.symbol);
             let long_spec = mgr.get_or_default(long_exchange_type, &opp.symbol);
 
-            // Get approximate price from the books or use a heuristic
-            let approx_price = Self::get_approximate_price(opp, global_book_registry)
-                .unwrap_or(1.0); // fallback; will be conservative
+            // FIX: Reject opportunity if no price is available instead of using
+            // fallback of 1.0. A $1 price for BTC ($71k actual) is catastrophically
+            // wrong and leads to oversized positions (e.g., 1 BTC = $71k notional
+            // when only $4943 is available).
+            let approx_price = match Self::get_approximate_price(opp, global_book_registry) {
+                Some(p) => p,
+                None => {
+                    let reason = format!(
+                        "No price data available for {} — cannot safely size position",
+                        opp.symbol
+                    );
+                    warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    return PreTradeResult::Rejected { reason };
+                }
+            };
 
             // Calculate qty for each exchange and use the minimum
             let short_qty = short_spec.notional_to_qty(notional_usd, approx_price);
@@ -182,7 +209,30 @@ impl PreTradeValidator {
             // For Binance/Bybit linear: contracts = qty (since multiplier = 1.0)
             let short_contracts = short_spec.qty_to_contracts(qty);
             let long_contracts = long_spec.qty_to_contracts(qty);
-            let contracts = short_contracts.min(long_contracts).max(1);
+            let contracts = short_contracts.min(long_contracts);
+
+            // FIX: Validate that the minimum contract size (1) is actually
+            // affordable before clamping. Previously .max(1) blindly produced
+            // size=1 even when 1 contract = 1 BTC = $71k, far exceeding the
+            // account balance. Now we check the notional of 1 contract against
+            // available margin before allowing it.
+            let contracts = if contracts < 1 {
+                // Check if even 1 contract is affordable
+                let one_contract_qty = short_spec.contract_multiplier.max(long_spec.contract_multiplier);
+                let one_contract_notional = one_contract_qty * approx_price;
+                let one_contract_margin = one_contract_notional / config.leverage as f64;
+                if one_contract_margin > min_balance {
+                    let reason = format!(
+                        "Minimum 1 contract = {:.4} units = ${:.2} notional requires ${:.2} margin, but only ${:.2} available",
+                        one_contract_qty, one_contract_notional, one_contract_margin, min_balance
+                    );
+                    warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    return PreTradeResult::Rejected { reason };
+                }
+                1
+            } else {
+                contracts
+            };
 
             // Pre-flight margin simulation
             let short_margin_check = simulate_margin(
@@ -201,7 +251,13 @@ impl PreTradeValidator {
                 let affordable_contracts = short_spec.qty_to_contracts(
                     short_margin_check.max_affordable_qty
                 );
-                affordable_contracts.min(contracts).max(1)
+                let reduced = affordable_contracts.min(contracts);
+                if reduced < 1 {
+                    let reason = "Short leg margin insufficient even for minimum position size".to_string();
+                    warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    return PreTradeResult::Rejected { reason };
+                }
+                reduced
             } else if !long_margin_check.can_place {
                 info!(
                     "[pre-trade] Margin simulation: long leg would fail — reducing size. {}",
@@ -210,7 +266,13 @@ impl PreTradeValidator {
                 let affordable_contracts = long_spec.qty_to_contracts(
                     long_margin_check.max_affordable_qty
                 );
-                affordable_contracts.min(contracts).max(1)
+                let reduced = affordable_contracts.min(contracts);
+                if reduced < 1 {
+                    let reason = "Long leg margin insufficient even for minimum position size".to_string();
+                    warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    return PreTradeResult::Rejected { reason };
+                }
+                reduced
             } else {
                 contracts
             }
@@ -218,7 +280,16 @@ impl PreTradeValidator {
             // Legacy fallback without InstrumentManager
             let max_size_by_balance = (min_balance * config.max_position_pct * config.leverage as f64) as i64;
             let max_size_by_notional = config.max_notional_usdt as i64;
-            max_size_by_balance.min(max_size_by_notional).max(1)
+            let size = max_size_by_balance.min(max_size_by_notional);
+            if size < 1 {
+                let reason = format!(
+                    "Computed position size {} is too small (balance: ${:.2})",
+                    size, min_balance
+                );
+                warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                return PreTradeResult::Rejected { reason };
+            }
+            size
         };
 
         // 5. BASIS RISK

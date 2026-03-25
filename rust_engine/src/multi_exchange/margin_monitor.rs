@@ -182,6 +182,15 @@ impl CrossVenueMarginMonitor {
         self.health.values().collect()
     }
 
+    /// Check if the margin monitor has fetched balance data for a specific exchange.
+    /// Returns false if the exchange has never been polled or if its balance is zero
+    /// (which indicates the first fetch hasn't completed yet for funded accounts).
+    pub fn has_exchange_data(&self, exchange: ExchangeId) -> bool {
+        self.health.get(&exchange)
+            .map(|h| h.available_balance > 0.0 || h.total_equity > 0.0)
+            .unwrap_or(false)
+    }
+
     /// Check for margin imbalances across all exchanges.
     /// Returns alerts for exchanges below the minimum margin ratio.
     pub fn check_imbalances(&self) -> Vec<MarginImbalanceAlert> {
