@@ -16,6 +16,9 @@ use crate::execution_gateway::{
     ExecutionGateway, ExchangeError, OrderIntent, OrderResult, OrderSide, OrderType,
 };
 use crate::execution_state::PlacementType;
+use crate::instrument_manager::{
+    self, ContractSpec, Exchange, FeeStrategy, InstrumentManager,
+};
 use crate::multi_exchange::global_book::ExchangeId;
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,15 @@ pub enum DualLegResult {
 
 pub struct DualLegExecutor;
 
+/// Convert ExchangeId (multi_exchange module) to Exchange (instrument_manager module).
+fn exchange_id_to_exchange(id: ExchangeId) -> Exchange {
+    match id {
+        ExchangeId::Binance => Exchange::Binance,
+        ExchangeId::Bybit => Exchange::Bybit,
+        ExchangeId::GateIo => Exchange::GateIo,
+    }
+}
+
 impl DualLegExecutor {
     /// Execute simultaneous entry on both exchanges with Post-Only repricing.
     ///
@@ -95,6 +107,18 @@ impl DualLegExecutor {
     ///
     /// GAP 2 FIX: Implements legging risk safeguards with configurable timeout
     /// and automatic retry with exponential backoff for failed legs.
+    ///
+    /// FEE STRATEGY: Uses InstrumentManager + FeeStrategy to set exchange-specific
+    /// time-in-force and price offsets for optimal maker rebate capture.
+    ///
+    /// PRE-FLIGHT MARGIN: Simulates margin requirements on both exchanges before
+    /// submitting orders to prevent InsufficientBalance rejections mid-execution.
+    ///
+    /// EXECUTION IDEMPOTENCY: Before retrying timed-out orders, checks if the
+    /// order already exists on the exchange to prevent duplicate fills.
+    ///
+    /// CONTRACT MULTIPLIER: Normalizes order sizes using InstrumentManager specs
+    /// so that both exchanges receive equivalent notional exposure.
     pub async fn execute_entry(
         symbol: &str,
         short_exchange: ExchangeId,
@@ -105,6 +129,7 @@ impl DualLegExecutor {
         max_slippage: f64,
         _timeout_ms: u64,
         gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
+        instrument_mgr: Option<&InstrumentManager>,
     ) -> DualLegResult {
         let short_gw = match gateways.get(&short_exchange) {
             Some(gw) => gw.clone(),
@@ -140,25 +165,137 @@ impl DualLegExecutor {
             long_gw.set_leverage(symbol, leverage),
         );
 
-        // GAP 1 FIX: Prefer Post-Only orders to capture maker rebates.
-        // Only use market orders if explicitly requested (emergency/exit scenarios).
-        // Post-Only orders save 0.05-0.10% per side (0.10-0.20% round trip),
-        // which is critical for funding arb where net rates are often 0.01-0.05%.
-        let (order_type, tif) = if use_market_orders {
-            (OrderType::Market, "ioc".to_string())
+        // ── Pre-flight margin simulation ──────────────────────────────────────
+        // Simulate margin requirements on both exchanges before submitting.
+        // This prevents InsufficientBalance rejections that leave us "legged in".
+        if let Some(mgr) = instrument_mgr {
+            let short_ex = exchange_id_to_exchange(short_exchange);
+            let long_ex = exchange_id_to_exchange(long_exchange);
+            let short_spec = mgr.get_or_default(short_ex, symbol);
+            let long_spec = mgr.get_or_default(long_ex, symbol);
+
+            // Approximate price from spec (fallback to 1.0 if unavailable)
+            let approx_price = if short_spec.min_notional > 0.0 {
+                short_spec.min_notional / short_spec.min_qty.max(1.0)
+            } else {
+                1.0
+            };
+
+            // Fetch balances from both gateways concurrently
+            let (short_bal, long_bal) = tokio::join!(
+                short_gw.get_balance(symbol),
+                long_gw.get_balance(symbol),
+            );
+            let short_balance = short_bal.unwrap_or(0.0);
+            let long_balance = long_bal.unwrap_or(0.0);
+
+            let qty_f64 = size as f64 * short_spec.contract_multiplier;
+            let short_margin = instrument_manager::simulate_margin(
+                short_balance, approx_price, qty_f64, leverage, true, 0.0,
+            );
+            let long_margin = instrument_manager::simulate_margin(
+                long_balance, approx_price, qty_f64, leverage, true, 0.0,
+            );
+
+            if !short_margin.can_place {
+                warn!("[dual-leg] Pre-flight margin REJECTED for short leg on {}: {}",
+                    short_exchange.name(),
+                    short_margin.rejection_reason.as_deref().unwrap_or("unknown"));
+                return DualLegResult::BothFailed {
+                    short_error: ExchangeError::Unknown {
+                        code: "MARGIN_INSUFFICIENT".into(),
+                        message: short_margin.rejection_reason.unwrap_or_else(|| "Margin check failed".into()),
+                    },
+                    long_error: ExchangeError::Unknown {
+                        code: "SKIPPED".into(),
+                        message: "Skipped due to short leg margin rejection".into(),
+                    },
+                };
+            }
+            if !long_margin.can_place {
+                warn!("[dual-leg] Pre-flight margin REJECTED for long leg on {}: {}",
+                    long_exchange.name(),
+                    long_margin.rejection_reason.as_deref().unwrap_or("unknown"));
+                return DualLegResult::BothFailed {
+                    short_error: ExchangeError::Unknown {
+                        code: "SKIPPED".into(),
+                        message: "Skipped due to long leg margin rejection".into(),
+                    },
+                    long_error: ExchangeError::Unknown {
+                        code: "MARGIN_INSUFFICIENT".into(),
+                        message: long_margin.rejection_reason.unwrap_or_else(|| "Margin check failed".into()),
+                    },
+                };
+            }
+            info!("[dual-leg] Pre-flight margin OK: short=${:.2}/{:.2} long=${:.2}/{:.2}",
+                short_margin.required_margin, short_balance,
+                long_margin.required_margin, long_balance);
+        }
+
+        // ── Contract multiplier normalization ─────────────────────────────────
+        // Ensure both exchanges receive equivalent notional exposure by adjusting
+        // contract sizes based on each exchange's contract multiplier.
+        let (short_size, long_size) = if let Some(mgr) = instrument_mgr {
+            let short_ex = exchange_id_to_exchange(short_exchange);
+            let long_ex = exchange_id_to_exchange(long_exchange);
+            let short_spec = mgr.get_or_default(short_ex, symbol);
+            let long_spec = mgr.get_or_default(long_ex, symbol);
+
+            if (short_spec.contract_multiplier - long_spec.contract_multiplier).abs() > 1e-12 {
+                // Normalize: target_notional = size * short_multiplier
+                // long_size = target_notional / long_multiplier
+                let target_notional_units = size as f64 * short_spec.contract_multiplier;
+                let adjusted_long = (target_notional_units / long_spec.contract_multiplier).round() as i64;
+                info!("[dual-leg] Contract multiplier normalization: short={} (mult={}) long={} (mult={})",
+                    size, short_spec.contract_multiplier, adjusted_long, long_spec.contract_multiplier);
+                (size, adjusted_long.max(1))
+            } else {
+                (size, size)
+            }
         } else {
-            (OrderType::PostOnly, "poc".to_string())
+            (size, size)
         };
+
+        // ── Fee Strategy integration ─────────────────────────────────────────
+        // Use InstrumentManager + FeeStrategy to set exchange-specific TIF and
+        // order type for optimal maker rebate capture.
+        let short_ex_enum = exchange_id_to_exchange(short_exchange);
+        let long_ex_enum = exchange_id_to_exchange(long_exchange);
+        let urgency = if use_market_orders { 1.0 } else { 0.0 };
+        let short_fee_strategy = instrument_manager::optimal_fee_strategy(short_ex_enum, urgency);
+        let long_fee_strategy = instrument_manager::optimal_fee_strategy(long_ex_enum, urgency);
+
+        let (short_order_type, short_tif) = if use_market_orders {
+            (OrderType::Market, "ioc".to_string())
+        } else if short_fee_strategy.use_post_only {
+            (OrderType::PostOnly, short_fee_strategy.time_in_force.clone())
+        } else {
+            (OrderType::Market, short_fee_strategy.time_in_force.clone())
+        };
+
+        let (long_order_type, long_tif) = if use_market_orders {
+            (OrderType::Market, "ioc".to_string())
+        } else if long_fee_strategy.use_post_only {
+            (OrderType::PostOnly, long_fee_strategy.time_in_force.clone())
+        } else {
+            (OrderType::Market, long_fee_strategy.time_in_force.clone())
+        };
+
+        info!("[dual-leg] Fee strategy: short@{}={} (tif={}, fee={:.5}) long@{}={} (tif={}, fee={:.5})",
+            short_exchange.name(), if short_fee_strategy.use_post_only { "PostOnly" } else { "Market" },
+            short_tif, short_fee_strategy.expected_fee_rate,
+            long_exchange.name(), if long_fee_strategy.use_post_only { "PostOnly" } else { "Market" },
+            long_tif, long_fee_strategy.expected_fee_rate);
 
         let short_intent = OrderIntent {
             symbol: symbol.to_string(),
             side: OrderSide::Sell,
-            size,
-            order_type: order_type.clone(),
+            size: short_size,
+            order_type: short_order_type,
             price: None,
             reduce_only: false,
             leverage: Some(leverage),
-            time_in_force: tif.clone(),
+            time_in_force: short_tif,
             slippage_cap_pct: Some(max_slippage),
             placement: PlacementType::AtBest,
             stop_loss: None,
@@ -170,12 +307,12 @@ impl DualLegExecutor {
         let long_intent = OrderIntent {
             symbol: symbol.to_string(),
             side: OrderSide::Buy,
-            size,
-            order_type,
+            size: long_size,
+            order_type: long_order_type,
             price: None,
             reduce_only: false,
             leverage: Some(leverage),
-            time_in_force: tif,
+            time_in_force: long_tif,
             slippage_cap_pct: Some(max_slippage),
             placement: PlacementType::AtBest,
             stop_loss: None,

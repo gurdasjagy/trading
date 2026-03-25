@@ -4836,6 +4836,19 @@ fn main() {
         .expect("Failed to build gateway Tokio runtime");
     let gateway_runtime = Box::leak(Box::new(gateway_runtime)); // intentional leak — lives forever
 
+    // 7b-pre. Initialize InstrumentManager — fetches contract specs (tick size,
+    // step size, contract multiplier) from all three exchanges at startup.
+    // This replaces ALL hardcoded precision values throughout the engine.
+    let is_testnet = config.exchanges.iter()
+        .find(|e| e.name == "gateio")
+        .map(|e| e.testnet)
+        .unwrap_or(false);
+    let instrument_mgr = Arc::new(instrument_manager::InstrumentManager::new(is_testnet));
+    gateway_runtime.block_on(async {
+        instrument_mgr.refresh_all().await;
+    });
+    info!("[startup] InstrumentManager initialized and specs refreshed from all exchanges");
+
     let gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> =
         config.exchanges.iter().find(|e| e.name == "gateio")
             .and_then(|cfg| {
@@ -4872,6 +4885,10 @@ fn main() {
                         }
                     }
                 });
+
+                // Set InstrumentManager on the concrete gateway before Arc wrapping
+                let mut gateway = gateway;
+                gateway.set_instrument_manager(instrument_mgr.clone());
 
                 Some(Arc::new(gateway) as Arc<dyn ExecutionGateway + Send + Sync>)
             });
@@ -5070,10 +5087,12 @@ fn main() {
             let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
             if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
                 info!("Binance: live execution gateway initialised (testnet={})", config.multi_exchange.binance_testnet);
-                Some(Arc::new(binance_gateway::BinanceGateway::new(
+                let mut bgw = binance_gateway::BinanceGateway::new(
                     ak.to_string(), sk.to_string(),
                     config.multi_exchange.binance_testnet,
-                )) as Arc<dyn ExecutionGateway + Send + Sync>)
+                );
+                bgw.set_instrument_manager(instrument_mgr.clone());
+                Some(Arc::new(bgw) as Arc<dyn ExecutionGateway + Send + Sync>)
             } else {
                 info!("Binance: no valid credentials - signal-only mode");
                 None
@@ -5086,10 +5105,12 @@ fn main() {
             let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
             if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
                 info!("Bybit: live execution gateway initialised (testnet={})", config.multi_exchange.bybit_testnet);
-                Some(Arc::new(bybit_gateway::BybitGateway::new(
+                let mut bbgw = bybit_gateway::BybitGateway::new(
                     ak.to_string(), sk.to_string(),
                     config.multi_exchange.bybit_testnet,
-                )) as Arc<dyn ExecutionGateway + Send + Sync>)
+                );
+                bbgw.set_instrument_manager(instrument_mgr.clone());
+                Some(Arc::new(bbgw) as Arc<dyn ExecutionGateway + Send + Sync>)
             } else {
                 info!("Bybit: no valid credentials - signal-only mode");
                 None
@@ -5230,6 +5251,9 @@ fn main() {
             let fab_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let fab_shutdown_clone = fab_shutdown.clone();
 
+            // Clone InstrumentManager for the funding arb engine thread
+            let fab_instrument_mgr = instrument_mgr.clone();
+
             info!("[funding-arb] Spawning engine with {} gateways, {} symbols",
                   fab_gateways.len(), fab_symbols.len());
 
@@ -5255,6 +5279,7 @@ fn main() {
                             config,
                             fab_shutdown_clone,
                         );
+                        engine.set_instrument_manager(fab_instrument_mgr);
 
                         engine.run(
                             fab_gateways,
@@ -5422,10 +5447,12 @@ fn main() {
                 let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
                 let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
                 if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    let binance_gw = Arc::new(binance_gateway::BinanceGateway::new(
+                    let mut bgw_exec = binance_gateway::BinanceGateway::new(
                         ak.to_string(), sk.to_string(),
                         config.multi_exchange.binance_testnet,
-                    )) as Arc<dyn ExecutionGateway + Send + Sync>;
+                    );
+                    bgw_exec.set_instrument_manager(instrument_mgr.clone());
+                    let binance_gw = Arc::new(bgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
                     gateways_map.insert(multi_exchange::ExchangeId::Binance, binance_gw);
                 }
             }
@@ -5434,10 +5461,12 @@ fn main() {
                 let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
                 let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
                 if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    let bybit_gw = Arc::new(bybit_gateway::BybitGateway::new(
+                    let mut bbgw_exec = bybit_gateway::BybitGateway::new(
                         ak.to_string(), sk.to_string(),
                         config.multi_exchange.bybit_testnet,
-                    )) as Arc<dyn ExecutionGateway + Send + Sync>;
+                    );
+                    bbgw_exec.set_instrument_manager(instrument_mgr.clone());
+                    let bybit_gw = Arc::new(bbgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
                     gateways_map.insert(multi_exchange::ExchangeId::Bybit, bybit_gw);
                 }
             }

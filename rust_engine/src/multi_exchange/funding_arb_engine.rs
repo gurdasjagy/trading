@@ -460,7 +460,9 @@ impl FundingArbEngine {
                                     opp.net_rate * 100.0, opp.annualized_apr * 100.0,
                                     estimated_slippage_bps, basis_risk, breakeven_periods, recommended_size);
 
-                                // Execute dual-leg entry
+                                // Execute dual-leg entry with InstrumentManager for
+                                // pre-flight margin simulation, contract multiplier
+                                // normalization, and fee strategy integration.
                                 let result = DualLegExecutor::execute_entry(
                                     &opp.symbol,
                                     opp.short_exchange,
@@ -471,6 +473,7 @@ impl FundingArbEngine {
                                     self.config.max_order_slippage,
                                     self.config.execution_timeout_ms,
                                     &gateways,
+                                    self.instrument_mgr.as_deref(),
                                 ).await;
 
                                 match result {

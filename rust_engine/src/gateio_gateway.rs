@@ -56,6 +56,7 @@ use crate::execution_gateway::{
     now_ms, now_us,
 };
 use crate::execution_state::PlacementType;
+use crate::instrument_manager::{InstrumentManager, Exchange};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -168,6 +169,10 @@ pub struct GateIoGateway {
     /// the connection loop trips this with TripReason::ConnectivityLost to prevent
     /// the strategy engine from firing signals into a dead gateway.
     circuit_breaker: Option<Arc<CircuitBreaker>>,
+    /// Dynamic instrument manager for real-time precision rules.
+    /// When set, price is formatted using Gate.io's order_price_round (tick size)
+    /// instead of hardcoded "{:.8}".
+    instrument_mgr: Option<Arc<InstrumentManager>>,
 }
 
 impl GateIoGateway {
@@ -179,6 +184,11 @@ impl GateIoGateway {
     ///   3. WS writer (send orders, pings)
     pub fn new(api_key: String, api_secret: String, testnet: bool) -> Self {
         Self::new_with_circuit_breaker(api_key, api_secret, testnet, None)
+    }
+
+    /// Set the instrument manager after construction for dynamic price formatting.
+    pub fn set_instrument_manager(&mut self, mgr: Arc<InstrumentManager>) {
+        self.instrument_mgr = Some(mgr);
     }
 
     /// Create a new WebSocket-based Gate.io gateway with circuit breaker integration.
@@ -233,6 +243,7 @@ impl GateIoGateway {
             rate_limit_tokens_used: rate_limit_tokens.clone(),
             rate_limit_second_ns: rate_limit_second.clone(),
             circuit_breaker: circuit_breaker.clone(),
+            instrument_mgr: None,
         };
 
         // Spawn the WS connection manager task
@@ -285,6 +296,7 @@ impl GateIoGateway {
                         rate_limit_tokens_used: Arc::new(AtomicU64::new(0)),
                         rate_limit_second_ns: Arc::new(AtomicU64::new(0)),
                         circuit_breaker: None,
+                        instrument_mgr: None,
                     };
 
                     if let Err(e) = temp_gw.monitor_liquidation_prices().await {
@@ -1906,13 +1918,20 @@ impl ExecutionGateway for GateIoGateway {
         // Previously hardcoded "{:.8}" which may not respect Gate.io's order_price_round
         // (tick size) for specific contracts. The InstrumentManager fetches the real
         // tick size from GET /api/v4/futures/usdt/contracts at startup.
+        // BUG FIX #3: Use InstrumentManager for Gate.io price formatting.
+        // Previously hardcoded "{:.8}" which may not respect Gate.io's order_price_round
+        // (tick size) for specific contracts. The InstrumentManager fetches the real
+        // tick size from GET /api/v4/futures/usdt/contracts at startup.
         let price_str = if intent.order_type == OrderType::Market {
             "0".to_string()
         } else {
             intent.price.map(|p| {
-                // Gate.io price formatting uses order_price_round from contract spec
-                // Fallback to {:.8} if InstrumentManager is not available
-                format!("{:.8}", p)
+                if let Some(ref mgr) = self.instrument_mgr {
+                    let spec = mgr.get_or_default(Exchange::GateIo, &symbol);
+                    spec.format_price(p)
+                } else {
+                    format!("{:.8}", p)
+                }
             }).unwrap_or_else(|| "0".to_string())
         };
 
