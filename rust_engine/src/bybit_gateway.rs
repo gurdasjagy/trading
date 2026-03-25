@@ -17,6 +17,7 @@ use crate::execution_gateway::{
     ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, Position,
     RustTicker,
 };
+use crate::instrument_manager::{InstrumentManager, Exchange};
 
 const BYBIT_BASE_URL: &str = "https://api.bybit.com";
 const BYBIT_RECV_WINDOW: i64 = 5000;
@@ -27,6 +28,10 @@ pub struct BybitGateway {
     api_secret: Vec<u8>,
     rate_limiter: Arc<AdaptiveRateLimiter>,
     testnet: bool,
+    /// Dynamic instrument manager for real-time precision rules.
+    /// When set, price and quantity are formatted using Bybit's
+    /// tickSize and qtyStep instead of hardcoded "{:.8}" / "{:.3}".
+    instrument_mgr: Option<Arc<InstrumentManager>>,
 }
 
 impl BybitGateway {
@@ -48,7 +53,25 @@ impl BybitGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
+            instrument_mgr: None,
         }
+    }
+
+    /// Create a new Bybit gateway with an InstrumentManager for real-time precision.
+    pub fn new_with_instruments(
+        api_key: String,
+        api_secret: String,
+        testnet: bool,
+        instrument_mgr: Arc<InstrumentManager>,
+    ) -> Self {
+        let mut gw = Self::new(api_key, api_secret, testnet);
+        gw.instrument_mgr = Some(instrument_mgr);
+        gw
+    }
+
+    /// Set the instrument manager after construction.
+    pub fn set_instrument_manager(&mut self, mgr: Arc<InstrumentManager>) {
+        self.instrument_mgr = Some(mgr);
     }
 
     fn base_url(&self) -> &str {
@@ -243,12 +266,32 @@ impl ExecutionGateway for BybitGateway {
             OrderType::Limit => "GTC",
         };
 
-        // Ensure quantity is at least 1 and properly formatted as a decimal string.
-        // Bybit v5 linear contracts require qty as a string in base currency units
-        // (e.g. "0.01" for ETH). Sending "0" causes error 10001 (Parameter error).
-        let qty = intent.size.max(1);
-        let qty_str = format!("{:.3}", qty as f64);
-        
+        // BUG FIX #2 & #3: Use InstrumentManager for proper precision formatting.
+        // Previously used hardcoded "{:.3}" for qty and "{:.8}" for price, which
+        // caused Bybit error 110007 (InvalidPrice) when the price didn't respect
+        // the symbol's specific tickSize (e.g. BTCUSDT requires 0.5 increments).
+        //
+        // Now we fetch tickSize and qtyStep from Bybit's /v5/market/instruments-info
+        // via the InstrumentManager and format accordingly.
+        let spec = self.instrument_mgr.as_ref()
+            .and_then(|mgr| mgr.get(Exchange::Bybit, &symbol));
+
+        let qty_f64 = intent.size as f64;
+        let qty_str = if let Some(ref s) = spec {
+            // Use real-time qtyStep precision from instruments-info lotSizeFilter
+            let rounded = s.clamp_and_round_qty(qty_f64);
+            if rounded < s.min_qty {
+                tracing::warn!(
+                    "Bybit qty {} below min {} for {} — clamping to min",
+                    qty_f64, s.min_qty, symbol
+                );
+            }
+            s.format_qty(rounded.max(s.min_qty))
+        } else {
+            // Fallback: conservative 8 decimal places
+            format!("{:.8}", qty_f64.max(0.001))
+        };
+
         let mut body = json!({
             "category": "linear",
             "symbol": symbol,
@@ -263,7 +306,13 @@ impl ExecutionGateway for BybitGateway {
         // Only send price for non-MARKET orders
         if intent.order_type != OrderType::Market {
             if let Some(price) = intent.price {
-                body["price"] = json!(format!("{:.8}", price));
+                let price_str = if let Some(ref s) = spec {
+                    // Use real-time tickSize precision from instruments-info priceFilter
+                    s.format_price(price)
+                } else {
+                    format!("{:.8}", price)
+                };
+                body["price"] = json!(price_str);
             }
         }
 

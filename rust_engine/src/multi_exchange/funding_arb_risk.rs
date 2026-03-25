@@ -6,12 +6,13 @@
 //! 3. Basis Risk Calculation
 //! 4. Capital & Margin Sufficiency Check
 
-use tracing::{warn, debug};
+use tracing::{warn, debug, info};
 use serde::{Deserialize, Serialize};
 
 use crate::multi_exchange::global_book::{ExchangeId, GlobalBookRegistry};
 use crate::multi_exchange::margin_monitor::CrossVenueMarginMonitor;
 use crate::multi_exchange::funding_arb::FundingArbOpportunity;
+use crate::instrument_manager::{InstrumentManager, Exchange, simulate_margin};
 
 // Forward reference: FundingArbEngineConfig is defined in funding_arb_engine.rs
 use crate::multi_exchange::funding_arb_engine::FundingArbEngineConfig;
@@ -47,11 +48,32 @@ pub struct PreTradeValidator;
 
 impl PreTradeValidator {
     /// Run all pre-trade checks for a funding arbitrage opportunity.
+    ///
+    /// BUG FIX #2: Now accepts an optional InstrumentManager to properly
+    /// calculate fractional position sizes based on available equity and
+    /// exchange-specific contract multipliers. Previously, the position
+    /// sizing at line 126-128 treated raw USD balance * leverage as contract
+    /// count, which for BTC meant trying to open size=4943 contracts when
+    /// the balance was $4943 — but on Binance 1 contract = 1 BTC ($60k+).
+    ///
+    /// With InstrumentManager: notional USD → base asset qty → contracts,
+    /// respecting each exchange's quanto_multiplier and lot size.
     pub fn validate(
         opp: &FundingArbOpportunity,
         global_book_registry: &GlobalBookRegistry,
         margin_monitor: &CrossVenueMarginMonitor,
         config: &FundingArbEngineConfig,
+    ) -> PreTradeResult {
+        Self::validate_with_instruments(opp, global_book_registry, margin_monitor, config, None)
+    }
+
+    /// Run all pre-trade checks with InstrumentManager for proper sizing.
+    pub fn validate_with_instruments(
+        opp: &FundingArbOpportunity,
+        global_book_registry: &GlobalBookRegistry,
+        margin_monitor: &CrossVenueMarginMonitor,
+        config: &FundingArbEngineConfig,
+        instrument_mgr: Option<&InstrumentManager>,
     ) -> PreTradeResult {
         // 1. PROFITABILITY GATE: Is the funding spread enough to cover fees?
         let short_fee_bps = opp.short_exchange.taker_fee_bps() as f64;
@@ -122,10 +144,82 @@ impl PreTradeValidator {
         }
 
         // 4. CALCULATE RECOMMENDED SIZE
+        // BUG FIX #2: Proper position sizing using InstrumentManager.
+        // Previously: recommended_size = (balance * leverage) as i64
+        //   → For $4943 balance: size = 4943 * 2 = 9886 contracts
+        //   → On Binance, 1 contract = 1 BTC (~$60k) → InsufficientBalance!
+        //
+        // Now: Convert notional USD → base-asset quantity → exchange contracts
+        //   → $4943 * 2x leverage * 50% position = $4943 notional
+        //   → At $60k/BTC: 4943/60000 = 0.082 BTC
+        //   → On Binance (linear): qty = 0.082, rounded to stepSize
+        //   → On Gate.io (quanto 0.0001): contracts = 0.082/0.0001 = 820
         let min_balance = short_balance.min(long_balance);
-        let max_size_by_balance = (min_balance * config.max_position_pct * config.leverage as f64) as i64;
-        let max_size_by_notional = config.max_notional_usdt as i64;
-        let recommended_size = max_size_by_balance.min(max_size_by_notional).max(1);
+        let notional_usd = (min_balance * config.max_position_pct * config.leverage as f64)
+            .min(config.max_notional_usdt);
+
+        let recommended_size = if let Some(mgr) = instrument_mgr {
+            // Use InstrumentManager for exchange-aware sizing
+            let short_exchange_type = exchange_id_to_exchange(opp.short_exchange);
+            let long_exchange_type = exchange_id_to_exchange(opp.long_exchange);
+
+            // Get contract specs for both exchanges
+            let short_spec = mgr.get_or_default(short_exchange_type, &opp.symbol);
+            let long_spec = mgr.get_or_default(long_exchange_type, &opp.symbol);
+
+            // Get approximate price from the books or use a heuristic
+            let approx_price = Self::get_approximate_price(opp, global_book_registry)
+                .unwrap_or(1.0); // fallback; will be conservative
+
+            // Calculate qty for each exchange and use the minimum
+            let short_qty = short_spec.notional_to_qty(notional_usd, approx_price);
+            let long_qty = long_spec.notional_to_qty(notional_usd, approx_price);
+
+            // Use the smaller of the two to ensure both legs can be filled
+            let qty = short_qty.min(long_qty);
+
+            // Convert to exchange contract units (for Gate.io: qty / quanto_multiplier)
+            // For Binance/Bybit linear: contracts = qty (since multiplier = 1.0)
+            let short_contracts = short_spec.qty_to_contracts(qty);
+            let long_contracts = long_spec.qty_to_contracts(qty);
+            let contracts = short_contracts.min(long_contracts).max(1);
+
+            // Pre-flight margin simulation
+            let short_margin_check = simulate_margin(
+                short_balance, approx_price, qty, config.leverage, true, 0.0,
+            );
+            let long_margin_check = simulate_margin(
+                long_balance, approx_price, qty, config.leverage, true, 0.0,
+            );
+
+            if !short_margin_check.can_place {
+                info!(
+                    "[pre-trade] Margin simulation: short leg would fail — reducing size. {}",
+                    short_margin_check.rejection_reason.unwrap_or_default()
+                );
+                // Use max affordable qty instead
+                let affordable_contracts = short_spec.qty_to_contracts(
+                    short_margin_check.max_affordable_qty
+                );
+                affordable_contracts.min(contracts).max(1)
+            } else if !long_margin_check.can_place {
+                info!(
+                    "[pre-trade] Margin simulation: long leg would fail — reducing size. {}",
+                    long_margin_check.rejection_reason.unwrap_or_default()
+                );
+                let affordable_contracts = long_spec.qty_to_contracts(
+                    long_margin_check.max_affordable_qty
+                );
+                affordable_contracts.min(contracts).max(1)
+            } else {
+                contracts
+            }
+        } else {
+            // Legacy fallback without InstrumentManager
+            let max_size_by_balance = (min_balance * config.max_position_pct * config.leverage as f64) as i64;
+            let max_size_by_notional = config.max_notional_usdt as i64;
+            max_size_by_balance.min(max_size_by_notional).max(1)
+        };
 
         // 5. BASIS RISK
         // Walk both exchange books to compute basis (price gap between exchanges).
@@ -279,6 +373,29 @@ impl PreTradeValidator {
         slippage_bps
     }
 
+    /// Get an approximate price for the symbol from the global book.
+    /// Used for notional → quantity conversion in position sizing.
+    fn get_approximate_price(
+        opp: &FundingArbOpportunity,
+        registry: &GlobalBookRegistry,
+    ) -> Option<f64> {
+        for sym_id in registry.all_symbol_ids() {
+            if let Some(book_lock) = registry.get(sym_id) {
+                let book = book_lock.read();
+                // Try the short exchange first, then the long exchange
+                for exchange in &[opp.short_exchange, opp.long_exchange] {
+                    if let Some(snap) = book.get_exchange_snapshot(*exchange) {
+                        let mid = (snap.best_bid_fp + snap.best_ask_fp) as f64 / 2.0 / 1e8;
+                        if mid > 0.0 {
+                            return Some(mid);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Estimate basis risk (price gap between exchanges) as a fraction of mid price.
     fn estimate_basis_risk(
         opp: &FundingArbOpportunity,
@@ -305,6 +422,15 @@ impl PreTradeValidator {
 
         // If we can't compute basis risk, return 0 (conservative — let execution handle it)
         0.0
+    }
+}
+
+/// Convert ExchangeId (multi_exchange module) to Exchange (instrument_manager module).
+fn exchange_id_to_exchange(id: ExchangeId) -> Exchange {
+    match id {
+        ExchangeId::Binance => Exchange::Binance,
+        ExchangeId::Bybit => Exchange::Bybit,
+        ExchangeId::GateIo => Exchange::GateIo,
     }
 }
 

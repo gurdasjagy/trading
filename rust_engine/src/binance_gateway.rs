@@ -13,12 +13,13 @@ use reqwest::{
 };
 use serde_json::{json, Value};
 use sha2::Sha256;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::execution_gateway::{
     AdaptiveRateLimiter, ExchangeError, ExecutionGateway, OrderIntent, OrderResult, 
     OrderSide, OrderType, Position, RustTicker,
 };
+use crate::instrument_manager::{InstrumentManager, Exchange};
 
 const BINANCE_FUTURES_BASE_URL: &str = "https://fapi.binance.com";
 const BINANCE_FUTURES_TESTNET_URL: &str = "https://testnet.binancefuture.com";
@@ -74,6 +75,10 @@ pub struct BinanceGateway {
     api_secret: Vec<u8>,
     rate_limiter: Arc<AdaptiveRateLimiter>,
     testnet: bool,
+    /// Dynamic instrument manager for real-time precision rules.
+    /// When set, price and quantity are formatted using exchange-specific
+    /// tickSize and stepSize instead of hardcoded "{:.8}" / "{:.3}".
+    instrument_mgr: Option<Arc<InstrumentManager>>,
 }
 
 impl BinanceGateway {
@@ -92,7 +97,25 @@ impl BinanceGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
+            instrument_mgr: None,
         }
+    }
+
+    /// Create a new Binance gateway with an InstrumentManager for real-time precision.
+    pub fn new_with_instruments(
+        api_key: String,
+        api_secret: String,
+        testnet: bool,
+        instrument_mgr: Arc<InstrumentManager>,
+    ) -> Self {
+        let mut gw = Self::new(api_key, api_secret, testnet);
+        gw.instrument_mgr = Some(instrument_mgr);
+        gw
+    }
+
+    /// Set the instrument manager after construction.
+    pub fn set_instrument_manager(&mut self, mgr: Arc<InstrumentManager>) {
+        self.instrument_mgr = Some(mgr);
     }
     
     fn base_url(&self) -> &str {
@@ -229,11 +252,31 @@ impl ExecutionGateway for BinanceGateway {
             OrderType::PostOnly => ("LIMIT", "GTX"), // GTX = Post-only on Binance
         };
         
-        // Ensure quantity is at least 1 and properly formatted as a decimal string.
-        // Binance requires 'quantity' as a decimal number string matching the
-        // symbol's lot-size precision (e.g. "0.001" for ETH).
-        let qty = intent.size.max(1);
-        let qty_str = format!("{:.3}", qty as f64);
+        // BUG FIX #2 & #3: Use InstrumentManager for proper precision formatting.
+        // Previously used hardcoded "{:.3}" for qty and "{:.8}" for price, which
+        // caused InvalidPrice errors on Bybit and InsufficientBalance on Binance
+        // (because size=1 meant 1 whole BTC instead of a fractional amount).
+        //
+        // Now we fetch tickSize and stepSize from Binance's /fapi/v1/exchangeInfo
+        // via the InstrumentManager and format accordingly.
+        let spec = self.instrument_mgr.as_ref()
+            .and_then(|mgr| mgr.get(Exchange::Binance, &symbol));
+
+        let qty_f64 = intent.size as f64;
+        let qty_str = if let Some(ref s) = spec {
+            // Use real-time stepSize precision from exchangeInfo
+            let rounded = s.clamp_and_round_qty(qty_f64);
+            if rounded < s.min_qty {
+                warn!(
+                    "Binance qty {} below min {} for {} — clamping to min",
+                    qty_f64, s.min_qty, symbol
+                );
+            }
+            s.format_qty(rounded.max(s.min_qty))
+        } else {
+            // Fallback: conservative 8 decimal places
+            format!("{:.8}", qty_f64.max(0.001))
+        };
         
         let mut params = format!(
             "symbol={}&side={}&type={}&quantity={}",
@@ -248,7 +291,13 @@ impl ExecutionGateway for BinanceGateway {
         // that include a price parameter with error -1102.
         if intent.order_type != OrderType::Market {
             if let Some(price) = intent.price {
-                params.push_str(&format!("&price={:.8}", price));
+                let price_str = if let Some(ref s) = spec {
+                    // Use real-time tickSize precision from exchangeInfo PRICE_FILTER
+                    s.format_price(price)
+                } else {
+                    format!("{:.8}", price)
+                };
+                params.push_str(&format!("&price={}", price_str));
             }
         }
         
