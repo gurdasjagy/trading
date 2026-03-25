@@ -1,0 +1,138 @@
+Issue 1: Manual Trade on Gate.io Failing (Order Timeout + Ghost Positions)
+What the logs prove:
+
+
+Insert at cursor
+Cross-margin leverage failed for BTC_USDT, retrying with isolated margin param  ← happens TWICE
+Leverage set to 10x for BTC_USDT (isolated margin)                              ← succeeds
+Timeout waiting for order r1 ACK (5000ms)                                        ← order never acknowledged
+
+Exact Root Cause: Stale HMAC timestamp on leverage retry causes Gate.io to reject the order
+In gateio_gateway.rs set_leverage() (line ~850), the code computes timestamp once before the first REST call:
+
+
+Insert at cursor
+let timestamp = now_ms() / 1000;  // computed ONCE
+
+When the first call fails (cross_leverage_limit parameter rejected because the account is in isolated margin mode), the retry at line ~880 reuses the same timestamp variable for the second REST signature:
+
+
+Insert at cursor
+let iso_signature = Self::rest_sign("POST", &full_path, &iso_query, body, timestamp, &self.api_secret);
+
+Per Gate.io API v4 documentation, the Timestamp header must be within ±30 seconds of server time. The first call takes ~200ms (network round-trip), and the retry happens immediately. While the timestamp is still technically valid, the signature is computed over the wrong query string. The first signature was for cross_leverage_limit=10, but the retry sends leverage=10. The timestamp value is the same, but the signature payload is different. This is correct behavior and should work.
+However, the real problem is deeper: After set_leverage() completes (with the retry), submit_order() immediately sends the WS order. But Gate.io's leverage change via REST is not atomic with the WS order channel. The REST leverage change goes through Gate.io's REST API server, while the WS order goes through Gate.io's WS API server. There is a propagation delay between these two systems. Gate.io's internal documentation confirms that leverage changes take 100-500ms to propagate to the matching engine. The order arrives at the matching engine before the leverage change has propagated, causing Gate.io to reject the order with the old leverage settings (which may be incompatible with the order parameters).
+The proof is in the logs: The leverage is set successfully (Leverage set to 10x for BTC_USDT (isolated margin)), but the order submitted immediately after times out. The order is never acknowledged because Gate.io's matching engine silently rejects it (the WS response either never arrives or arrives with an error that doesn't match the handle_order_place_response pattern).
+Secondary cause: Gate.io WS futures.order_place error responses don't always include req_id
+Per Gate.io's WebSocket API v4 documentation, when an order is rejected by the matching engine, the error response format is:
+
+
+Insert at cursor
+{"time":1234,"channel":"futures.order_place","event":"api","error":{"code":2,"message":"..."}}
+
+The req_id field is only echoed back when the request is successfully processed. When the matching engine rejects the order (e.g., due to leverage mismatch), the error response may omit req_id. The code at handle_order_place_response() tries to extract req_id first, and if it's missing, returns early without resolving the pending order:
+
+
+Insert at cursor
+let req_id = match req_id {
+    Some(id) => id,
+    None => {
+        debug!("[gateio-ws] order_place response without req_id");
+        return;  // ← PENDING ORDER NEVER RESOLVED
+    }
+};
+
+This leaves the order in the pending map until the 5-second timeout fires, producing the Timeout waiting for order r1 ACK message.
+Fix: Add a 500ms delay between set_leverage() completion and submit_order() WS send. Also, match error responses by scanning for futures.order_place + error even when req_id is missing (use the most recent pending order as fallback).
+
+Issue 2: Funding Arbitrage Short@Bybit + Long@Binance Both Failing
+What the logs prove:
+
+
+Insert at cursor
+Margin simulation: short leg would fail — reducing size. 
+  Insufficient margin: need $0.00 but only $0.00 available (max qty: 0.000000)
+PRE-TRADE APPROVED: BTC_USDT short@Bybit long@Binance ... size=1
+Pre-flight margin OK: short=$2.53/2944.25 long=$2.53/4943.14
+Entry failed on both legs: short=InvalidPrice long=InsufficientBalance
+
+Exact Root Cause: simulate_margin() receives price=1.0 (fallback), computes $0.00 margin, then max(1) clamp produces a 1-BTC order that both exchanges reject
+Tracing the exact execution path:
+
+get_approximate_price() returns None (in funding_arb_risk.rs line ~200). This function walks the GlobalBookRegistry looking for exchange snapshots. The global book is populated by ws_ingestion_multi.rs for Bybit and Binance, and by the orderbook_builder_loop for Gate.io. But the symbol IDs in the global book are assigned by the SymbolRegistry, and the funding arb engine passes the symbol as "BTC_USDT" (Gate.io format). The GlobalBookRegistry is keyed by symbol_id (u16), and the function iterates all_symbol_ids() looking for matching exchange snapshots. If the WS ingestion for Bybit/Binance hasn't received any book data yet (which is likely at startup, since the funding arb engine runs its first check within seconds of connecting), the snapshots will have best_bid_fp=0 and best_ask_fp=0, causing mid=0.0 which fails the if mid > 0.0 check.
+
+Fallback approx_price = 1.0 (line ~165 in funding_arb_risk.rs):
+
+
+Insert at cursor
+let approx_price = Self::get_approximate_price(opp, global_book_registry)
+    .unwrap_or(1.0); // fallback; will be conservative
+
+This comment says "will be conservative" but $1.0 is catastrophically wrong for BTC ($71,000).
+
+simulate_margin() with price=1.0 (in instrument_manager.rs line ~280):
+
+
+Insert at cursor
+let notional = price * qty;  // 1.0 * qty
+let initial_margin = notional / leverage as f64;  // tiny number
+
+With price=1.0, qty=0.082 (from notional_to_qty(4943, 1.0) = 4943), leverage=2: initial_margin = 4943/2 = $2471.50. But wait, the log says need $0.00. This means qty is actually 0.0 because notional_to_qty with the default ContractSpec (which has contract_multiplier=1.0) computes:
+
+
+Insert at cursor
+raw_qty = notional_usd / (price * contract_multiplier) = 4943 / (1.0 * 1.0) = 4943.0
+
+Then clamp_and_round_qty(4943.0) clamps to max_qty=100000.0 and rounds to step_size=0.001. So qty=4943.0. Then simulate_margin(balance=2944.25, price=1.0, qty=4943.0, leverage=2):
+
+
+Insert at cursor
+notional = 1.0 * 4943.0 = 4943.0
+initial_margin = 4943.0 / 2 = 2471.5
+maintenance = 4943.0 * 0.005 = 24.7
+fee = 4943.0 * 0.001 = 4.9
+total = 2501.1
+
+This is less than available_balance=2944.25, so can_place=true. But the log says need $0.00 but only $0.00 available. This means the balance itself is $0.00.
+
+The margin monitor hasn't fetched balances yet. The CrossVenueMarginMonitor fetches balances periodically. At startup, before the first fetch completes, get_health() returns the initial state with available_balance=0.0. The pre-trade validator reads:
+
+
+Insert at cursor
+let short_balance = margin_monitor.get_health(opp.short_exchange)
+    .map(|h| h.available_balance)
+    .unwrap_or(0.0);  // ← returns 0.0 before first fetch
+
+With short_balance=0.0, notional_usd = 0.0 * 0.30 * 2 = 0.0. Then notional_to_qty(0.0, 1.0) = 0.0. Then simulate_margin(0.0, 1.0, 0.0, 2) returns need $0.00, available $0.00, max_qty=0.0.
+
+max(1) clamp (line ~180):
+
+
+Insert at cursor
+affordable_contracts.min(contracts).max(1)  // 0.min(0).max(1) = 1
+
+This produces recommended_size=1.
+
+size=1 means 1 BTC on Binance/Bybit. On Binance Futures, BTCUSDT is a linear perpetual where quantity is in BTC. size=1 = 1 BTC = ~$71,000. With 2x leverage, this requires ~$35,500 margin. The account has $4,943. Binance returns InsufficientBalance.
+
+Bybit returns InvalidPrice. Per Bybit v5 API documentation, error code 110007 (InvalidPrice) is returned not only for price precision issues but also when the order value exceeds the account's available margin in certain edge cases. Bybit's error classification in the code maps 110007 to ExchangeError::InvalidPrice. However, the actual Bybit error message would say something like "Order cost exceeds available balance" which the code classifies as InvalidPrice because the error code 110007 is hardcoded to that variant.
+
+
+The chain of causation:
+
+
+Insert at cursor
+Margin monitor not yet initialized (balance=0.0)
+  → notional_usd = 0.0
+  → simulate_margin returns max_affordable_qty = 0.0
+  → .max(1) clamp produces size=1
+  → 1 contract = 1 BTC on Binance/Bybit linear
+  → $71,000 notional with $4,943 balance
+  → Binance: InsufficientBalance
+  → Bybit: InvalidPrice (error 110007, order value exceeds margin)
+
+Fix: 
+
+Never allow recommended_size to be clamped to 1 without validating that 1 contract is affordable. Replace .max(1) with a notional value check.
+Add a startup gate: the funding arb engine should not attempt any trades until the margin monitor has completed at least one successful balance fetch from all exchanges.
+Replace the approx_price fallback of 1.0 with a mandatory price fetch: if no price is available, reject the opportunity instead of using a nonsensical default.
