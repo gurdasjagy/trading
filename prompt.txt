@@ -1,0 +1,662 @@
+I now have a thorough understanding of the entire codebase. Let me compile the comprehensive prompt for your coding agent.
+
+---
+
+# Comprehensive Coding Agent Prompt: Institutional-Grade Futures Trading Bot Upgrade
+
+## Context & Repository Overview
+
+You are working on the repository `https://gitlab.com/jas-group2/xtrade`. This is a **fully automated multi-exchange USDT-M perpetual futures trading bot** with a dual-architecture:
+
+- **Hot Path (Rust):** `rust_engine/src/` - Real-time WS ingestion, orderbook building, microstructure strategy, execution routing. Runs on pinned CPU cores with lock-free SPSC ring buffers.
+- **Cold Path (Python):** `crypto_trading_bot/` - ML model training, regime detection, dashboard, analytics, sentiment analysis. Communicates with Rust via `/dev/shm` shared memory.
+
+**Supported Exchanges:** Gate.io (primary, WS-based), Binance Futures (REST), Bybit v5 (REST). Multi-exchange mode activated via `USE_MULTI_EXCHANGE=on`.
+
+**Current State:** The bot has numerous bugs, architectural gaps, and missing institutional features that prevent it from being profitable in live trading. The `read.txt` file documents some known issues but is incomplete.
+
+---
+
+## PART 1: CRITICAL BUG FIXES (Must Fix First)
+
+### BUG 1: Gate.io WS Authentication - "Not Login" Error on Order Placement
+
+**File:** `rust_engine/src/gateio_gateway.rs`
+
+**Problem:** Gate.io WS v4 requires an explicit `login` channel authentication BEFORE any `futures.order_place` API calls. The current code only authenticates via the `futures.orders` subscription auth block, which authenticates for receiving order updates but does NOT authenticate the session for placing orders. When `submit_order` sends a `futures.order_place` message, Gate.io rejects it with `WS_REJECT: Not login`.
+
+**Fix:** Add a dedicated login step in `ws_connection_loop` between connection and subscription:
+
+```rust
+// In ws_connection_loop, after connect_async succeeds and before subscribing:
+
+// Step 1: Send explicit login message
+let login_time = now_ms() / 1000;
+let login_sign = Self::ws_sign(&api_secret, "futures.login", "api", login_time);
+let login_msg = format!(
+    r#"{{"time":{},"channel":"futures.login","event":"api","payload":{{"api_key":"{}","signature":"{}","timestamp":"{}"}}}}"#,
+    login_time, api_key, login_sign, login_time
+);
+info!("[gateio-ws] Sending explicit login authentication");
+if let Err(e) = ws_write.send(Message::Text(login_msg)).await {
+    error!("[gateio-ws] Login send failed: {}", e);
+    continue;
+}
+
+// Wait for login success response
+let login_deadline = Instant::now() + Duration::from_secs(5);
+let mut login_success = false;
+while Instant::now() < login_deadline {
+    tokio::select! {
+        msg = ws_read.next() => {
+            match msg {
+                Some(Ok(Message::Text(txt))) => {
+                    if txt.contains("futures.login") && 
+                       (txt.contains("\"status\":\"success\"") || txt.contains("\"error\":null")) {
+                        info!("[gateio-ws] Login authentication successful");
+                        login_success = true;
+                        break;
+                    } else if txt.contains("futures.login") && txt.contains("error") {
+                        error!("[gateio-ws] Login authentication failed: {}", txt);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+    }
+}
+
+if !login_success {
+    warn!("[gateio-ws] Login failed, reconnecting...");
+    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+    backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
+    continue;
+}
+
+// Step 2: THEN subscribe to futures.orders (existing code)
+```
+
+Also update `ws_sign` to handle the login channel signature format. Gate.io's login channel uses: `HMAC_SHA512(secret, "channel=futures.login&event=api&time={time}")`.
+
+### BUG 2: Tick Size / Price Precision Normalization Missing
+
+**Files:** `rust_engine/src/gateio_gateway.rs`, `rust_engine/src/binance_gateway.rs`, `rust_engine/src/bybit_gateway.rs`, `rust_engine/src/instrument_manager.rs`
+
+**Problem:** Orders are rejected with "invalid price" because raw calculated prices (e.g., `71469.12345`) are not snapped to the exchange's tick size. The `InstrumentManager` exists but is not always initialized or used consistently.
+
+**Fix:** 
+1. Make `InstrumentManager` initialization mandatory at startup (not optional)
+2. Fetch contract specs from all three exchanges on startup:
+   - Gate.io: `GET /api/v4/futures/usdt/contracts` → extract `order_price_round`, `quanto_multiplier`, `order_size_min`
+   - Binance: `GET /fapi/v1/exchangeInfo` → extract `tickSize`, `stepSize`, `minQty` from filters
+   - Bybit: `GET /v5/market/instruments-info?category=linear` → extract `tickSize`, `qtyStep`, `minOrderQty`
+3. Add a `snap_price(price: f64, tick_size: f64) -> f64` function: `(price / tick_size).round() * tick_size`
+4. Add a `snap_qty(qty: f64, step_size: f64) -> f64` function: `(qty / step_size).floor() * step_size`
+5. Apply these in ALL `submit_order` implementations before sending to exchange
+
+```rust
+// In instrument_manager.rs, add:
+impl ContractSpec {
+    pub fn snap_price(&self, price: f64) -> f64 {
+        if self.tick_size <= 0.0 { return price; }
+        (price / self.tick_size).round() * self.tick_size
+    }
+    
+    pub fn snap_qty(&self, qty: f64) -> f64 {
+        if self.step_size <= 0.0 { return qty; }
+        (qty / self.step_size).floor() * self.step_size
+    }
+}
+```
+
+### BUG 3: USDT-to-Contracts Conversion Broken for Multi-Exchange
+
+**Files:** `rust_engine/src/binance_gateway.rs`, `rust_engine/src/bybit_gateway.rs`
+
+**Problem:** When the strategy engine emits `size=1` (meaning 1 contract on Gate.io where 1 contract = 0.0001 BTC), Binance interprets `qty=1` as 1 whole BTC ($70,000+), causing "insufficient balance". The size normalization between exchanges is fundamentally broken.
+
+**Fix:** Implement a universal size normalization layer:
+
+```rust
+// In a new file: rust_engine/src/size_normalizer.rs
+
+pub struct SizeNormalizer;
+
+impl SizeNormalizer {
+    /// Convert a USDT notional value to exchange-specific contract quantity.
+    /// 
+    /// Gate.io: contracts = usdt_notional / (quanto_multiplier * price)
+    /// Binance: quantity = usdt_notional / price (in base currency units)
+    /// Bybit:   quantity = usdt_notional / price (in base currency units)
+    pub fn usdt_to_exchange_qty(
+        exchange: ExchangeId,
+        usdt_notional: f64,
+        price: f64,
+        quanto_multiplier: f64,
+        step_size: f64,
+        min_qty: f64,
+    ) -> Result<f64, String> {
+        if price <= 0.0 { return Err("Invalid price".into()); }
+        
+        let raw_qty = match exchange {
+            ExchangeId::GateIo => {
+                if quanto_multiplier > 0.0 {
+                    usdt_notional / (quanto_multiplier * price)
+                } else {
+                    usdt_notional / price
+                }
+            }
+            ExchangeId::Binance | ExchangeId::Bybit => {
+                usdt_notional / price
+            }
+        };
+        
+        // Snap to step size
+        let snapped = if step_size > 0.0 {
+            (raw_qty / step_size).floor() * step_size
+        } else {
+            raw_qty
+        };
+        
+        if snapped < min_qty {
+            return Err(format!("Qty {} below minimum {}", snapped, min_qty));
+        }
+        
+        Ok(snapped)
+    }
+}
+```
+
+### BUG 4: Margin Monitor Returns 0% for Binance/Bybit
+
+**File:** `rust_engine/src/multi_exchange/margin_monitor.rs`
+
+**Problem:** The `CrossVenueMarginMonitor` queries balances but the Binance/Bybit gateways may not be initialized when keys are missing, causing the margin monitor to report 0% margin. The funding arb engine then rejects all trades with "Insufficient Margin: 0.0%".
+
+**Fix:**
+1. Add a `is_gateway_ready()` method to `ExecutionGateway` trait
+2. In `margin_monitor.rs`, skip exchanges with no valid gateway instead of reporting 0%
+3. Add a startup balance check that logs clearly if any exchange has $0 balance
+4. Cache the last known balance and use it if the API call fails (with a staleness timeout)
+
+### BUG 5: Funding Arb Legging Risk - Naked Directional Exposure
+
+**Files:** `rust_engine/src/multi_exchange/funding_arb_executor.rs`, `rust_engine/src/multi_exchange/funding_arb_engine.rs`
+
+**Problem:** The bot fires two simultaneous market orders for funding arb (short on high-rate exchange, long on low-rate exchange). If one leg fails, the bot has naked directional exposure. There is no atomic execution or rollback mechanism.
+
+**Fix:** Implement a Maker-Taker leg execution pattern:
+
+```rust
+// In funding_arb_executor.rs:
+
+pub struct DualLegExecutor {
+    // ... existing fields ...
+}
+
+impl DualLegExecutor {
+    /// Execute a funding arb trade with proper leg sequencing.
+    /// 
+    /// 1. Place MAKER (post-only) order on the less liquid exchange first
+    /// 2. Wait for fill confirmation (poll every 100ms, timeout 30s)
+    /// 3. Only when leg 1 fills, immediately hedge with IOC taker on liquid exchange
+    /// 4. If leg 1 doesn't fill within timeout, cancel it (no exposure)
+    /// 5. If leg 2 fails after leg 1 filled, immediately close leg 1 at market
+    pub async fn execute_with_leg_protection(
+        &self,
+        maker_exchange: ExchangeId,
+        taker_exchange: ExchangeId,
+        symbol: &str,
+        maker_side: OrderSide,
+        taker_side: OrderSide,
+        size_usdt: f64,
+        maker_price: f64,
+    ) -> Result<DualLegResult, ExchangeError> {
+        // Step 1: Place maker order
+        let maker_gw = self.get_gateway(maker_exchange)?;
+        let maker_qty = self.normalize_qty(maker_exchange, symbol, size_usdt, maker_price).await?;
+        
+        let maker_intent = OrderIntent {
+            symbol: symbol.to_string(),
+            side: maker_side.clone(),
+            size: maker_qty,
+            order_type: OrderType::PostOnly,
+            price: Some(maker_price),
+            reduce_only: false,
+            leverage: Some(3),
+            time_in_force: "poc".to_string(),
+            ..Default::default()
+        };
+        
+        let maker_result = maker_gw.submit_order(maker_intent).await?;
+        
+        // Step 2: Poll for fill (max 30 seconds)
+        let mut filled = false;
+        let mut fill_price = 0.0;
+        let mut fill_size = 0i64;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        
+        while Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if let Ok(Some(status)) = maker_gw.get_order_status(&maker_result.order_id, symbol).await {
+                if status.filled_size > 0 {
+                    filled = true;
+                    fill_price = status.avg_fill_price;
+                    fill_size = status.filled_size;
+                    break;
+                }
+                if status.status == "cancelled" || status.status == "expired" {
+                    break;
+                }
+            }
+        }
+        
+        if !filled {
+            // Cancel unfilled maker order - no exposure
+            let _ = maker_gw.cancel_order(&maker_result.order_id, symbol).await;
+            return Err(ExchangeError::Unknown {
+                code: "MAKER_NOT_FILLED".into(),
+                message: "Maker leg did not fill within timeout".into(),
+            });
+        }
+        
+        // Step 3: Hedge with IOC taker on liquid exchange
+        let taker_gw = self.get_gateway(taker_exchange)?;
+        let taker_qty = self.normalize_qty(taker_exchange, symbol, fill_size as f64 * fill_price, fill_price).await?;
+        
+        let taker_intent = OrderIntent {
+            symbol: symbol.to_string(),
+            side: taker_side.clone(),
+            size: taker_qty,
+            order_type: OrderType::Market,
+            price: None,
+            reduce_only: false,
+            leverage: Some(3),
+            time_in_force: "ioc".to_string(),
+            ..Default::default()
+        };
+        
+        match taker_gw.submit_order(taker_intent).await {
+            Ok(taker_result) => {
+                Ok(DualLegResult {
+                    maker_leg: LegStatus::Filled { 
+                        exchange: maker_exchange, 
+                        price: fill_price, 
+                        size: fill_size 
+                    },
+                    taker_leg: LegStatus::Filled { 
+                        exchange: taker_exchange, 
+                        price: taker_result.avg_fill_price, 
+                        size: taker_result.filled_size 
+                    },
+                })
+            }
+            Err(e) => {
+                // CRITICAL: Taker failed - close maker leg immediately
+                error!("[funding-arb] TAKER LEG FAILED - closing maker leg at market: {}", e);
+                let close_side = if maker_side == OrderSide::Buy { OrderSide::Sell } else { OrderSide::Buy };
+                let close_intent = OrderIntent {
+                    symbol: symbol.to_string(),
+                    side: close_side,
+                    size: fill_size,
+                    order_type: OrderType::Market,
+                    reduce_only: true,
+                    ..Default::default()
+                };
+                let _ = maker_gw.submit_order(close_intent).await;
+                Err(e)
+            }
+        }
+    }
+}
+```
+
+---
+
+## PART 2: INSTITUTIONAL FEATURES TO ADD
+
+### FEATURE 1: Funding Rate Timestamp-Aware Entry/Exit
+
+**Files:** `rust_engine/src/funding_rate.rs`, `rust_engine/src/multi_exchange/funding_arb_engine.rs`
+
+**Problem:** The bot enters funding arb positions at random times. Institutional bots enter seconds before the funding snapshot and exit immediately after to minimize directional exposure time.
+
+**Implementation:**
+1. Fetch funding rate schedules from each exchange:
+   - Binance: 8-hour intervals (00:00, 08:00, 16:00 UTC)
+   - Bybit: 8-hour intervals (00:00, 08:00, 16:00 UTC)  
+   - Gate.io: 8-hour intervals (00:00, 08:00, 16:00 UTC)
+2. Add a `FundingTimingEngine` that:
+   - Calculates time until next funding snapshot for each exchange
+   - Only opens positions within a configurable window before snapshot (default: 60 seconds)
+   - Automatically closes positions within 30 seconds after funding is credited
+   - Tracks cumulative funding received per position
+
+```rust
+// New file: rust_engine/src/funding_timing.rs
+
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+pub struct FundingTimingEngine {
+    /// Seconds before funding snapshot to enter position
+    entry_window_secs: u64,
+    /// Seconds after funding snapshot to exit position
+    exit_window_secs: u64,
+    /// Funding intervals per exchange (in hours from midnight UTC)
+    funding_hours: Vec<u64>, // [0, 8, 16] for most exchanges
+}
+
+impl FundingTimingEngine {
+    pub fn new() -> Self {
+        Self {
+            entry_window_secs: 60,
+            exit_window_secs: 30,
+            funding_hours: vec![0, 8, 16],
+        }
+    }
+    
+    /// Returns seconds until next funding snapshot
+    pub fn seconds_until_next_funding(&self) -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let current_hour = (now / 3600) % 24;
+        let current_minute_secs = now % 3600;
+        
+        for &funding_hour in &self.funding_hours {
+            if funding_hour > current_hour || 
+               (funding_hour == current_hour && current_minute_secs < 3600) {
+                return (funding_hour - current_hour) * 3600 - current_minute_secs;
+            }
+        }
+        // Next day's first funding
+        (24 - current_hour + self.funding_hours[0]) * 3600 - current_minute_secs
+    }
+    
+    /// Returns true if we're within the entry window before funding
+    pub fn is_entry_window(&self) -> bool {
+        self.seconds_until_next_funding() <= self.entry_window_secs
+    }
+    
+    /// Returns true if we should exit (funding just occurred)
+    pub fn is_exit_window(&self) -> bool {
+        let secs = self.seconds_until_next_funding();
+        // Just after funding = close to next 8h mark
+        let time_since_last = 8 * 3600 - secs;
+        time_since_last <= self.exit_window_secs
+    }
+}
+```
+
+
+
+### FEATURE 3: Fee-Optimized Execution (Maker Rebate Capture)
+
+**File:** `rust_engine/src/fee_optimizer.rs` (exists but needs enhancement)
+
+**Problem:** The bot uses market orders (taker fees ~0.04-0.05%) for both entry and exit. On a funding arb with 0.01% yield, the round-trip taker fees (0.16%) completely wipe out profits.
+
+**Implementation:**
+1. Default ALL entries to post-only (maker) orders
+2. Implement a fee calculator per exchange per VIP tier:
+   - Gate.io VIP0: maker=0.015%, taker=0.05%
+   - Binance VIP0: maker=0.02%, taker=0.04%
+   - Bybit VIP0: maker=0.02%, taker=0.055%
+3. Only use market/IOC orders when:
+   - Signal confidence > 0.9 (very high urgency)
+   - Position is being emergency-closed (SL hit, liquidation risk)
+   - Funding arb hedge leg (speed critical)
+4. Track maker vs taker fill ratio and report in telemetry
+
+### FEATURE 4: Binance & Bybit WebSocket Execution (Currently REST-Only)
+
+**Files:** `rust_engine/src/binance_gateway.rs`, `rust_engine/src/bybit_gateway.rs`
+
+**Problem:** Binance and Bybit gateways use REST API for order submission, adding 50-200ms latency per order. For cross-exchange arb, this latency is unacceptable.
+
+**Implementation:**
+1. Add WebSocket connections for Binance Futures:
+   - Connect to `wss://fstream.binance.com/ws`
+   - Authenticate via `userDataStream` listen key
+   - Subscribe to order updates
+   - Submit orders via REST but receive fills via WS (Binance doesn't support WS order placement for futures)
+2. Add WebSocket connections for Bybit:
+   - Connect to `wss://stream.bybit.com/v5/private`
+   - Authenticate with HMAC-SHA256
+   - Subscribe to `order` topic for fill updates
+   - Submit orders via REST, receive fills via WS
+
+### FEATURE 5: Position Delta Neutrality Monitor
+
+**File:** New file `rust_engine/src/multi_exchange/delta_monitor.rs`
+
+**Problem:** In funding arb, the bot should maintain delta-neutral exposure (net position across all exchanges = 0). Currently there's no monitoring or auto-correction for delta drift.
+
+```rust
+pub struct DeltaNeutralityMonitor {
+    max_delta_usdt: f64,  // Maximum allowed net delta in USDT
+    check_interval_secs: u64,
+}
+
+impl DeltaNeutralityMonitor {
+    /// Calculate net delta across all exchanges for a symbol
+    pub async fn calculate_net_delta(
+        &self,
+        symbol: &str,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+    ) -> f64 {
+        let mut net_delta = 0.0;
+        for (_, gw) in gateways {
+            if let Ok(Some(pos)) = gw.get_position(symbol).await {
+                let delta_usdt = pos.size as f64 * pos.entry_price;
+                net_delta += delta_usdt;
+            }
+        }
+        net_delta
+    }
+    
+    /// Check if delta is within acceptable range
+    pub fn is_delta_neutral(&self, net_delta: f64) -> bool {
+        net_delta.abs() < self.max_delta_usdt
+    }
+    
+    /// Generate hedge order to restore delta neutrality
+    pub fn generate_hedge_order(
+        &self,
+        net_delta: f64,
+        symbol: &str,
+        price: f64,
+    ) -> Option<OrderIntent> {
+        if self.is_delta_neutral(net_delta) {
+            return None;
+        }
+        
+        let side = if net_delta > 0.0 { OrderSide::Sell } else { OrderSide::Buy };
+        let size = (net_delta.abs() / price).ceil() as i64;
+        
+        Some(OrderIntent {
+            symbol: symbol.to_string(),
+            side,
+            size,
+            order_type: OrderType::Market,
+            price: None,
+            reduce_only: false,
+            leverage: Some(3),
+            time_in_force: "ioc".to_string(),
+            slippage_cap_pct: Some(0.002),
+            placement: PlacementType::AtBest,
+            stop_loss: None,
+            take_profit: None,
+            confidence: 1.0,
+            signal_tag: "delta_hedge".to_string(),
+        })
+    }
+}
+```
+
+### FEATURE 6: Advanced Order Types - TWAP/Iceberg Execution
+
+**File:** `rust_engine/src/twap_executor.rs` (exists but not wired)
+
+**Problem:** Large orders cause market impact. The TWAP executor exists but is not connected to the execution pipeline.
+
+**Implementation:**
+1. Wire `twap_executor.rs` into the execution router
+2. Add iceberg order support (show only a fraction of total size)
+3. Trigger TWAP for orders > configurable threshold (e.g., > $5000 notional)
+4. Split into N child orders over T seconds with randomized intervals
+
+### FEATURE 7: Real-Time PnL Tracking & Risk Dashboard
+
+**Files:** `rust_engine/src/dashboard_server.rs`, `crypto_trading_bot/core/trade_tracker.py`
+
+**Problem:** No real-time PnL tracking across exchanges. The dashboard shows stale data.
+
+**Implementation:**
+1. Add a `PnLTracker` in Rust that:
+   - Tracks realized PnL per trade
+   - Calculates unrealized PnL from live prices
+   - Computes Sharpe ratio, max drawdown, win rate in real-time
+   - Writes to shared memory for dashboard consumption
+2. Add WebSocket endpoint in dashboard server for live PnL streaming
+
+### FEATURE 8: Smart Order Routing (SOR) Enhancement
+
+**File:** `rust_engine/src/multi_exchange/sor.rs`
+
+**Problem:** Current SOR is basic. Institutional SOR considers:
+- Real-time fee tiers per exchange
+- Available liquidity at each price level
+- Historical fill rates per exchange
+- Latency to each exchange
+
+**Implementation:**
+1. Add fee-aware routing: route to exchange with lowest effective cost (price + fees)
+2. Add liquidity-weighted splitting: split large orders proportional to available depth
+3. Add latency-aware routing: prefer exchanges with lower observed latency
+4. Track and learn from historical fill quality per exchange
+
+### FEATURE 9: Volatility-Adjusted Position Sizing
+
+**File:** `rust_engine/src/position_sizer.rs`
+
+**Problem:** Position sizes don't adapt to current volatility. In high-vol environments, the same position size carries much more risk.
+
+**Implementation:**
+1. Use the existing `RealizedVolatilityCalculator` output
+2. Scale position size inversely with volatility:
+   - Low vol (< 20% annualized): 1.5x base size
+   - Normal vol (20-50%): 1.0x base size
+   - High vol (50-80%): 0.5x base size
+   - Extreme vol (> 80%): 0.25x base size
+3. Add Kelly Criterion-based sizing option
+
+### FEATURE 10: Order Flow Toxicity-Based Spread Widening
+
+**File:** `rust_engine/src/strategy_engine.rs`
+
+**Problem:** When VPIN is high (toxic flow), the bot simply skips signals. Institutional market makers widen their quotes instead.
+
+**Implementation:**
+1. Instead of skipping on high VPIN, adjust the entry price:
+   - VPIN 0.35-0.50: widen entry by 1 tick
+   - VPIN 0.50-0.65: widen entry by 2 ticks
+   - VPIN > 0.65: skip (current behavior)
+2. This captures more trades while protecting against adverse selection
+
+---
+
+## PART 3: PYTHON COLD PATH IMPROVEMENTS
+
+### FEATURE 11: Regime Detection Enhancement
+
+**File:** `crypto_trading_bot/ai/regime_service.py`
+
+**Implementation:**
+1. Add Hidden Markov Model (HMM) for regime detection with 4 states:
+   - Trending Up (momentum)
+   - Trending Down (momentum)
+   - Mean-Reverting (range-bound)
+   - High Volatility (crisis)
+2. Write regime probabilities to `/dev/shm/regime_weights` using the existing seqlock format
+3. Add online learning: update HMM parameters every hour with new data
+
+### FEATURE 12: ML Weight Publisher Enhancement
+
+**File:** `crypto_trading_bot/ai/ml_weight_publisher.py`
+
+**Implementation:**
+1. Train a gradient-boosted model (XGBoost/LightGBM) on:
+   - Recent trade outcomes (win/loss, PnL)
+   - Current market regime
+   - Time of day / day of week effects
+   - Correlation with BTC/ETH
+2. Output per-symbol weights: momentum_weight, mean_reversion_weight, volatility_weight, confidence_floor, max_position_scale
+3. Write to `/dev/shm/ml_weights` for Rust consumption
+
+---
+
+## PART 4: CONFIGURATION & OPERATIONAL IMPROVEMENTS
+
+### CONFIG 1: Per-Symbol Configuration
+
+**File:** `rust_engine/src/config.rs`
+
+Add per-symbol overrides in `engine_config.toml`:
+
+```toml
+[pair_profiles.BTC_USDT]
+imbalance_threshold = 0.02
+max_position_size = 20
+leverage = 10
+sl_pct = 1.5
+tp_pct = 3.0
+vpin_bucket_size = 50000.0
+
+[pair_profiles.ETH_USDT]
+imbalance_threshold = 0.03
+max_position_size = 30
+leverage = 15
+sl_pct = 2.0
+tp_pct = 4.0
+vpin_bucket_size = 30000.0
+```
+
+### CONFIG 2: Telegram Alert Enhancement
+
+**File:** `rust_engine/src/telegram_alert.rs`
+
+Add alerts for:
+- Position opened/closed with PnL
+- Funding arb opportunity detected
+- Margin ratio warning
+- Delta neutrality breach
+- Daily PnL summary
+- Exchange connectivity issues
+
+### CONFIG 3: Graceful Shutdown with State Persistence
+
+**File:** `rust_engine/src/state_store.rs`
+
+On SIGTERM/SIGINT:
+1. Cancel all resting orders on all exchanges
+2. Persist open position state to SQLite
+3. On restart, reconcile persisted state with exchange state
+4. Resume tracking positions that survived the restart
+
+---
+
+## EXECUTION INSTRUCTIONS
+
+1. **Priority Order:** Fix BUGs 1-5 first (they cause real money losses), then implement Features in order 1-12
+2. **Testing:** After each bug fix, verify with testnet credentials before moving to next
+3. **Compilation:** The Rust code must compile with `cargo build --release` from `rust_engine/`
+4. **Python:** Python changes must be compatible with the existing `crypto_trading_bot/` structure
+5. **No Breaking Changes:** All changes must be backward-compatible with `USE_MULTI_EXCHANGE=off` mode
+6. **Logging:** Add `info!` level logs for all new features and `error!` for all failure paths
+7. **Error Handling:** Never panic. All errors must be handled gracefully with fallback behavior
+
+**Note:** This prompt is based on a thorough analysis of the full repository but some source files were truncated during reading. The Rust `main.rs` file is very large (~2000+ lines) and contains the full thread topology, execution router loop, and multi-exchange initialization code. When implementing changes to `main.rs`, read the full file first to understand the complete wiring before making modifications.
