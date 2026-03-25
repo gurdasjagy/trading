@@ -2528,6 +2528,8 @@ fn execution_router_loop(
     state_store: Option<Arc<state_store::StateStore>>,
     // Feature 2: Auto-protection config (for reconciled positions)
     auto_protection_config: config::AutoProtectionConfig,
+    // FIX 1: Shared margin monitor instance — same Arc passed to funding arb engine
+    shared_margin_monitor: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>>,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2593,7 +2595,11 @@ fn execution_router_loop(
     );
 
     // TASK 5: Initialize CrossVenueMarginMonitor for multi-exchange margin health tracking
-    let mut margin_monitor = multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults();
+    // FIX 1: Use the shared Arc<RwLock<>> margin monitor passed from main() so the
+    // funding arb engine sees the same margin health data as the execution router.
+    // The old code created a local `mut margin_monitor` here, while the funding arb
+    // engine created its own separate instance — so balances fetched here were never
+    // visible to the funding arb engine's pre-trade checks.
     if multi_exchange_enabled {
         info!("[execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)");
     }
@@ -2889,12 +2895,14 @@ fn execution_router_loop(
                     info!("[execution] Manual trade: {:.2} USDT × {}x leverage = {:.2} notional → {} contracts for {}",
                         manual_req.size_usdt, manual_req.leverage, effective_notional, contract_size, sym_upper);
 
-                    // Step 2: Set leverage
-                    if let Err(e) = gw.set_leverage(&sym_upper, manual_req.leverage as i32).await {
-                        warn!("[execution] Manual trade: failed to set leverage: {}", e);
-                    }
-                    
-                    // Step 3: Set margin mode (from request, default "cross")
+                    // FIX 3: Removed duplicate set_leverage() call that was here (Step 2).
+                    // submit_order() already calls set_leverage() internally when
+                    // intent.leverage is Some(...), so calling it here too caused
+                    // 4 wasted REST calls (2 cross-margin fails + 2 isolated retries)
+                    // and ~600ms unnecessary latency per order.
+                    // Leverage is now set once inside submit_order() via intent.leverage.
+
+                    // Step 2: Set margin mode (from request, default "cross")
                     let margin_mode = manual_req.margin_mode.as_deref().unwrap_or("cross");
                     if let Err(e) = gw.set_margin_mode(&sym_upper, margin_mode).await {
                         warn!("[execution] Manual trade: failed to set margin mode to '{}': {}", margin_mode, e);
@@ -4540,7 +4548,7 @@ fn execution_router_loop(
                 // Fetch balances and positions from all exchanges, update margin monitor and dashboard
                 if multi_exchange_enabled && !multi_gateways.is_empty() {
                     // Refresh margin monitor with all gateways
-                    margin_monitor.refresh_all(&multi_gateways).await;
+                    shared_margin_monitor.write().refresh_all(&multi_gateways).await;
                     
                     // Update dashboard with per-exchange balances
                     for (exchange_id, gw) in &multi_gateways {
@@ -4548,7 +4556,7 @@ fn execution_router_loop(
                         match gw.get_balance().await {
                             Ok(balance) => {
                                 dashboard_state.set_exchange_balance(idx, balance);
-                                let margin_ratio = margin_monitor.get_health(*exchange_id)
+                                let margin_ratio = shared_margin_monitor.read().get_health(*exchange_id)
                                     .map(|h| h.margin_ratio)
                                     .unwrap_or(1.0);
                                 dashboard_state.set_exchange_margin_ratio(idx, margin_ratio);
@@ -4560,7 +4568,7 @@ fn execution_router_loop(
                     }
                     
                     // Check for margin imbalances and log warnings
-                    let alerts = margin_monitor.check_imbalances();
+                    let alerts = shared_margin_monitor.read().check_imbalances();
                     for alert in &alerts {
                         warn!(
                             "[execution] Margin imbalance: {} at {:.1}% — recommend transferring ${:.0} from {}",
@@ -4572,7 +4580,7 @@ fn execution_router_loop(
                     }
                     
                     // If any exchange is critical (margin < 15%), halt new trades on that exchange
-                    for health in margin_monitor.all_health() {
+                    for health in shared_margin_monitor.read().all_health() {
                         if health.is_critical {
                             warn!(
                                 "[execution] CRITICAL: {} margin at {:.1}% — halting new trades",
@@ -4584,7 +4592,7 @@ fn execution_router_loop(
                     
                     // Push margin monitor JSON to dashboard
                     dashboard_state.set_funding_arb_json(
-                        serde_json::to_string(&margin_monitor.to_json()).unwrap_or_default()
+                        serde_json::to_string(&shared_margin_monitor.read().to_json()).unwrap_or_default()
                     );
                     
                     // Fetch positions from all exchanges and push to dashboard
@@ -4618,7 +4626,7 @@ fn execution_router_loop(
                     
                     info!(
                         "[execution] Multi-exchange health: total_balance=${:.2}, exchanges={}, positions={}",
-                        margin_monitor.total_balance(),
+                        shared_margin_monitor.read().total_balance(),
                         multi_gateways.len(),
                         all_positions.len()
                     );
@@ -5075,6 +5083,16 @@ fn main() {
         thread_handles.push(handle);
     }
 
+    // FIX 1: Create the shared CrossVenueMarginMonitor BEFORE any threads are spawned.
+    // Both the execution router and the funding arb engine will share this same instance
+    // via Arc<RwLock<>>. Previously, each created their own instance, so balances fetched
+    // by the execution router were invisible to the funding arb engine's pre-trade checks.
+    let shared_margin_monitor_arc: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>> = Arc::new(
+        parking_lot::RwLock::new(
+            multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
+        )
+    );
+
     // ── Multi-Exchange Initialization (gated by USE_MULTI_EXCHANGE) ──────────────
     let global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> = if config.multi_exchange_enabled {
         info!("Multi-Exchange mode ENABLED - initializing Binance + Bybit");
@@ -5238,12 +5256,11 @@ fn main() {
             // references so all subsystems share the same connections.
             let fab_gateways = multi_gateways.clone();
 
-            // Shared margin monitor — same instance used by execution router
-            let fab_margin_monitor = Arc::new(
-                parking_lot::RwLock::new(
-                    multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
-                )
-            );
+            // FIX 1: Use the shared margin monitor created above in main().
+            // Previously this created a NEW CrossVenueMarginMonitor instance that
+            // was never refreshed, causing all funding arb opportunities to be
+            // rejected with "Margin monitor not yet initialized".
+            let fab_margin_monitor = shared_margin_monitor_arc.clone();
 
             // Dashboard state for operator visibility
             let fab_dashboard = dashboard_state.clone();
@@ -5493,6 +5510,8 @@ fn main() {
         let gbr_exec = global_book_registry.clone();
         // Feature 2: Clone auto-protection config for execution thread (reconciliation)
         let auto_protection_exec = config.auto_protection.clone();
+        // FIX 1: Clone shared margin monitor for the execution router thread
+        let shared_margin_monitor_exec = shared_margin_monitor_arc.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
@@ -5503,6 +5522,7 @@ fn main() {
                     position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp,
                     gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
                     sl_tp_update_rx, state_store_exec, auto_protection_exec,
+                    shared_margin_monitor_exec,
                 );
             })
             .expect("Failed to spawn execution thread");
