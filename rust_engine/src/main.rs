@@ -3530,6 +3530,7 @@ fn execution_router_loop(
 
                             // If it's a connectivity issue, trip the circuit breaker
                             if matches!(e, execution_gateway::ExchangeError::Timeout
+                                | execution_gateway::ExchangeError::TimedOut { .. }
                                 | execution_gateway::ExchangeError::ConnectionReset) {
                                 error!("[execution] Connectivity issue — considering circuit breaker trip");
                                 // Don't trip immediately on a single timeout, but track it

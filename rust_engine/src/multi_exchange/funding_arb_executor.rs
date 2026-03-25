@@ -504,9 +504,18 @@ impl DualLegExecutor {
     /// the legging risk as quickly as possible.
     ///
     /// EXECUTION IDEMPOTENCY: Before each retry attempt, checks if the
-    /// previous order already exists on the exchange (via get_order_status)
-    /// to prevent duplicate fills when a timeout was caused by network
-    /// latency rather than actual order rejection.
+    /// previous order already exists on the exchange to prevent duplicate fills
+    /// when a timeout was caused by network latency rather than actual rejection.
+    ///
+    /// Two paths:
+    /// 1. If the previous attempt returned an exchange `order_id` (e.g. order was
+    ///    accepted but zero-filled), `get_order_status(order_id)` is used.
+    /// 2. If the previous attempt timed out entirely and returned no `order_id`
+    ///    (the critical gap described in bugs.txt), `check_order_by_client_id` is
+    ///    called with the `client_order_id` embedded in the `TimedOut` error.
+    ///    This queries the exchange by the user-defined identifier
+    ///    (`origClientOrderId` on Binance, `orderLinkId` on Bybit, `text` on Gate.io)
+    ///    to detect whether the order was silently accepted.
     async fn retry_failed_leg(
         gw: Arc<dyn ExecutionGateway + Send + Sync>,
         symbol: &str,
@@ -516,7 +525,11 @@ impl DualLegExecutor {
         max_slippage: f64,
     ) -> Result<OrderResult, ExchangeError> {
         let mut last_err = ExchangeError::Timeout;
+        // Exchange-assigned order ID from a previous timed-out/zero-fill attempt.
         let mut last_order_id: Option<String> = None;
+        // Client-side order identifier from a `TimedOut` error; used when we have no
+        // exchange order_id to fall back on check_order_by_client_id.
+        let mut last_client_order_id: Option<String> = None;
 
         for attempt in 0..LEG_RETRY_MAX_ATTEMPTS {
             let delay = LEG_RETRY_BASE_DELAY_MS * (1u64 << attempt); // Exponential backoff
@@ -527,10 +540,8 @@ impl DualLegExecutor {
                 attempt + 1, LEG_RETRY_MAX_ATTEMPTS, side, delay
             );
 
-            // IDEMPOTENCY CHECK: If we have a previous order ID from a timed-out
-            // attempt, check if it actually filled on the exchange before retrying.
-            // This prevents duplicate orders when the timeout was due to network
-            // latency rather than actual order rejection.
+            // IDEMPOTENCY CHECK (Path 1): If we have a previous exchange order_id from
+            // a timed-out/zero-fill attempt, check its status before retrying.
             if let Some(ref prev_oid) = last_order_id {
                 match gw.get_order_status(prev_oid, symbol).await {
                     Ok(Some(status)) if status.filled_size > 0 => {
@@ -553,6 +564,52 @@ impl DualLegExecutor {
                     }
                     Err(e) => {
                         warn!("[dual-leg] Idempotency check failed for order {}: {:?} — proceeding with retry", prev_oid, e);
+                    }
+                }
+            } else if let Some(ref prev_cid) = last_client_order_id {
+                // IDEMPOTENCY CHECK (Path 2): WS ACK timed out with no exchange order_id.
+                // The exchange may have accepted the order silently.  Query by the
+                // client-side identifier before issuing a new order to prevent doubling
+                // the position.
+                info!(
+                    "[dual-leg] Idempotency check by client_order_id={} (no exchange order_id available)",
+                    prev_cid
+                );
+                match gw.check_order_by_client_id(prev_cid, symbol).await {
+                    Ok(Some(exch_oid)) => {
+                        // Order found on exchange — get its fill status
+                        match gw.get_order_status(&exch_oid, symbol).await {
+                            Ok(Some(status)) if status.filled_size > 0 => {
+                                info!(
+                                    "[dual-leg] Idempotency (client_id={}): order {} already filled ({} contracts) — skipping retry",
+                                    prev_cid, exch_oid, status.filled_size
+                                );
+                                return Ok(status);
+                            }
+                            Ok(Some(status)) => {
+                                info!(
+                                    "[dual-leg] Idempotency (client_id={}): order {} exists but unfilled (status={}) — cancelling",
+                                    prev_cid, exch_oid, status.status
+                                );
+                                let _ = gw.cancel_order(&exch_oid, symbol).await;
+                            }
+                            Ok(None) | Err(_) => {
+                                // get_order_status not supported or order gone — cancel defensively
+                                let _ = gw.cancel_order(&exch_oid, symbol).await;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        info!(
+                            "[dual-leg] Idempotency (client_id={}): no order found on exchange — safe to retry",
+                            prev_cid
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "[dual-leg] Idempotency check by client_id {} failed: {:?} — proceeding with retry",
+                            prev_cid, e
+                        );
                     }
                 }
             }
@@ -585,19 +642,32 @@ impl DualLegExecutor {
                 }
                 Ok(result) => {
                     warn!("[dual-leg] Retry attempt {} returned 0 fill: {:?}", attempt + 1, result.status);
-                    // Track order ID for idempotency check on next attempt
+                    // Track exchange order ID for idempotency check on next attempt
                     if !result.order_id.is_empty() {
                         last_order_id = Some(result.order_id);
+                        last_client_order_id = None; // exchange oid takes priority
                     }
                     last_err = ExchangeError::Unknown {
                         code: "ZERO_FILL".into(),
                         message: format!("Retry filled 0 contracts on attempt {}", attempt + 1),
                     };
                 }
+                Err(ExchangeError::TimedOut { ref client_order_id }) => {
+                    // WS ACK / REST response timed out and the gateway has provided the
+                    // client_order_id that was used.  Store it so the next iteration can
+                    // call check_order_by_client_id() to detect a silent acceptance.
+                    warn!(
+                        "[dual-leg] Retry attempt {} timed out (client_order_id={}) — will check by client_id on next attempt",
+                        attempt + 1, client_order_id
+                    );
+                    last_client_order_id = Some(client_order_id.clone());
+                    last_order_id = None; // no exchange oid available
+                    last_err = ExchangeError::TimedOut { client_order_id: client_order_id.clone() };
+                }
                 Err(ExchangeError::Timeout) => {
                     warn!("[dual-leg] Retry attempt {} timed out — will check idempotency on next attempt", attempt + 1);
-                    // Timeout: the order may have been accepted by the exchange.
-                    // On next attempt, the idempotency check will verify before retrying.
+                    // Timeout with no client_order_id (e.g. from a gateway that doesn't
+                    // support TimedOut yet) — existing path handles this gracefully.
                     last_err = ExchangeError::Timeout;
                 }
                 Err(e) => {

@@ -4,6 +4,7 @@
 //! Used for multi-exchange arbitrage in Feature 5.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use hmac::{Hmac, Mac};
@@ -19,7 +20,7 @@ use crate::execution_gateway::{
     AdaptiveRateLimiter, ExchangeError, ExecutionGateway, OrderIntent, OrderResult, 
     OrderSide, OrderType, Position, RustTicker,
 };
-use crate::instrument_manager::{InstrumentManager, Exchange};
+use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_binance};
 
 const BINANCE_FUTURES_BASE_URL: &str = "https://fapi.binance.com";
 const BINANCE_FUTURES_TESTNET_URL: &str = "https://testnet.binancefuture.com";
@@ -75,6 +76,9 @@ pub struct BinanceGateway {
     api_secret: Vec<u8>,
     rate_limiter: Arc<AdaptiveRateLimiter>,
     testnet: bool,
+    /// Monotonically increasing counter for generating unique newClientOrderId values.
+    /// Allows idempotency checks via check_order_exists_binance when REST calls time out.
+    next_client_id: AtomicU64,
     /// Dynamic instrument manager for real-time precision rules.
     /// When set, price and quantity are formatted using exchange-specific
     /// tickSize and stepSize instead of hardcoded "{:.8}" / "{:.3}".
@@ -97,8 +101,18 @@ impl BinanceGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
+            next_client_id: AtomicU64::new(1),
             instrument_mgr: None,
         }
+    }
+
+    /// Generate the next monotonic client order ID for idempotency tracking.
+    ///
+    /// The counter wraps to 0 after u64::MAX increments (effectively never in practice
+    /// since a gateway instance is restarted long before 2^64 orders are submitted).
+    fn next_client_id(&self) -> String {
+        let id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        format!("rte{:016x}", id)
     }
 
     /// Create a new Binance gateway with an InstrumentManager for real-time precision.
@@ -277,10 +291,16 @@ impl ExecutionGateway for BinanceGateway {
             // Fallback: conservative 8 decimal places
             format!("{:.8}", qty_f64.max(0.001))
         };
+
+        // Generate a unique client order ID for idempotency.
+        // Included in every order submission as `newClientOrderId` so that
+        // if this REST call times out we can later call check_order_exists_binance()
+        // with this ID to determine whether the order was accepted.
+        let client_oid = self.next_client_id();
         
         let mut params = format!(
-            "symbol={}&side={}&type={}&quantity={}",
-            symbol, side, order_type, qty_str
+            "symbol={}&side={}&type={}&quantity={}&newClientOrderId={}",
+            symbol, side, order_type, qty_str, client_oid
         );
         
         if !time_in_force.is_empty() {
@@ -305,7 +325,13 @@ impl ExecutionGateway for BinanceGateway {
             params.push_str("&reduceOnly=true");
         }
         
-        let response = self.post_signed("/fapi/v1/order", &params).await?;
+        // Convert a generic Timeout into TimedOut so that retry_failed_leg can call
+        // check_order_by_client_id() and avoid duplicate order submission.
+        let response = self.post_signed("/fapi/v1/order", &params).await
+            .map_err(|e| match e {
+                ExchangeError::Timeout => ExchangeError::TimedOut { client_order_id: client_oid.clone() },
+                other => other,
+            })?;
         let end_us = now_us();
         let latency_us = (end_us - start_us).max(0) as u64;
         
@@ -334,8 +360,8 @@ impl ExecutionGateway for BinanceGateway {
             .unwrap_or(0.0);
         
         info!(
-            "Binance order {} submitted: {} {} {} @ {:?} | {}us",
-            order_id, side, qty_str, symbol, intent.price, latency_us
+            "Binance order {} submitted (client_oid={}): {} {} {} @ {:?} | {}us",
+            order_id, client_oid, side, qty_str, symbol, intent.price, latency_us
         );
         
         Ok(OrderResult {
@@ -505,6 +531,28 @@ impl ExecutionGateway for BinanceGateway {
         }
 
         Ok(positions)
+    }
+
+    /// Idempotency check: look up an order by the `newClientOrderId` that was sent with
+    /// the original submission.  Called when `submit_order` returns
+    /// `ExchangeError::TimedOut` — i.e. the REST call timed out and we don't know whether
+    /// Binance accepted the order.  Returns the exchange-assigned orderId if found and
+    /// active, or `Ok(None)` if no matching order exists (safe to retry).
+    async fn check_order_by_client_id(
+        &self,
+        client_order_id: &str,
+        symbol: &str,
+    ) -> Result<Option<String>, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let result = check_order_exists_binance(
+            &self.client,
+            self.base_url(),
+            &self.api_key,
+            &self.api_secret,
+            &normalized,
+            client_order_id,
+        ).await;
+        Ok(result)
     }
 }
 
