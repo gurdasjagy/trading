@@ -62,12 +62,13 @@ use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_
 // Constants
 // ---------------------------------------------------------------------------
 
-const GATEIO_WS_URL: &str = "wss://ws.gate.com/v4/ws/futures/usdt";
-// Gate.io may migrate testnet WS to wss://ws-testnet.gate.com/v4/ws/futures/usdt
-// but the legacy URL still works as of 2025. Update if connection fails.
-// Gate.io migrated USDT futures testnet WS to ws-testnet.gate.com.
-// The old wss://fx-ws-testnet.gateio.ws/v4/ws/usdt defaults to BTC contracts.
-const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
+// FIX 2: Use Gate.io's official documented futures WS URLs.
+// The previous URLs (ws.gate.com/v4/ws/futures/usdt) accepted connections and pings
+// but silently dropped `futures.order_place` messages, causing 5s timeouts and
+// ghost positions. The official docs (https://www.gate.io/docs/developers/futures/ws/en/)
+// consistently specify fx-ws.gateio.ws for futures order placement.
+const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
+const GATEIO_WS_TESTNET_URL: &str = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
 const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
@@ -1305,7 +1306,10 @@ impl GateIoGateway {
             return;
         }
 
-        debug!("[gateio-ws] Unhandled message: {}", &text[..text.len().min(120)]);
+        // FIX 2C: Log ALL unhandled WS messages at warn! level so we can diagnose
+        // what Gate.io sends back (or doesn't) during order submission windows.
+        // Previously this was debug!-only, making silent order rejections invisible.
+        warn!("[gateio-ws] Unhandled message: {}", &text[..text.len().min(200)]);
     }
 
     /// Handle a futures.order_place ACK/NACK response.
@@ -2128,47 +2132,28 @@ impl ExecutionGateway for GateIoGateway {
     }
 
     async fn set_leverage(&self, symbol: &str, leverage: i32) -> Result<(), ExchangeError> {
-        // BUG 8 FIX: Detect the current margin mode before setting leverage.
-        // Gate.io requires different parameters for cross vs isolated margin:
-        //   - Cross margin: use `cross_leverage_limit` parameter
-        //   - Isolated margin: use `leverage` parameter
-        // Previously we always sent `cross_leverage_limit` which fails on isolated mode
-        // with "cross_leverage_limit only for cross-margin" error.
+        // FIX 4: Completely rewritten margin mode detection.
+        //
+        // Previous logic checked the `mode` field in position data, but that field
+        // represents the position mode (single/dual), NOT the margin mode. It also
+        // defaulted to cross-margin on any error or missing position, causing every
+        // call to fail with "cross_leverage_limit only for cross-margin" and then
+        // retry with isolated — wasting ~150ms per call.
+        //
+        // New approach: Try isolated margin FIRST (using `leverage` parameter) since
+        // the account is configured for isolated margin. If that fails with an error
+        // indicating cross-margin mode, retry with `cross_leverage_limit`.
+        // This eliminates the wasted REST call in the common case.
         let normalized = Self::normalize_symbol(symbol);
         let path = format!("/futures/usdt/positions/{}/leverage", normalized);
-
-        // First, detect the current margin mode by checking the position
-        let is_cross = match self.rest_get("/futures/usdt/positions", "").await {
-            Ok(positions_val) => {
-                if let Some(positions) = positions_val.as_array() {
-                    positions.iter()
-                        .find(|p| p.get("contract").and_then(|v| v.as_str()) == Some(&normalized))
-                        .and_then(|p| p.get("mode").and_then(|v| v.as_str()))
-                        .map(|mode| mode == "dual" || mode == "single")
-                        // Gate.io: "single" and "dual" are position modes, not margin modes.
-                        // Cross margin is indicated by cross_leverage_limit > 0 in the position.
-                        .unwrap_or(true) // Default to cross margin (Gate.io default)
-                } else {
-                    true // Default to cross margin
-                }
-            }
-            Err(_) => true, // Default to cross margin on error
-        };
-
-        // Build query with the correct parameter based on margin mode
-        let query = if is_cross {
-            format!("cross_leverage_limit={}", leverage)
-        } else {
-            format!("leverage={}", leverage)
-        };
-
-        let body = ""; // Body must be empty — params go in query string
-        let timestamp = now_ms() / 1000;
-        // Gate.io v4 requires the FULL path (including /api/v4) in the signature
         let full_path = format!("/api/v4{}", path);
-        let signature = Self::rest_sign("POST", &full_path, &query, body, timestamp, &self.api_secret);
+        let body = "";
 
-        let url = format!("{}{}?{}", self.base_url(), path, query);
+        // Try isolated margin first (most common configuration)
+        let iso_query = format!("leverage={}", leverage);
+        let timestamp = now_ms() / 1000;
+        let signature = Self::rest_sign("POST", &full_path, &iso_query, body, timestamp, &self.api_secret);
+        let url = format!("{}{}?{}", self.base_url(), path, iso_query);
         let response = self.rest_client
             .post(&url)
             .header("KEY", &self.api_key)
@@ -2188,44 +2173,40 @@ impl ExecutionGateway for GateIoGateway {
             let err = crate::execution_gateway::classify_gateio_error(status, &resp_body);
             let err_str = format!("{}", err);
 
-            // BUG 8 FIX: If cross-margin parameter failed, retry with isolated-margin parameter
-            // Also catch MISSING_REQUIRED_PARAM which Gate.io returns when isolated margin
-            // mode is active but we sent cross_leverage_limit parameter
-            if err_str.contains("cross_leverage_limit") || err_str.contains("cross-margin") || err_str.contains("MISSING_REQUIRED_PARAM") {
-                warn!("[gateio-ws] Cross-margin leverage failed for {}, retrying with isolated margin param", normalized);
-                let iso_query = format!("leverage={}", leverage);
-                // FIX: Recompute timestamp for the retry request so the HMAC
-                // signature is computed over the correct (iso_query) payload
-                // with a fresh timestamp, avoiding potential signature mismatches.
+            // If isolated-margin parameter failed because account uses cross-margin,
+            // retry with the cross_leverage_limit parameter.
+            if err_str.contains("leverage") || err_str.contains("cross") || err_str.contains("MISSING_REQUIRED_PARAM") {
+                debug!("[gateio-ws] Isolated-margin leverage failed for {}, retrying with cross-margin param", normalized);
+                let cross_query = format!("cross_leverage_limit={}", leverage);
                 let timestamp = now_ms() / 1000;
-                let iso_signature = Self::rest_sign("POST", &full_path, &iso_query, body, timestamp, &self.api_secret);
-                let iso_url = format!("{}{}?{}", self.base_url(), path, iso_query);
-                let iso_response = self.rest_client
-                    .post(&iso_url)
+                let cross_signature = Self::rest_sign("POST", &full_path, &cross_query, body, timestamp, &self.api_secret);
+                let cross_url = format!("{}{}?{}", self.base_url(), path, cross_query);
+                let cross_response = self.rest_client
+                    .post(&cross_url)
                     .header("KEY", &self.api_key)
-                    .header("SIGN", &iso_signature)
+                    .header("SIGN", &cross_signature)
                     .header("Timestamp", timestamp.to_string())
                     .header("Content-Type", "application/json")
                     .send()
                     .await
                     .map_err(|_| ExchangeError::Timeout)?;
 
-                let iso_status = iso_response.status().as_u16();
-                if iso_status >= 400 {
-                    let iso_body: serde_json::Value = iso_response.json().await.map_err(|e| ExchangeError::Unknown {
+                let cross_status = cross_response.status().as_u16();
+                if cross_status >= 400 {
+                    let cross_body: serde_json::Value = cross_response.json().await.map_err(|e| ExchangeError::Unknown {
                         code: "JSON_PARSE".to_string(),
                         message: e.to_string(),
                     })?;
-                    return Err(crate::execution_gateway::classify_gateio_error(iso_status, &iso_body));
+                    return Err(crate::execution_gateway::classify_gateio_error(cross_status, &cross_body));
                 }
-                info!("[gateio-ws] Leverage set to {}x for {} (isolated margin)", leverage, normalized);
+                info!("[gateio-ws] Leverage set to {}x for {} (cross margin)", leverage, normalized);
                 return Ok(());
             }
 
             return Err(err);
         }
 
-        info!("[gateio-ws] Leverage set to {}x for {}", leverage, normalized);
+        info!("[gateio-ws] Leverage set to {}x for {} (isolated margin)", leverage, normalized);
         Ok(())
     }
 
