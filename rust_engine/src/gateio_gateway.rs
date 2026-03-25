@@ -56,7 +56,7 @@ use crate::execution_gateway::{
     now_ms, now_us,
 };
 use crate::execution_state::PlacementType;
-use crate::instrument_manager::{InstrumentManager, Exchange};
+use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_gateio};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1997,11 +1997,13 @@ impl ExecutionGateway for GateIoGateway {
                 Err(ExchangeError::ConnectionReset)
             }
             Err(_) => {
-                // Timeout — order may still be live on exchange
+                // Timeout — order may still be live on exchange.
+                // Return TimedOut with the client_id so that retry_failed_leg can call
+                // check_order_by_client_id() before retrying, preventing duplicate fills.
                 warn!("[gateio-ws] Timeout waiting for order {} ACK ({}ms)", client_id, RESPONSE_TIMEOUT_MS);
                 // Remove from pending to avoid leak
                 self.pending.write().remove(&client_id);
-                Err(ExchangeError::Timeout)
+                Err(ExchangeError::TimedOut { client_order_id: client_id.clone() })
             }
         };
 
@@ -2294,6 +2296,28 @@ impl ExecutionGateway for GateIoGateway {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Idempotency check: look up an order by its client-side `req_id` (the `text` field
+    /// Gate.io stores verbatim on each order).  Called when `submit_order` returns
+    /// `ExchangeError::TimedOut` — i.e. the WS ACK never arrived but the exchange may
+    /// have accepted the order.  Returns the exchange-assigned order ID if found so the
+    /// caller can decide whether to retry or accept the existing fill.
+    async fn check_order_by_client_id(
+        &self,
+        client_order_id: &str,
+        symbol: &str,
+    ) -> Result<Option<String>, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let result = check_order_exists_gateio(
+            &self.rest_client,
+            self.base_url(),
+            &self.api_key,
+            &self.api_secret,
+            &normalized,
+            client_order_id,
+        ).await;
+        Ok(result)
     }
 
     /// FIX 6: Submit a conditional stop-loss order to Gate.io via price_trigger API.

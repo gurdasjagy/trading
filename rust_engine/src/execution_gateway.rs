@@ -125,6 +125,14 @@ pub enum ExchangeError {
     // Retryable
     RateLimited { retry_after_ms: u64 },
     Timeout,
+    /// WS ACK or REST request timed out with a known client-side order identifier.
+    ///
+    /// Unlike `Timeout`, this carries the `client_order_id` that was used when
+    /// submitting the order. The exchange may have accepted the order even though
+    /// we never received confirmation. Callers must call
+    /// `ExecutionGateway::check_order_by_client_id` before retrying to avoid
+    /// duplicate fills.
+    TimedOut { client_order_id: String },
     ConnectionReset,
     InternalServerError,
     // Non-retryable
@@ -146,6 +154,7 @@ impl ExchangeError {
             self,
             ExchangeError::RateLimited { .. }
                 | ExchangeError::Timeout
+                | ExchangeError::TimedOut { .. }
                 | ExchangeError::ConnectionReset
                 | ExchangeError::InternalServerError
         )
@@ -159,6 +168,9 @@ impl std::fmt::Display for ExchangeError {
                 write!(f, "RateLimited (retry after {}ms)", retry_after_ms)
             }
             ExchangeError::Timeout => write!(f, "Request timeout"),
+            ExchangeError::TimedOut { client_order_id } => {
+                write!(f, "Request timeout (client_order_id={})", client_order_id)
+            }
             ExchangeError::ConnectionReset => write!(f, "Connection reset"),
             ExchangeError::InternalServerError => write!(f, "Internal server error"),
             ExchangeError::InsufficientBalance => write!(f, "Insufficient balance"),
@@ -407,6 +419,28 @@ pub trait ExecutionGateway: Send + Sync {
     async fn get_order_status(&self, order_id: &str, symbol: &str)
         -> Result<Option<OrderResult>, ExchangeError> {
         let _ = (order_id, symbol);
+        Ok(None)
+    }
+
+    /// Idempotency check by client-side order identifier.
+    ///
+    /// Called when `submit_order` returns `ExchangeError::TimedOut` — meaning the WS ACK
+    /// (or REST response) never arrived but the exchange may have accepted the order.
+    ///
+    /// Returns `Ok(Some(exchange_order_id))` if an active or filled order with this
+    /// `client_order_id` is found on the exchange, or `Ok(None)` if no such order exists
+    /// (safe to retry). Returns `Err` only on network/auth failures.
+    ///
+    /// Default implementation returns `Ok(None)` for gateways that do not support this
+    /// lookup. Concrete implementations call the appropriate REST endpoint:
+    /// - Binance: `GET /fapi/v1/order?origClientOrderId=…`
+    /// - Bybit:   `GET /v5/order/realtime?orderLinkId=…`
+    /// - Gate.io: `GET /api/v4/futures/usdt/orders?text=…`
+    async fn check_order_by_client_id(
+        &self,
+        _client_order_id: &str,
+        _symbol: &str,
+    ) -> Result<Option<String>, ExchangeError> {
         Ok(None)
     }
 

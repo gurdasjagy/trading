@@ -1,6 +1,7 @@
 //! Bybit v5 unified REST API gateway.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use hmac::{Hmac, Mac};
@@ -17,7 +18,7 @@ use crate::execution_gateway::{
     ExchangeError, ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType, Position,
     RustTicker,
 };
-use crate::instrument_manager::{InstrumentManager, Exchange};
+use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_bybit};
 
 const BYBIT_BASE_URL: &str = "https://api.bybit.com";
 const BYBIT_RECV_WINDOW: i64 = 5000;
@@ -28,6 +29,9 @@ pub struct BybitGateway {
     api_secret: Vec<u8>,
     rate_limiter: Arc<AdaptiveRateLimiter>,
     testnet: bool,
+    /// Monotonically increasing counter for generating unique orderLinkId values.
+    /// Allows idempotency checks via check_order_exists_bybit when REST calls time out.
+    next_client_id: AtomicU64,
     /// Dynamic instrument manager for real-time precision rules.
     /// When set, price and quantity are formatted using Bybit's
     /// tickSize and qtyStep instead of hardcoded "{:.8}" / "{:.3}".
@@ -53,8 +57,18 @@ impl BybitGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
+            next_client_id: AtomicU64::new(1),
             instrument_mgr: None,
         }
+    }
+
+    /// Generate the next monotonic order link ID for idempotency tracking.
+    ///
+    /// The counter wraps to 0 after u64::MAX increments (effectively never in practice
+    /// since a gateway instance is restarted long before 2^64 orders are submitted).
+    fn next_order_link_id(&self) -> String {
+        let id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        format!("rte{:016x}", id)
     }
 
     /// Create a new Bybit gateway with an InstrumentManager for real-time precision.
@@ -292,6 +306,12 @@ impl ExecutionGateway for BybitGateway {
             format!("{:.8}", qty_f64.max(0.001))
         };
 
+        // Generate a unique orderLinkId for idempotency.
+        // Included in every order submission so that if this REST call times out
+        // we can call check_order_exists_bybit() with this ID to determine whether
+        // the order was accepted by the exchange before retrying.
+        let link_id = self.next_order_link_id();
+
         let mut body = json!({
             "category": "linear",
             "symbol": symbol,
@@ -301,6 +321,7 @@ impl ExecutionGateway for BybitGateway {
             "timeInForce": tif,
             "reduceOnly": intent.reduce_only,
             "positionIdx": 0,  // one-way mode
+            "orderLinkId": link_id,
         });
 
         // Only send price for non-MARKET orders
@@ -316,7 +337,13 @@ impl ExecutionGateway for BybitGateway {
             }
         }
 
-        let response = self.post_signed("/v5/order/create", &body).await?;
+        // Convert a generic Timeout into TimedOut so that retry_failed_leg can call
+        // check_order_by_client_id() and avoid duplicate order submission.
+        let response = self.post_signed("/v5/order/create", &body).await
+            .map_err(|e| match e {
+                ExchangeError::Timeout => ExchangeError::TimedOut { client_order_id: link_id.clone() },
+                other => other,
+            })?;
         let end_us = now_us();
         let latency_us = (end_us - start_us).max(0) as u64;
 
@@ -335,8 +362,8 @@ impl ExecutionGateway for BybitGateway {
             .to_string();
 
         info!(
-            "Bybit order {} submitted: {} {} {} @ {:?} | {}µs",
-            order_id, side_str, qty_str, symbol, intent.price, latency_us
+            "Bybit order {} submitted (link_id={}): {} {} {} @ {:?} | {}µs",
+            order_id, link_id, side_str, qty_str, symbol, intent.price, latency_us
         );
 
         Ok(OrderResult {
@@ -598,6 +625,28 @@ impl ExecutionGateway for BybitGateway {
             Err(ExchangeError::OrderNotFound) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
+    /// Idempotency check: look up an order by the `orderLinkId` that was sent with the
+    /// original submission.  Called when `submit_order` returns
+    /// `ExchangeError::TimedOut` — i.e. the REST call timed out and we don't know whether
+    /// Bybit accepted the order.  Returns the exchange-assigned orderId if found and
+    /// active, or `Ok(None)` if no matching order exists (safe to retry).
+    async fn check_order_by_client_id(
+        &self,
+        client_order_id: &str,
+        symbol: &str,
+    ) -> Result<Option<String>, ExchangeError> {
+        let normalized = Self::normalize_symbol(symbol);
+        let result = check_order_exists_bybit(
+            &self.client,
+            self.base_url(),
+            &self.api_key,
+            &self.api_secret,
+            &normalized,
+            client_order_id,
+        ).await;
+        Ok(result)
     }
 
     async fn get_positions(&self) -> Result<Vec<Position>, ExchangeError> {
