@@ -1,6 +1,6 @@
 Hey  understand the current situation of the repository completey . Your task is to search on web ( complete documentations of bybit , binance and gate io )  to fix all the errors with proper approach and with proper working code ( no fake or pseudo code ) . Nextly again use your full knowledge to add all the gaps or features that bot is lacking as mentioned in bugs.txt properly by a deep research. No hardcoded values should be there . Evrything should be fetched in real time from exchange. Also search on web how to avoid maker and taker fees in finding arbitrage trading and add the same logic ( with complete working code ) to my bot. Below are all the errors or the bugs or features gap that bot is having.
 
-Note : Here is what is done from one one of your previous session.
+Note : Here is what is done from one one of your previous one session.
 
 Devin's execution plan
 
@@ -46,7 +46,25 @@ Devin's execution plan
 
 (x) represent that is done ( tick mark ).
 
+Complete in next session : 
 
+Devin execution plan : 
+
+[x] Explore repo structure, check compilation state on main, and review previous Devin branches for partial work
+[x] Research Bybit, Binance, Gate.io API docs (precision rules, WebSocket format, fee structures, fee avoidance strategies for arbitrage)
+[x] Checkout a new git branch for changes
+[x] Bug Fix: Wire InstrumentManager into Gate.io gateway submit_order for price formatting
+[x] Feature: Add Bybit VIP fee tiers to FeeOptimizer (new_bybit constructor)
+[x] Bug Fix: Wire InstrumentManager initialization in main.rs and pass to all gateways + funding arb engine
+[x] Create PR with current fixes
+[x] Feature: Integrate FeeStrategy into funding_arb_executor for post-only orders with proper price offsets
+[x] Feature: Add pre-flight margin simulation in DualLegExecutor before submitting orders
+[x] Feature: Contract multiplier normalization in funding arb engine between exchanges
+[ ] Feature: Add execution idempotency - call check_order_exists_* before retrying timed-out orders
+[ ] Audit and remove all remaining hardcoded values (prices, sizes, precision)
+[ ] Run cargo check / cargo clippy to fix all.
+
+Complete the remaining work after checking evrything and fix all cargo errors ( whether they are caused by your changes or previous. Leave warnings as it is ).
 
 
 1. Gate.io Manual Trade & Auto Trade Failures (Timeout)
