@@ -248,7 +248,22 @@ impl DualLegExecutor {
                 let adjusted_long = (target_notional_units / long_spec.contract_multiplier).round() as i64;
                 info!("[dual-leg] Contract multiplier normalization: short={} (mult={}) long={} (mult={})",
                     size, short_spec.contract_multiplier, adjusted_long, long_spec.contract_multiplier);
-                (size, adjusted_long.max(1))
+                // FIX: Don't blindly clamp to 1 — if adjusted_long < 1,
+                // the notional mismatch is too large to safely execute.
+                if adjusted_long < 1 {
+                    warn!("[dual-leg] Contract multiplier normalization produced long_size=0, aborting");
+                    return DualLegResult::BothFailed {
+                        short_error: ExchangeError::Unknown {
+                            code: "SIZE_TOO_SMALL".into(),
+                            message: "Long leg size rounds to 0 after multiplier normalization".into(),
+                        },
+                        long_error: ExchangeError::Unknown {
+                            code: "SIZE_TOO_SMALL".into(),
+                            message: "Long leg size rounds to 0 after multiplier normalization".into(),
+                        },
+                    };
+                }
+                (size, adjusted_long)
             } else {
                 (size, size)
             }

@@ -1319,16 +1319,44 @@ impl GateIoGateway {
     ) {
         // Extract req_id via fast scan: find "req_id":"..." pattern
         let req_id = Self::extract_json_string(text, "req_id");
+
+        // Check for error
+        let is_error = text.contains("\"error\"") && !text.contains("\"error\":null");
+
+        // FIX: When req_id is missing but an error is present, resolve the most
+        // recent pending order with that error. Gate.io's matching engine may omit
+        // req_id in error responses (e.g., leverage mismatch rejection), leaving
+        // the pending order stuck until the 5s timeout fires.
         let req_id = match req_id {
             Some(id) => id,
             None => {
+                if is_error {
+                    // Find the most recent pending order (by submit_us) and resolve it
+                    let mut pending_lock = pending.write();
+                    let oldest_key = pending_lock.iter()
+                        .min_by_key(|(_, p)| p.submit_us)
+                        .map(|(k, _)| k.clone());
+                    if let Some(key) = oldest_key {
+                        if let Some(p) = pending_lock.remove(&key) {
+                            let err_msg = Self::extract_json_string(text, "message")
+                                .unwrap_or_else(|| "unknown error (no req_id)".to_string());
+                            warn!("[gateio-ws] order_place error without req_id, resolving pending order {}: {}", key, err_msg);
+                            let mut state = order_state.write();
+                            if let Some(tracking) = state.get_mut(&p.client_id) {
+                                tracking.state = OrderTrackingState::Rejected { reason: err_msg.clone() };
+                            }
+                            let _ = p.response_tx.send(Err(ExchangeError::Unknown {
+                                code: "WS_REJECT_NO_REQID".to_string(),
+                                message: err_msg,
+                            }));
+                        }
+                    }
+                    return;
+                }
                 debug!("[gateio-ws] order_place response without req_id");
                 return;
             }
         };
-
-        // Check for error
-        let is_error = text.contains("\"error\"") && !text.contains("\"error\":null");
 
         let mut pending_lock = pending.write();
         if let Some(p) = pending_lock.remove(&req_id) {
@@ -1906,6 +1934,12 @@ impl ExecutionGateway for GateIoGateway {
                 match lev_result {
                     Ok(_) => {
                         debug!("[gateio-ws] Set leverage {}x for {}", target_leverage, symbol);
+                        // FIX: Add 500ms delay after leverage change to allow Gate.io's
+                        // REST API server to propagate the change to the matching engine.
+                        // Without this delay, the WS order may arrive at the matching
+                        // engine before the leverage change has propagated, causing
+                        // silent rejection (no WS ACK → 5s timeout → ghost position).
+                        tokio::time::sleep(Duration::from_millis(500)).await;
                     }
                     Err(e) => {
                         // Non-fatal: log and continue (exchange may already be at this leverage)
@@ -2160,6 +2194,10 @@ impl ExecutionGateway for GateIoGateway {
             if err_str.contains("cross_leverage_limit") || err_str.contains("cross-margin") || err_str.contains("MISSING_REQUIRED_PARAM") {
                 warn!("[gateio-ws] Cross-margin leverage failed for {}, retrying with isolated margin param", normalized);
                 let iso_query = format!("leverage={}", leverage);
+                // FIX: Recompute timestamp for the retry request so the HMAC
+                // signature is computed over the correct (iso_query) payload
+                // with a fresh timestamp, avoiding potential signature mismatches.
+                let timestamp = now_ms() / 1000;
                 let iso_signature = Self::rest_sign("POST", &full_path, &iso_query, body, timestamp, &self.api_secret);
                 let iso_url = format!("{}{}?{}", self.base_url(), path, iso_query);
                 let iso_response = self.rest_client
