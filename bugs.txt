@@ -1,3 +1,54 @@
+Hey  understand the current situation of the repository completey . Your task is to search on web ( complete documentations of bybit , binance and gate io )  to fix all the errors with proper approach and with proper working code ( no fake or pseudo code ) . Nextly again use your full knowledge to add all the gaps or features that bot is lacking as mentioned in bugs.txt properly by a deep research. No hardcoded values should be there . Evrything should be fetched in real time from exchange. Also search on web how to avoid maker and taker fees in finding arbitrage trading and add the same logic ( with complete working code ) to my bot. Below are all the errors or the bugs or features gap that bot is having.
+
+Note : Here is what is done from one one of your previous session.
+
+Devin's execution plan
+
+[x] Explore repository structure and understand codebase
+
+[x] Research Bybit, Binance, Gate.io API docs for precision rules, WebSocket format, and fee structures
+
+[x] Checkout a new git branch for changes
+
+[x] Bug Fix #1: Fix Gate.io WebSocket req_id placement - move from nested payload to root level
+
+[x] Feature: Build unified InstrumentManager module that fetches contract specs from all 3 exchanges at startup
+
+[x] Bug Fix #2 & #3: Integrate InstrumentManager into Binance/Bybit gateways for proper price/qty formatting
+
+[x] Add helper functions (exchange_id_to_exchange, get_approximate_price, get_or_default) and complete integration
+
+[ ] Commit current changes and push to remote
+
+[ ] Create PR with all fixes and features
+
+[ ] Wait for cargo check / fix compilation errors
+
+[ ] Feature: Add symbol normalization with contract multiplier conversion at gateway level
+
+[ ] Feature: Add pre-flight margin/risk simulation before order submission
+
+[ ] Feature: Enhance fee optimization - add Bybit fee tiers, BNB discount logic, post-only enforcement across all exchanges
+
+[ ] Integrate InstrumentManager into Gate.io gateway for price formatting
+
+[ ] Integrate InstrumentManager + fee strategy into funding arb engine/executor
+
+[ ] Feature: Add execution idempotency - REST reconciliation before retrying timed-out orders
+
+[ ] Audit and remove all remaining hardcoded values
+
+[ ] Wait for CI checks to pass
+
+[ ] Update environment config for future sessions
+
+[ ] Report results to user and suggest testing the app end-to-end
+
+(x) represent that is done ( tick mark ).
+
+
+
+
 1. Gate.io Manual Trade & Auto Trade Failures (Timeout)
 The Error in Logs: Timeout waiting for order r1 ACK (5000ms) followed by Ghost tracking entry removed. The Root Cause: The issue lies in how your Rust engine constructs the Gate.io WebSocket message for futures.order_place. You have nested the req_id field inside the "payload" JSON object. However, the Gate.io WebSocket API V4 requires req_id to be at the root level of the JSON request. Because it is incorrectly nested, Gate.io does not echo the req_id back in its response. Your Rust engine's ws_ingestion thread receives the exchange's response but cannot match it to the pending order map, resulting in the 5-second timeout, multiple retries, and eventually discarding it as a "ghost" order. Because manual trades share this execution gateway, auto-trades on Gate.io fail for the exact same reason.
 
