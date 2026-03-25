@@ -14,8 +14,14 @@
 //!
 //! # Authentication
 //!
-//! Gate.io WS v4 authentication uses HMAC-SHA512:
-//!   signature = HMAC_SHA512(secret, "channel={channel}&event={event}&time={time}")
+//! Gate.io WS v4 has TWO different authentication mechanisms:
+//!
+//! 1. **Subscriptions** (event: "subscribe"):
+//!    signature = HMAC_SHA512(secret, "channel={channel}&event={event}&time={time}")
+//!
+//! 2. **API requests** (event: "api", e.g. order placement/cancellation):
+//!    signature = HMAC_SHA512(secret, "api\n{channel}\n{req_param_json}\n{timestamp}")
+//!    Auth fields (api_key, signature, timestamp, req_param) go INSIDE the payload.
 //!
 //! # Order State Machine
 //!
@@ -62,13 +68,8 @@ use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_
 // Constants
 // ---------------------------------------------------------------------------
 
-// FIX 2: Use Gate.io's official documented futures WS URLs.
-// The previous URLs (ws.gate.com/v4/ws/futures/usdt) accepted connections and pings
-// but silently dropped `futures.order_place` messages, causing 5s timeouts and
-// ghost positions. The official docs (https://www.gate.io/docs/developers/futures/ws/en/)
-// consistently specify fx-ws.gateio.ws for futures order placement.
-const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
-const GATEIO_WS_TESTNET_URL: &str = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+const GATEIO_WS_URL: &str = "wss://ws.gate.com/v4/ws/futures/usdt";
+const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
 const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
@@ -927,12 +928,35 @@ impl GateIoGateway {
 
     // ── HMAC-SHA512 WS Authentication ──────────────────────────────────────
 
-    /// Compute Gate.io WS HMAC-SHA512 signature.
+    /// Compute Gate.io WS HMAC-SHA512 signature for **subscriptions**.
     ///
     /// sig_payload = "channel={channel}&event={event}&time={time}"
     /// signature   = HMAC_SHA512(api_secret, sig_payload)
+    ///
+    /// This is ONLY for subscribe/unsubscribe events. API requests (order
+    /// placement, cancellation) use a different signature format — see
+    /// `ws_api_sign()`.
     fn ws_sign(secret: &[u8], channel: &str, event: &str, time: i64) -> String {
         let payload = format!("channel={}&event={}&time={}", channel, event, time);
+        let mut mac = Hmac::<Sha512>::new_from_slice(secret)
+            .expect("HMAC accepts any key length");
+        mac.update(payload.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    /// Compute Gate.io WS HMAC-SHA512 signature for **API requests**
+    /// (order placement, cancellation, amendment, status queries).
+    ///
+    /// Gate.io WS API (event: "api") uses a DIFFERENT signature format than
+    /// subscriptions. The signature payload is:
+    ///
+    ///   "{event}\n{channel}\n{req_param_json}\n{timestamp}"
+    ///
+    /// where req_param_json is the JSON-serialized order parameters.
+    /// This matches the format used by CCXT and the official Gate.io docs
+    /// for WebSocket trading API.
+    fn ws_api_sign(secret: &[u8], channel: &str, req_param_json: &str, timestamp: i64) -> String {
+        let payload = format!("api\n{}\n{}\n{}", channel, req_param_json, timestamp);
         let mut mac = Hmac::<Sha512>::new_from_slice(secret)
             .expect("HMAC accepts any key length");
         mac.update(payload.as_bytes());
@@ -973,28 +997,30 @@ impl GateIoGateway {
 
     /// Build a futures.order_place WS message for order submission.
     ///
-    /// BUG FIX: Gate.io WebSocket API V4 requires `req_id` at the ROOT level
-    /// of the JSON request, NOT nested inside the `payload` object. When
-    /// `req_id` was inside `payload`, Gate.io did not echo it back in the
-    /// response, causing the ws_ingestion thread to fail matching the response
-    /// to the pending order map — resulting in 5-second timeouts and ghost
-    /// order tracking entries.
+    /// Gate.io WS API (event: "api") uses a DIFFERENT format than
+    /// subscriptions. The auth is embedded INSIDE the payload object
+    /// alongside the order parameters in `req_param`, and the signature
+    /// is computed over "api\nchannel\nreq_param_json\ntimestamp".
     ///
-    /// Correct format per Gate.io docs:
+    /// Correct format (matching CCXT and official Gate.io WS trading API):
     /// ```json
     /// {
     ///   "time": 1234567890,
     ///   "channel": "futures.order_place",
     ///   "event": "api",
-    ///   "req_id": "my_request_id",     // <-- ROOT level
     ///   "payload": {
-    ///     "contract": "BTC_USDT",
-    ///     "size": 10,
-    ///     "price": "50000",
-    ///     "tif": "gtc",
-    ///     "reduce_only": false
-    ///   },
-    ///   "auth": { ... }
+    ///     "req_id": "r1",
+    ///     "req_param": {
+    ///       "contract": "BTC_USDT",
+    ///       "size": 10,
+    ///       "price": "50000",
+    ///       "tif": "gtc",
+    ///       "reduce_only": false
+    ///     },
+    ///     "timestamp": "1234567890",
+    ///     "api_key": "your_key",
+    ///     "signature": "hmac_sha512_hex"
+    ///   }
     /// }
     /// ```
     fn build_order_place_message(
@@ -1008,35 +1034,43 @@ impl GateIoGateway {
         reduce_only: bool,
     ) -> String {
         let time = now_ms() / 1000;
-        let sign = Self::ws_sign(secret, "futures.order_place", "api", time);
-        // Build inline — avoid serde_json allocation on hot path.
-        // Gate.io WS API V4: req_id MUST be at root level, NOT inside payload.
+        // Build the req_param JSON first (needed for signature computation)
+        let req_param = format!(
+            r#"{{"contract":"{}","size":{},"price":"{}","tif":"{}","reduce_only":{},"text":"t-{}"}}"#,
+            contract, size, price, tif, reduce_only, req_id
+        );
+        // Gate.io WS API signature: HMAC-SHA512("api\nchannel\nreq_param_json\ntimestamp")
+        let sign = Self::ws_api_sign(secret, "futures.order_place", &req_param, time);
+        // Build the full message with auth embedded inside payload
         format!(
             concat!(
                 r#"{{"time":{},"channel":"futures.order_place","event":"api","#,
-                r#""req_id":"{}","#,
-                r#""payload":{{"contract":"{}","size":{},"price":"{}","tif":"{}","reduce_only":{}}}"#,
-                r#","auth":{{"method":"api_key","KEY":"{}","SIGN":"{}"}}}}"#
+                r#""payload":{{"req_id":"{}","req_param":{},"#,
+                r#""timestamp":"{}","api_key":"{}","signature":"{}"}}}}"#
             ),
-            time, req_id, contract, size, price, tif, reduce_only, api_key, sign
+            time, req_id, req_param, time, api_key, sign
         )
     }
 
     /// Build a futures.order_cancel WS message.
+    ///
+    /// Uses the same WS API auth format as order placement:
+    /// signature over "api\nchannel\nreq_param_json\ntimestamp".
     fn build_order_cancel_message(
         api_key: &str,
         secret: &[u8],
         order_id: &str,
     ) -> String {
         let time = now_ms() / 1000;
-        let sign = Self::ws_sign(secret, "futures.order_cancel", "api", time);
+        let req_param = format!(r#"{{"order_id":"{}"}}"#, order_id);
+        let sign = Self::ws_api_sign(secret, "futures.order_cancel", &req_param, time);
         format!(
             concat!(
                 r#"{{"time":{},"channel":"futures.order_cancel","event":"api","#,
-                r#""payload":{{"order_id":"{}"}}"#,
-                r#","auth":{{"method":"api_key","KEY":"{}","SIGN":"{}"}}}}"#
+                r#""payload":{{"req_id":"cancel_{}","req_param":{},"#,
+                r#""timestamp":"{}","api_key":"{}","signature":"{}"}}}}"#
             ),
-            time, order_id, api_key, sign
+            time, order_id, req_param, time, api_key, sign
         )
     }
 
@@ -1314,18 +1348,36 @@ impl GateIoGateway {
 
     /// Handle a futures.order_place ACK/NACK response.
     ///
-    /// Matches the `req_id` field against our pending orders and resolves
-    /// the oneshot channel so that `submit_order()` can return.
+    /// Gate.io WS API responses have a different structure than subscription
+    /// updates. The response format is:
+    /// ```json
+    /// {
+    ///   "header": {"response_time": "...", "status": "200", "channel": "...", "event": "api"},
+    ///   "data": {"result": {"id": 123, "status": "open", "size": 10, "left": 10, ...}},
+    ///   "request_id": "r1"   // <-- top-level, NOT "req_id"
+    /// }
+    /// ```
+    /// On error, `header.status` != "200" and `data.errs` contains error details.
     fn handle_order_place_response(
         text: &str,
         pending: &RwLock<HashMap<String, PendingOrder>>,
         order_state: &RwLock<HashMap<String, OrderTracking>>,
     ) {
-        // Extract req_id via fast scan: find "req_id":"..." pattern
-        let req_id = Self::extract_json_string(text, "req_id");
+        // Gate.io WS API returns `request_id` at top level for API responses.
+        // Also try `req_id` for backward compatibility.
+        let req_id = Self::extract_json_string(text, "request_id")
+            .or_else(|| Self::extract_json_string(text, "req_id"));
 
-        // Check for error
-        let is_error = text.contains("\"error\"") && !text.contains("\"error\":null");
+        // Check for error: header.status != "200", or explicit error fields
+        let is_error = {
+            let has_error_field = text.contains("\"error\"") && !text.contains("\"error\":null");
+            let has_errs = text.contains("\"errs\"");
+            // Check header.status for non-200
+            let header_error = Self::extract_header_status(text)
+                .map(|s| s != "200")
+                .unwrap_or(false);
+            has_error_field || has_errs || header_error
+        };
 
         // FIX: When req_id is missing but an error is present, resolve the most
         // recent pending order with that error. Gate.io's matching engine may omit
@@ -1342,8 +1394,7 @@ impl GateIoGateway {
                         .map(|(k, _)| k.clone());
                     if let Some(key) = oldest_key {
                         if let Some(p) = pending_lock.remove(&key) {
-                            let err_msg = Self::extract_json_string(text, "message")
-                                .unwrap_or_else(|| "unknown error (no req_id)".to_string());
+                            let err_msg = Self::extract_api_error_message(text);
                             warn!("[gateio-ws] order_place error without req_id, resolving pending order {}: {}", key, err_msg);
                             let mut state = order_state.write();
                             if let Some(tracking) = state.get_mut(&p.client_id) {
@@ -1357,7 +1408,7 @@ impl GateIoGateway {
                     }
                     return;
                 }
-                debug!("[gateio-ws] order_place response without req_id");
+                debug!("[gateio-ws] order_place response without req_id/request_id");
                 return;
             }
         };
@@ -1368,9 +1419,8 @@ impl GateIoGateway {
             let latency_us = (end_us - p.submit_us).max(0) as u64;
 
             if is_error {
-                // Extract error message
-                let err_msg = Self::extract_json_string(text, "message")
-                    .unwrap_or_else(|| "unknown error".to_string());
+                // Extract error message from data.errs or error.message
+                let err_msg = Self::extract_api_error_message(text);
                 let _ = p.response_tx.send(Err(ExchangeError::Unknown {
                     code: "WS_REJECT".to_string(),
                     message: err_msg.clone(),
@@ -1381,25 +1431,27 @@ impl GateIoGateway {
                     tracking.state = OrderTrackingState::Rejected { reason: err_msg };
                 }
             } else {
-                // Extract exchange order ID
-                let order_id = Self::extract_json_string(text, "id")
-                    .or_else(|| Self::extract_json_number_as_string(text, "id"))
+                // Gate.io WS API wraps order data inside data.result.
+                // Use extract_api_result_field_* helpers that look in
+                // top-level -> result -> data.result -> data.result[0].
+                let order_id = Self::extract_api_result_string(text, "id")
+                    .or_else(|| Self::extract_api_result_number(text, "id").map(|n| n.to_string()))
                     .unwrap_or_default();
 
-                let status = Self::extract_json_string(text, "status")
+                let status = Self::extract_api_result_string(text, "status")
                     .unwrap_or_else(|| "open".to_string());
 
                 // Gate.io returns `size` (total) and `left` (unfilled remaining).
                 // Actual filled = abs(size) - abs(left).
-                let total_size = Self::extract_json_number(text, "size")
+                let total_size = Self::extract_api_result_number(text, "size")
                     .map(|s| s.abs())
                     .unwrap_or(0);
-                let left = Self::extract_json_number(text, "left")
+                let left = Self::extract_api_result_number(text, "left")
                     .map(|s| s.abs())
                     .unwrap_or(0);
                 let filled_size = total_size - left;
 
-                let fill_price = Self::extract_json_float(text, "fill_price")
+                let fill_price = Self::extract_api_result_float(text, "fill_price")
                     .unwrap_or(0.0);
 
                 info!(
@@ -1428,6 +1480,149 @@ impl GateIoGateway {
                 }));
             }
         }
+    }
+
+    /// Extract `header.status` from a WS API response.
+    fn extract_header_status(text: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(text).ok()?;
+        v.get("header")
+            .and_then(|h| h.get("status"))
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string())
+    }
+
+    /// Extract error message from a WS API response.
+    /// Checks: data.errs.message, data.errs.label, error.message, top-level message.
+    fn extract_api_error_message(text: &str) -> String {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+            // Check data.errs first (API response error format)
+            if let Some(errs) = v.get("data").and_then(|d| d.get("errs")) {
+                if let Some(msg) = errs.get("message").and_then(|m| m.as_str()) {
+                    return msg.to_string();
+                }
+                if let Some(label) = errs.get("label").and_then(|l| l.as_str()) {
+                    return label.to_string();
+                }
+            }
+            // Check error.message (subscription-style error)
+            if let Some(err) = v.get("error") {
+                if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+                    return msg.to_string();
+                }
+            }
+            // Check top-level message
+            if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
+                return msg.to_string();
+            }
+        }
+        "unknown error".to_string()
+    }
+
+    /// Extract a string field from a WS API response result.
+    /// Looks in: top-level -> result -> data.result -> data.result[0]
+    fn extract_api_result_string(text: &str, key: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(text).ok()?;
+        // Top-level
+        if let Some(s) = v.get(key).and_then(|v| v.as_str()) {
+            return Some(s.to_string());
+        }
+        // result (subscription-style response)
+        if let Some(result) = v.get("result") {
+            if let Some(s) = result.get(key).and_then(|v| v.as_str()) {
+                return Some(s.to_string());
+            }
+            if let Some(arr) = result.as_array() {
+                if let Some(first) = arr.first() {
+                    if let Some(s) = first.get(key).and_then(|v| v.as_str()) {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
+        // data.result (API-style response)
+        if let Some(data) = v.get("data") {
+            if let Some(result) = data.get("result") {
+                if let Some(s) = result.get(key).and_then(|v| v.as_str()) {
+                    return Some(s.to_string());
+                }
+                if let Some(arr) = result.as_array() {
+                    if let Some(first) = arr.first() {
+                        if let Some(s) = first.get(key).and_then(|v| v.as_str()) {
+                            return Some(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract an integer field from a WS API response result.
+    /// Looks in: top-level -> result -> data.result -> data.result[0]
+    fn extract_api_result_number(text: &str, key: &str) -> Option<i64> {
+        let v: serde_json::Value = serde_json::from_str(text).ok()?;
+        // Try all locations: top-level, result, data.result
+        for container in [
+            Some(&v),
+            v.get("result"),
+            v.get("data").and_then(|d| d.get("result")),
+        ].iter().flatten() {
+            if let Some(n) = container.get(key).and_then(|v| v.as_i64()) {
+                return Some(n);
+            }
+            if let Some(s) = container.get(key).and_then(|v| v.as_str()) {
+                if let Ok(n) = s.parse() {
+                    return Some(n);
+                }
+            }
+            // Check if container is an array
+            if let Some(arr) = container.as_array() {
+                if let Some(first) = arr.first() {
+                    if let Some(n) = first.get(key).and_then(|v| v.as_i64()) {
+                        return Some(n);
+                    }
+                    if let Some(s) = first.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(n) = s.parse() {
+                            return Some(n);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract a float field from a WS API response result.
+    /// Looks in: top-level -> result -> data.result -> data.result[0]
+    fn extract_api_result_float(text: &str, key: &str) -> Option<f64> {
+        let v: serde_json::Value = serde_json::from_str(text).ok()?;
+        for container in [
+            Some(&v),
+            v.get("result"),
+            v.get("data").and_then(|d| d.get("result")),
+        ].iter().flatten() {
+            if let Some(n) = container.get(key).and_then(|v| v.as_f64()) {
+                return Some(n);
+            }
+            if let Some(s) = container.get(key).and_then(|v| v.as_str()) {
+                if let Ok(n) = s.parse() {
+                    return Some(n);
+                }
+            }
+            if let Some(arr) = container.as_array() {
+                if let Some(first) = arr.first() {
+                    if let Some(n) = first.get(key).and_then(|v| v.as_f64()) {
+                        return Some(n);
+                    }
+                    if let Some(s) = first.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(n) = s.parse() {
+                            return Some(n);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Handle a futures.orders subscription update (fills, partial fills, cancels).
