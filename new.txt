@@ -1,0 +1,51 @@
+rust-engine-1      | 2026-03-25T07:42:18.052203Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-25T07:42:18.060872Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-25T07:42:18.777904Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-25T07:42:22.139499Z  INFO trading_engine::dashboard_server: [dashboard] Manual trade submitted: buy BTC_USDT 50.00 USDT SL=None TP=None
+ rust-engine-1      | 2026-03-25T07:42:22.139737Z  INFO trading_engine: [execution] Manual trade received: buy BTC_USDT 50.00 USDT lev=10x SL=None TP=None
+ rust-engine-1      | 2026-03-25T07:42:22.294016Z  INFO trading_engine::gateio_gateway: [gateio] USDT→contracts: 500.00 USDT → 70 contracts (price=71160.1000, quanto=0.00010000)
+ rust-engine-1      | 2026-03-25T07:42:22.294048Z  INFO trading_engine: [execution] Manual trade: 50.00 USDT × 10x leverage = 500.00 notional → 70 contracts for BTC_USDT
+ rust-engine-1      | 2026-03-25T07:42:22.345878Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345926Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345932Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345937Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345942Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345948Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:42:22.345953Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-25T07:42:22.345963Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":359,"channels":[]}
+ rust-engine-1      | 2026-03-25T07:42:22.448948Z  WARN trading_engine::gateio_gateway: [gateio-ws] Cross-margin leverage failed for BTC_USDT, retrying with isolated margin param
+ rust-engine-1      | 2026-03-25T07:42:22.527459Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 10x for BTC_USDT (isolated margin)
+ rust-engine-1      | 2026-03-25T07:42:22.646434Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-25T07:42:22.646472Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Binance — skipping until balances are fetched
+ rust-engine-1      | 2026-03-25T07:42:22.646485Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+ rust-engine-1      | 2026-03-25T07:42:22.684597Z  WARN trading_engine::gateio_gateway: [gateio-ws] Cross-margin leverage failed for BTC_USDT, retrying with isolated margin param
+ rust-engine-1      | 2026-03-25T07:42:22.764475Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 10x for BTC_USDT (isolated margin)
+ rust-engine-1      | 2026-03-25T07:42:28.266810Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r7 ACK (5000ms)
+ rust-engine-1      | 2026-03-25T07:42:28.266867Z  WARN trading_engine::execution_gateway: Retryable error on attempt 1/5: Request timeout (client_order_id=r7). Retrying in 120ms
+ rust-engine-1      | 2026-03-25T07:42:28.542319Z  WARN trading_engine::gateio_gateway: [gateio-ws] Cross-margin leverage failed for BTC_USDT, retrying with isolated margin param
+ rust-engine-1      | 2026-03-25T07:42:28.621669Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 10x for BTC_USDT (isolated margin)
+ rust-engine-1      | 2026-03-25T07:42:32.842650Z  WARN trading_engine::gateio_gateway: [gateio-reconcile] GHOST: Local tracking for BTC_USDT but REST shows no position — cleaning up
+ rust-engine-1      | 2026-03-25T07:42:32.842684Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] Removed ghost tracking entry: r7
+ rust-engine-1      | 2026-03-25T07:42:32.842689Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] Removed ghost tracking entry: r8
+ rust-engine-1      | 2026-03-25T07:42:32.842692Z  WARN trading_engine::gateio_gateway: [gateio-reconcile] Cycle 24: 2 discrepancies found
+ rust-engine-1      | 2026-03-25T07:42:34.124038Z  WARN trading_engine::gateio_gateway: [gateio-ws] Timeout waiting for order r8 ACK (5000ms)
+ rust-engine-1      | 2026-03-25T07:42:34.124075Z  WARN trading_engine::execution_gateway: Retryable error on attempt 2/5: Request timeout (client_order_id=r8). Retrying in 240ms
+ rust-engine-1      | 2026-03-25T07:42:34.521508Z  WARN trading_engine::gateio_gateway: [gateio-ws] Cross-margin leverage failed for BTC_USDT, retrying with isolated margin param
+..rust-engine-1      | 2026-03-25T07:41:33.839011Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-25T07:41:33.947699Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2944.30
+ rust-engine-1      | 2026-03-25T07:41:33.947759Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $2944.30 (margin: 100.0%)
+ rust-engine-1      | 2026-03-25T07:41:34.132476Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $4943.14 (margin: 100.0%)
+ rust-engine-1      | 2026-03-25T07:41:34.219522Z  INFO trading_engine::bybit_gateway:
+Bybit balance (totalAvailableBalance): $2944.30
+ rust-engine-1      | 2026-03-25T07:41:34.692170Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$8828.58, exchanges=3, positions=0
+ rust-engine-1      | 2026-03-25T07:41:52.320561Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320595Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320606Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320621Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320630Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320636Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-25T07:41:52.320642Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-25T07:41:52.647257Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+ rust-engine-1      | 2026-03-25T07:41:52.647294Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Binance — skipping until balances are fetched
+ rust-engine-1      | 2026-03-25T07:41:52.647303Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
