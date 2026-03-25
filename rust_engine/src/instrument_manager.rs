@@ -788,6 +788,113 @@ pub async fn check_order_exists_bybit(
     None
 }
 
+/// Check if an order with the given client_order_id (text field) already exists on Gate.io.
+/// Returns Some(order_id) if found, None if not.
+///
+/// Gate.io uses the `text` field as a user-defined order identifier. When querying
+/// orders, we filter by this field to detect duplicates before retrying timed-out orders.
+/// Endpoint: GET /api/v4/futures/usdt/orders — filters by `text` query parameter.
+pub async fn check_order_exists_gateio(
+    client: &Client,
+    base_url: &str,
+    api_key: &str,
+    api_secret: &[u8],
+    symbol: &str,
+    client_order_id: &str,
+) -> Option<String> {
+    use sha2::Digest;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let path = "/api/v4/futures/usdt/orders";
+    let query = format!("contract={}&status=open&text={}", symbol, client_order_id);
+    let body = "";
+
+    // Gate.io REST signature: HMAC-SHA512 of "METHOD\nPATH\nQUERY\nHASH(BODY)\nTIMESTAMP"
+    let body_hash = hex::encode(sha2::Sha512::digest(body.as_bytes()));
+    let payload = format!("GET\n{}\n{}\n{}\n{}", path, query, body_hash, timestamp);
+    let mut mac = hmac::Hmac::<sha2::Sha512>::new_from_slice(api_secret).ok()?;
+    hmac::Mac::update(&mut mac, payload.as_bytes());
+    let signature = hex::encode(hmac::Mac::finalize(mac).into_bytes());
+
+    let url = format!("{}{}?{}", base_url, path, query);
+
+    let resp = client.get(&url)
+        .header("KEY", api_key)
+        .header("SIGN", &signature)
+        .header("Timestamp", timestamp.to_string())
+        .header("Content-Type", "application/json")
+        .send().await.ok()?;
+
+    let body: Value = resp.json().await.ok()?;
+
+    // Gate.io returns an array of orders
+    if let Some(orders) = body.as_array() {
+        for order in orders {
+            let text = order.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if text == client_order_id {
+                let order_id = order.get("id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id.to_string())
+                    .or_else(|| order.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()));
+                let status = order.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                if status != "finished" {
+                    info!(
+                        "Idempotency check: found existing Gate.io order {:?} for text {}",
+                        order_id, client_order_id
+                    );
+                    return order_id;
+                }
+            }
+        }
+    }
+
+    // Also check finished orders (the order may have already filled)
+    let query_finished = format!("contract={}&status=finished&text={}&limit=5", symbol, client_order_id);
+    let body_hash2 = hex::encode(sha2::Sha512::digest("".as_bytes()));
+    let payload2 = format!("GET\n{}\n{}\n{}\n{}", path, query_finished, body_hash2, timestamp);
+    let mut mac2 = hmac::Hmac::<sha2::Sha512>::new_from_slice(api_secret).ok()?;
+    hmac::Mac::update(&mut mac2, payload2.as_bytes());
+    let signature2 = hex::encode(hmac::Mac::finalize(mac2).into_bytes());
+
+    let url2 = format!("{}{}?{}", base_url, path, query_finished);
+
+    let resp2 = client.get(&url2)
+        .header("KEY", api_key)
+        .header("SIGN", &signature2)
+        .header("Timestamp", timestamp.to_string())
+        .header("Content-Type", "application/json")
+        .send().await.ok()?;
+
+    let body2: Value = resp2.json().await.ok()?;
+
+    if let Some(orders) = body2.as_array() {
+        for order in orders {
+            let text = order.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if text == client_order_id {
+                let finish_as = order.get("finish_as").and_then(|v| v.as_str()).unwrap_or("");
+                // Only return if the order was filled (not cancelled/liquidated)
+                if finish_as == "filled" || finish_as == "ioc" {
+                    let order_id = order.get("id")
+                        .and_then(|v| v.as_u64())
+                        .map(|id| id.to_string())
+                        .or_else(|| order.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()));
+                    info!(
+                        "Idempotency check: found filled Gate.io order {:?} for text {}",
+                        order_id, client_order_id
+                    );
+                    return order_id;
+                }
+            }
+        }
+    }
+
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Fee optimization helpers
 // ---------------------------------------------------------------------------

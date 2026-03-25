@@ -692,15 +692,24 @@ impl GateIoGateway {
         trigger_price: f64,
         size: i64,
         trigger_type: u8,
+        instrument_mgr: Option<&Arc<InstrumentManager>>,
     ) -> String {
         let rule = if trigger_type == 0 { 1 } else { 2 }; // 1 = >=, 2 = <=
+
+        // Use InstrumentManager for dynamic price formatting when available,
+        // falling back to conservative 8 decimal places.
+        let price_str = instrument_mgr
+            .and_then(|mgr| mgr.get(Exchange::GateIo, contract))
+            .map(|spec| spec.format_price(trigger_price))
+            .unwrap_or_else(|| format!("{:.8}", trigger_price));
+
         // FIX 3: price_type=1 for mark price (more reliable than last price)
         format!(
             concat!(
                 r#"{{"initial":{{"contract":"{}","size":{},"price":"0","tif":"ioc","reduce_only":true}},"#,
                 r#""trigger":{{"strategy_type":0,"price_type":1,"price":"{}","rule":{}}}}}"#,
             ),
-            contract, size, format!("{:.8}", trigger_price), rule
+            contract, size, price_str, rule
         )
     }
 
@@ -754,7 +763,7 @@ impl GateIoGateway {
                         // should detect the breach and close the position at market.
                         // Do NOT proceed with a conditional order that Gate.io will reject.
                     } else {
-                        let body = Self::build_price_trigger_body(symbol, sl_price, close_size, trigger_type);
+                        let body = Self::build_price_trigger_body(symbol, sl_price, close_size, trigger_type, self.instrument_mgr.as_ref());
                         let path = "/futures/usdt/price_orders";
                         let timestamp = now_ms() / 1000;
                         let full_path = format!("/api/v4{}", path);
@@ -788,7 +797,7 @@ impl GateIoGateway {
                 } else {
                     // Could not fetch last price — submit anyway and let Gate.io validate
                     warn!("[gateio-ws] Could not fetch last price for {} — submitting SL without validation", symbol);
-                    let body = Self::build_price_trigger_body(symbol, sl_price, close_size, trigger_type);
+                    let body = Self::build_price_trigger_body(symbol, sl_price, close_size, trigger_type, self.instrument_mgr.as_ref());
                     let path = "/futures/usdt/price_orders";
                     let timestamp = now_ms() / 1000;
                     let full_path = format!("/api/v4{}", path);
@@ -841,7 +850,7 @@ impl GateIoGateway {
                             if *parent_side == OrderSide::Buy { "LONG" } else { "SHORT" }
                         );
                     } else {
-                        let body = Self::build_price_trigger_body(symbol, tp_price, close_size, trigger_type);
+                        let body = Self::build_price_trigger_body(symbol, tp_price, close_size, trigger_type, self.instrument_mgr.as_ref());
                         let path = "/futures/usdt/price_orders";
                         let timestamp = now_ms() / 1000;
                         let full_path = format!("/api/v4{}", path);
@@ -874,7 +883,7 @@ impl GateIoGateway {
                     }
                 } else {
                     warn!("[gateio-ws] Could not fetch last price for {} — submitting TP without validation", symbol);
-                    let body = Self::build_price_trigger_body(symbol, tp_price, close_size, trigger_type);
+                    let body = Self::build_price_trigger_body(symbol, tp_price, close_size, trigger_type, self.instrument_mgr.as_ref());
                     let path = "/futures/usdt/price_orders";
                     let timestamp = now_ms() / 1000;
                     let full_path = format!("/api/v4{}", path);
@@ -2635,7 +2644,7 @@ impl GateIoGatewaySlTpHelper {
                     }
                 }
 
-                let body = GateIoGateway::build_price_trigger_body(symbol, sl_price, close_size, trigger_type);
+                let body = GateIoGateway::build_price_trigger_body(symbol, sl_price, close_size, trigger_type, None);
                 let path = "/futures/usdt/price_orders";
                 let timestamp = now_ms() / 1000;
                 let full_path = format!("/api/v4{}", path);
@@ -2684,7 +2693,7 @@ impl GateIoGatewaySlTpHelper {
                     }
                 }
 
-                let body = GateIoGateway::build_price_trigger_body(symbol, tp_price, close_size, trigger_type);
+                let body = GateIoGateway::build_price_trigger_body(symbol, tp_price, close_size, trigger_type, None);
                 let path = "/futures/usdt/price_orders";
                 let timestamp = now_ms() / 1000;
                 let full_path = format!("/api/v4{}", path);

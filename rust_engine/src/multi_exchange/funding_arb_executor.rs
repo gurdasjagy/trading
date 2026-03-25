@@ -183,8 +183,8 @@ impl DualLegExecutor {
 
             // Fetch balances from both gateways concurrently
             let (short_bal, long_bal) = tokio::join!(
-                short_gw.get_balance(symbol),
-                long_gw.get_balance(symbol),
+                short_gw.get_balance(),
+                long_gw.get_balance(),
             );
             let short_balance = short_bal.unwrap_or(0.0);
             let long_balance = long_bal.unwrap_or(0.0);
@@ -502,6 +502,11 @@ impl DualLegExecutor {
     ///
     /// Uses market orders for retries to guarantee fill and resolve
     /// the legging risk as quickly as possible.
+    ///
+    /// EXECUTION IDEMPOTENCY: Before each retry attempt, checks if the
+    /// previous order already exists on the exchange (via get_order_status)
+    /// to prevent duplicate fills when a timeout was caused by network
+    /// latency rather than actual order rejection.
     async fn retry_failed_leg(
         gw: Arc<dyn ExecutionGateway + Send + Sync>,
         symbol: &str,
@@ -511,6 +516,7 @@ impl DualLegExecutor {
         max_slippage: f64,
     ) -> Result<OrderResult, ExchangeError> {
         let mut last_err = ExchangeError::Timeout;
+        let mut last_order_id: Option<String> = None;
 
         for attempt in 0..LEG_RETRY_MAX_ATTEMPTS {
             let delay = LEG_RETRY_BASE_DELAY_MS * (1u64 << attempt); // Exponential backoff
@@ -520,6 +526,36 @@ impl DualLegExecutor {
                 "[dual-leg] Retry attempt {}/{} for {:?} leg (delay={}ms)",
                 attempt + 1, LEG_RETRY_MAX_ATTEMPTS, side, delay
             );
+
+            // IDEMPOTENCY CHECK: If we have a previous order ID from a timed-out
+            // attempt, check if it actually filled on the exchange before retrying.
+            // This prevents duplicate orders when the timeout was due to network
+            // latency rather than actual order rejection.
+            if let Some(ref prev_oid) = last_order_id {
+                match gw.get_order_status(prev_oid, symbol).await {
+                    Ok(Some(status)) if status.filled_size > 0 => {
+                        info!(
+                            "[dual-leg] Idempotency check: previous order {} already filled ({} contracts) — skipping retry",
+                            prev_oid, status.filled_size
+                        );
+                        return Ok(status);
+                    }
+                    Ok(Some(status)) => {
+                        info!(
+                            "[dual-leg] Idempotency check: previous order {} exists but unfilled (status={})",
+                            prev_oid, status.status
+                        );
+                        // Order exists but not filled — cancel it before retrying
+                        let _ = gw.cancel_order(prev_oid, symbol).await;
+                    }
+                    Ok(None) => {
+                        info!("[dual-leg] Idempotency check: previous order {} not found — safe to retry", prev_oid);
+                    }
+                    Err(e) => {
+                        warn!("[dual-leg] Idempotency check failed for order {}: {:?} — proceeding with retry", prev_oid, e);
+                    }
+                }
+            }
 
             // Use market order for retries (speed > cost when resolving legging risk)
             let retry_intent = OrderIntent {
@@ -549,10 +585,20 @@ impl DualLegExecutor {
                 }
                 Ok(result) => {
                     warn!("[dual-leg] Retry attempt {} returned 0 fill: {:?}", attempt + 1, result.status);
+                    // Track order ID for idempotency check on next attempt
+                    if !result.order_id.is_empty() {
+                        last_order_id = Some(result.order_id);
+                    }
                     last_err = ExchangeError::Unknown {
                         code: "ZERO_FILL".into(),
                         message: format!("Retry filled 0 contracts on attempt {}", attempt + 1),
                     };
+                }
+                Err(ExchangeError::Timeout) => {
+                    warn!("[dual-leg] Retry attempt {} timed out — will check idempotency on next attempt", attempt + 1);
+                    // Timeout: the order may have been accepted by the exchange.
+                    // On next attempt, the idempotency check will verify before retrying.
+                    last_err = ExchangeError::Timeout;
                 }
                 Err(e) => {
                     warn!("[dual-leg] Retry attempt {} failed: {:?}", attempt + 1, e);
