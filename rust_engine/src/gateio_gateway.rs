@@ -296,6 +296,7 @@ impl GateIoGateway {
                         rate_limit_tokens_used: Arc::new(AtomicU64::new(0)),
                         rate_limit_second_ns: Arc::new(AtomicU64::new(0)),
                         circuit_breaker: None,
+                        instrument_mgr: None,
                     };
 
                     if let Err(e) = temp_gw.monitor_liquidation_prices().await {

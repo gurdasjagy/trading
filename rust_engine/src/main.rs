@@ -4847,8 +4847,7 @@ fn main() {
     gateway_runtime.block_on(async {
         instrument_mgr.refresh_all().await;
     });
-    info!("[startup] InstrumentManager loaded {} contract specs from all exchanges",
-          instrument_mgr.spec_count());
+    info!("[startup] InstrumentManager initialized and specs refreshed from all exchanges");
 
     let gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> =
         config.exchanges.iter().find(|e| e.name == "gateio")
