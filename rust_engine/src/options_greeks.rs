@@ -26,7 +26,7 @@
 //! ```
 
 use std::f64::consts::{E, PI};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Standard normal CDF approximation (Abramowitz and Stegun).
 /// 

@@ -1105,6 +1105,13 @@ impl GateIoGateway {
         circuit_breaker: Option<Arc<CircuitBreaker>>,
     ) {
         let mut backoff_ms = RECONNECT_BASE_MS;
+        /// Maximum consecutive auth failures before giving up rapid retries.
+        /// After this many INVALID_KEY errors, the gateway backs off to 60s
+        /// intervals to avoid hammering Gate.io with bad credentials.
+        const MAX_AUTH_FAILURES: u32 = 3;
+        /// Backoff interval (ms) after exhausting auth retries.
+        const AUTH_FAILURE_BACKOFF_MS: u64 = 60_000;
+        let mut consecutive_auth_failures: u32 = 0;
 
         loop {
             is_ready.store(false, Ordering::Release);
@@ -1112,9 +1119,12 @@ impl GateIoGateway {
             // ── CIRCUIT BREAKER: Trip on disconnect ──
             // When the WS drops, explicitly trip the circuit breaker to prevent
             // the strategy engine from firing signals into a dead gateway.
+            // Skip tripping for auth failures — those are handled separately
+            // in the auth response handler with TripReason::AuthFailure.
             if let Some(ref cb) = circuit_breaker {
-                if backoff_ms > RECONNECT_BASE_MS {
-                    // Not the first connection attempt — this is a reconnect
+                if backoff_ms > RECONNECT_BASE_MS && consecutive_auth_failures == 0 {
+                    // Not the first connection attempt AND not an auth failure — this is
+                    // a true connectivity issue (WS dropped, TCP reset, etc.)
                     cb.trip(TripReason::ConnectivityLost);
                     error!("[gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost");
                 }
@@ -1224,26 +1234,47 @@ impl GateIoGateway {
                     }
 
                     if !authenticated {
-                        warn!("[gateio-ws] Auth/subscribe failed, reconnecting...");
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                        backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
+                        consecutive_auth_failures += 1;
+                        if consecutive_auth_failures >= MAX_AUTH_FAILURES {
+                            // After repeated auth failures, this is almost certainly
+                            // an invalid/expired API key — not a transient issue.
+                            // Trip circuit breaker with AuthFailure (NOT ConnectivityLost)
+                            // and back off to 60s to avoid hammering the server.
+                            error!(
+                                "[gateio-ws] {} consecutive auth failures — API key is likely invalid or expired. \
+                                 Backing off to {}s intervals. Check GATEIO_API_KEY / GATEIO_API_SECRET env vars.",
+                                consecutive_auth_failures, AUTH_FAILURE_BACKOFF_MS / 1000
+                            );
+                            if let Some(ref cb) = circuit_breaker {
+                                cb.trip(TripReason::AuthFailure);
+                            }
+                            tokio::time::sleep(Duration::from_millis(AUTH_FAILURE_BACKOFF_MS)).await;
+                        } else {
+                            warn!(
+                                "[gateio-ws] Auth/subscribe failed (attempt {}/{}) — retrying in {}ms...",
+                                consecutive_auth_failures, MAX_AUTH_FAILURES, backoff_ms
+                            );
+                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                            backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
+                        }
                         continue;
                     }
 
-                    // Both login and subscription succeeded
+                    // Both login and subscription succeeded — reset auth failure counter
+                    consecutive_auth_failures = 0;
                     is_ready.store(true, Ordering::Release);
                     info!("[gateio-ws] Ready — login confirmed, accepting orders");
 
                     // ── CATEGORY 1 FIX: Auto-reset circuit breaker on successful reconnect ──
                     // When connectivity is restored, reset the circuit breaker if it was
-                    // tripped due to ConnectivityLost. This prevents the bot from staying
-                    // halted after a transient network issue.
+                    // tripped due to ConnectivityLost or AuthFailure. This prevents the
+                    // bot from staying halted after a transient network/auth issue.
                     if let Some(ref cb) = circuit_breaker {
                         if cb.is_trading_halted() {
                             let reason_code = cb.trip_reason_code();
-                            // TripReason::ConnectivityLost = 7
-                            if reason_code == 7 {
-                                info!("[gateio-ws] Connectivity restored — auto-resetting circuit breaker");
+                            // TripReason::ConnectivityLost = 7, TripReason::AuthFailure = 8
+                            if reason_code == 7 || reason_code == 8 {
+                                info!("[gateio-ws] Connectivity/auth restored — auto-resetting circuit breaker");
                                 cb.reset();
                             }
                         }
@@ -2392,54 +2423,6 @@ impl ExecutionGateway for GateIoGateway {
         self.ws_tx.send(WsCommand::SendText(ws_msg)).map_err(|_| ExchangeError::ConnectionReset)?;
         info!("[gateio-ws] Cancel sent for order {}", order_id);
         Ok(())
-    }
-
-    /// CATEGORY 2 FIX: Order amendment via cancel+replace pattern.
-    ///
-    /// Gate.io does not support native order amendment on futures WebSocket API.
-    /// This implements the standard cancel+replace pattern used by institutional
-    /// trading systems:
-    ///   1. Cancel the existing order
-    ///   2. Wait for cancel confirmation (or timeout)
-    ///   3. Submit a new order with updated parameters
-    ///
-    /// This is atomic from the caller's perspective — if cancel fails, the
-    /// replacement is not submitted. If replacement fails, the original order
-    /// is already cancelled (caller must handle this).
-    async fn amend_order(
-        &self,
-        existing_order_id: &str,
-        symbol: &str,
-        new_intent: OrderIntent,
-    ) -> Result<OrderResult, ExchangeError> {
-        info!(
-            "[gateio-ws] Amending order {} for {} — cancel+replace",
-            existing_order_id, symbol
-        );
-
-        // Step 1: Cancel the existing order
-        self.cancel_order(existing_order_id, symbol).await?;
-
-        // Step 2: Brief delay for cancel to propagate through matching engine
-        // Gate.io WS cancel is async — we need the matching engine to process
-        // the cancel before we submit the replacement to avoid double-fills.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // Step 3: Submit the replacement order
-        let result = self.submit_order(new_intent).await;
-
-        match &result {
-            Ok(r) => info!(
-                "[gateio-ws] Amendment complete: old={} → new={} filled={}",
-                existing_order_id, r.order_id, r.filled_size
-            ),
-            Err(e) => warn!(
-                "[gateio-ws] Amendment replacement failed for {}: {} (original already cancelled)",
-                existing_order_id, e
-            ),
-        }
-
-        result
     }
 
     /// Position queries use REST fallback (cold path, infrequent).

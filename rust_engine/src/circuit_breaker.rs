@@ -91,6 +91,8 @@ pub enum TripReason {
     ExposureLimitBreached,
     /// Exchange connectivity lost.
     ConnectivityLost,
+    /// Authentication failure (invalid API key).
+    AuthFailure,
 }
 
 impl std::fmt::Display for TripReason {
@@ -104,6 +106,7 @@ impl std::fmt::Display for TripReason {
             TripReason::SingleTradeLoss => write!(f, "single_trade_loss"),
             TripReason::ExposureLimitBreached => write!(f, "exposure_limit"),
             TripReason::ConnectivityLost => write!(f, "connectivity_lost"),
+            TripReason::AuthFailure => write!(f, "auth_failure"),
         }
     }
 }
