@@ -127,6 +127,7 @@ pub mod instrument_manager;
 // ── Comprehensive Upgrade: New modules ──
 pub mod size_normalizer;    // BUG 3: USDT-to-contracts conversion
 pub mod funding_timing;     // FEAT 1: Funding rate timestamp-aware entry/exit
+pub mod ws_fill_receiver;   // FEAT 4: Binance & Bybit WebSocket fill updates
 
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;

@@ -489,7 +489,6 @@ impl FeeOptimizer {
             has_maker_rebate: self.has_maker_rebate(),
         }
     }
-}
 
     /// FEATURE 3: Get the best exchange for a trade based on fee optimization.
     /// Returns the exchange with lowest effective fee for the given order type.
