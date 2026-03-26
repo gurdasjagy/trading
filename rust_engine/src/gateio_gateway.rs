@@ -1168,62 +1168,10 @@ impl GateIoGateway {
 
                     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-                    // ── Step 1: Explicit futures.login ──
-                    // BUG 1 FIX: Gate.io WS v4 requires an explicit login step before
-                    // futures.order_place calls. Without this, order placement may be
-                    // silently rejected. The login uses HMAC-SHA512 signature:
-                    //   sig = HMAC_SHA512(secret, "channel=futures.login&event=login&time={time}")
-                    let login_msg = Self::build_login_message(&api_key, &api_secret);
-                    info!("[gateio-ws] Sending explicit futures.login");
-                    if let Err(e) = ws_write.send(Message::Text(login_msg)).await {
-                        error!("[gateio-ws] Login send failed: {}", e);
-                        continue;
-                    }
-
-                    // Wait for login response
-                    let login_deadline = Instant::now() + Duration::from_secs(5);
-                    let mut logged_in = false;
-                    while Instant::now() < login_deadline {
-                        tokio::select! {
-                            msg = ws_read.next() => {
-                                match msg {
-                                    Some(Ok(Message::Text(txt))) => {
-                                        debug!("[gateio-ws] Login phase received: {}", txt);
-                                        if txt.contains("futures.login") {
-                                            if txt.contains("\"error\":null") || txt.contains("\"status\":\"success\"") || txt.contains("\"result\":{\"uid\"") {
-                                                info!("[gateio-ws] Login successful");
-                                                logged_in = true;
-                                                break;
-                                            } else if txt.contains("INVALID_KEY") || txt.contains("\"error\":{") {
-                                                error!("[gateio-ws] Login rejected: {}", txt);
-                                                break;
-                                            }
-                                        }
-                                        if txt.contains("futures.pong") || txt.contains("futures.ping") {
-                                            continue;
-                                        }
-                                    }
-                                    Some(Ok(Message::Ping(data))) => {
-                                        let _ = ws_write.send(Message::Pong(data)).await;
-                                    }
-                                    Some(Err(e)) => {
-                                        error!("[gateio-ws] Read error during login: {}", e);
-                                        break;
-                                    }
-                                    None => break,
-                                    _ => {}
-                                }
-                            }
-                            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-                        }
-                    }
-
-                    if !logged_in {
-                        warn!("[gateio-ws] Login failed, reconnecting...");
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                        backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
-                        continue;
-                    }
+                    // Gate.io futures WS v4 authenticates via the auth block
+                    // on subscription messages (Step 2 below), not via a
+                    // separate login channel. No explicit login step needed.
+                    info!("[gateio-ws] Proceeding to authenticated subscription");
 
                     // ── Step 2: Subscribe to futures.orders with auth block ──
                     // After explicit login, subscribe to order updates for ALL contracts.
