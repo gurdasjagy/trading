@@ -287,6 +287,137 @@ impl TelegramAlertSender {
         self.send_message(&text).await;
     }
 
+    // ── CONFIG 2: Additional alert types ──────────────────────────────
+
+    /// Format and send a funding arb opportunity alert.
+    ///
+    /// # Arguments
+    /// * `symbol` — Trading symbol (e.g., "BTC_USDT")
+    /// * `long_exchange` — Exchange for the long leg
+    /// * `short_exchange` — Exchange for the short leg
+    /// * `funding_diff_bps` — Funding rate differential in basis points
+    /// * `estimated_apy` — Estimated annualized yield
+    pub async fn send_funding_arb_alert(
+        &self,
+        symbol: &str,
+        long_exchange: &str,
+        short_exchange: &str,
+        funding_diff_bps: f64,
+        estimated_apy: f64,
+    ) {
+        let text = format!(
+            "💰 *Funding Arb Opportunity*\n\
+             Symbol: `{}`\n\
+             Long: *{}* → Short: *{}*\n\
+             Funding Diff: {:.2} bps\n\
+             Est. APY: {:.1}%",
+            symbol, long_exchange, short_exchange, funding_diff_bps, estimated_apy
+        );
+
+        self.send_message(&text).await;
+    }
+
+    /// Format and send a margin ratio warning alert.
+    ///
+    /// # Arguments
+    /// * `exchange` — Exchange name
+    /// * `margin_ratio_pct` — Current margin ratio as percentage
+    /// * `threshold_pct` — Warning threshold percentage
+    /// * `available_margin` — Available margin in USDT
+    pub async fn send_margin_ratio_warning(
+        &self,
+        exchange: &str,
+        margin_ratio_pct: f64,
+        threshold_pct: f64,
+        available_margin: f64,
+    ) {
+        let urgency = if margin_ratio_pct > 90.0 {
+            "🔴 CRITICAL"
+        } else if margin_ratio_pct > 80.0 {
+            "🟠 HIGH"
+        } else {
+            "🟡 WARNING"
+        };
+
+        let text = format!(
+            "⚠️ *Margin Ratio Warning* {}\n\
+             Exchange: *{}*\n\
+             Margin Ratio: *{:.1}%* (threshold: {:.1}%)\n\
+             Available Margin: ${:.2}\n\
+             Action: Reduce positions or add margin.",
+            urgency, exchange, margin_ratio_pct, threshold_pct, available_margin
+        );
+
+        self.send_message(&text).await;
+    }
+
+    /// Format and send a delta neutrality breach alert.
+    ///
+    /// # Arguments
+    /// * `net_delta` — Current net delta exposure in USDT
+    /// * `max_delta` — Maximum allowed net delta
+    /// * `positions` — Summary of positions contributing to delta
+    pub async fn send_delta_neutrality_breach(
+        &self,
+        net_delta: f64,
+        max_delta: f64,
+        positions: &str,
+    ) {
+        let direction = if net_delta > 0.0 { "LONG" } else { "SHORT" };
+
+        let text = format!(
+            "⚖️ *Delta Neutrality Breach*\n\
+             Net Delta: *${:.2}* ({})\n\
+             Max Allowed: ${:.2}\n\
+             Breach: {:.1}%\n\
+             Positions:\n{}\n\
+             Action: Rebalancing required.",
+            net_delta.abs(),
+            direction,
+            max_delta,
+            (net_delta.abs() / max_delta * 100.0),
+            positions
+        );
+
+        self.send_message(&text).await;
+    }
+
+    /// Format and send an exchange connectivity issue alert.
+    ///
+    /// # Arguments
+    /// * `exchange` — Exchange name
+    /// * `issue` — Description of the connectivity issue
+    /// * `last_seen_secs` — Seconds since last successful connection
+    /// * `is_recovered` — Whether connectivity has been restored
+    pub async fn send_exchange_connectivity_alert(
+        &self,
+        exchange: &str,
+        issue: &str,
+        last_seen_secs: u64,
+        is_recovered: bool,
+    ) {
+        if is_recovered {
+            let text = format!(
+                "🟢 *Exchange Connectivity Restored*\n\
+                 Exchange: *{}*\n\
+                 Downtime: {}s\n\
+                 Status: Back online",
+                exchange, last_seen_secs
+            );
+            self.send_message(&text).await;
+        } else {
+            let text = format!(
+                "🔴 *Exchange Connectivity Lost*\n\
+                 Exchange: *{}*\n\
+                 Issue: {}\n\
+                 Last Seen: {}s ago\n\
+                 Action: Orders may not be executing. Manual intervention may be required.",
+                exchange, issue, last_seen_secs
+            );
+            self.send_message(&text).await;
+        }
+    }
+
     /// Check if the sender is enabled.
     pub fn is_enabled(&self) -> bool {
         self.enabled
