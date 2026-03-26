@@ -824,6 +824,14 @@ impl StrategyEngine {
             take_profit: None, // Computed by execution router based on ATR
             confidence,
             signal_tag: "microstructure_imbalance_vpin".to_string(),
+            // CATEGORY 2 FIX: Minimum fill size for IOC orders
+            min_fill_size: if order_type == OrderType::Limit && time_in_force == "ioc" {
+                Some((position_size * 0.5).round().max(1.0) as i64) // Require at least 50% fill
+            } else {
+                None
+            },
+            // CATEGORY 8 FIX: Strategy name for PnL attribution
+            strategy_name: "microstructure_imbalance_vpin".to_string(),
         })
     }
 

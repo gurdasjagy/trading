@@ -78,6 +78,16 @@ mod instrument_manager;
 // Feature 4: Persistent State (SQLite)
 mod state_store;
 
+// ── Institutional Gaps Implementation (prompt.txt) ──
+mod kelly_criterion;       // CAT 6: Kelly Criterion optimal bet sizing
+mod strategy_correlation;  // CAT 6: Strategy correlation matrix
+mod event_driven_signals;  // CAT 6: Event-driven signal generation
+mod tca;                   // CAT 8: Trade Cost Analysis
+mod session_detector;      // CAT 8: Session-aware trading
+mod spread_analytics;      // CAT 5: Spread analytics & imbalance decay
+mod kill_switch;           // CAT 8: Kill switch API endpoint
+mod pnl_attribution;      // CAT 8: PnL attribution by strategy
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

@@ -76,6 +76,63 @@ impl CorrelationLimiter {
         }
     }
 
+    /// CATEGORY 4 FIX: Compute correlation-adjusted position size.
+    ///
+    /// Instead of simply blocking positions that exceed the correlated exposure
+    /// limit, this method SCALES DOWN the requested size proportionally.
+    /// This allows the strategy to still trade, just with reduced risk.
+    ///
+    /// # Arguments
+    /// * `symbol` — The symbol to trade
+    /// * `requested_size_usdt` — Desired position size in USDT
+    ///
+    /// # Returns
+    /// Adjusted position size in USDT (may be smaller than requested)
+    pub fn adjust_size_for_correlation(&self, symbol: &str, requested_size_usdt: f64) -> f64 {
+        let current_correlated = self.compute_correlated_exposure(symbol);
+        let max_total = self.max_single_position * self.max_correlated_exposure_multiplier;
+        let remaining_capacity = (max_total - current_correlated).max(0.0);
+
+        if remaining_capacity <= 0.0 {
+            warn!(
+                "[correlation-limiter] No remaining capacity for {}: correlated={:.2}, max={:.2}",
+                symbol, current_correlated, max_total
+            );
+            return 0.0;
+        }
+
+        if requested_size_usdt <= remaining_capacity {
+            // Full size fits within limits
+            requested_size_usdt
+        } else {
+            // Scale down to fit remaining capacity
+            let adjusted = remaining_capacity;
+            info!(
+                "[correlation-limiter] Size adjusted for {}: requested={:.2}, adjusted={:.2} (correlated={:.2})",
+                symbol, requested_size_usdt, adjusted, current_correlated
+            );
+            adjusted
+        }
+    }
+
+    /// CATEGORY 4 FIX: Compute a scaling factor [0.0, 1.0] for position sizing.
+    ///
+    /// Returns 1.0 if no correlated exposure exists, scales down as
+    /// correlated exposure approaches the limit. This is the recommended
+    /// integration point for the strategy engine.
+    pub fn correlation_scale_factor(&self, symbol: &str) -> f64 {
+        let current_correlated = self.compute_correlated_exposure(symbol);
+        let max_total = self.max_single_position * self.max_correlated_exposure_multiplier;
+
+        if max_total <= 0.0 {
+            return 0.0;
+        }
+
+        let utilization = current_correlated / max_total;
+        // Linear scaling: 0% utilization = 1.0, 100% utilization = 0.0
+        (1.0 - utilization).clamp(0.0, 1.0)
+    }
+
     /// Compute the total correlated exposure for a given symbol.
     ///
     /// # Formula

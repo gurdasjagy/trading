@@ -472,6 +472,104 @@ impl FeeOptimizer {
     pub fn reset_daily_volume(&mut self) {
         self.daily_volume.clear();
     }
+
+    /// CATEGORY 8 FIX: Auto-detect current VIP level from exchange API response.
+    ///
+    /// Instead of relying solely on tracked 30-day volume (which may be inaccurate
+    /// after restarts), this method accepts the actual fee rates returned by the
+    /// exchange and determines the VIP tier from those rates.
+    ///
+    /// Call this after fetching account info from the exchange.
+    pub fn detect_tier_from_fees(&mut self, actual_maker_bps: f64, actual_taker_bps: f64) {
+        // Find the closest matching tier based on actual fees
+        let mut best_match = 0usize;
+        let mut best_distance = f64::MAX;
+
+        for (i, tier) in self.tiers.iter().enumerate() {
+            let distance = (tier.maker_fee_bps - actual_maker_bps).abs()
+                + (tier.taker_fee_bps - actual_taker_bps).abs();
+            if distance < best_distance {
+                best_distance = distance;
+                best_match = i;
+            }
+        }
+
+        if best_match != self.current_tier {
+            let old_tier = self.tiers[self.current_tier].tier_name.clone();
+            self.current_tier = best_match;
+            let new_tier = &self.tiers[best_match].tier_name;
+            tracing::info!(
+                "[fee-optimizer] Auto-detected tier change: {} -> {} (maker={:.1}bps, taker={:.1}bps)",
+                old_tier, new_tier, actual_maker_bps, actual_taker_bps
+            );
+
+            // Also update volume to reflect detected tier
+            self.volume_30d = self.tiers[best_match].volume_threshold_usdt;
+            if best_match + 1 < self.tiers.len() {
+                self.volume_to_next_tier =
+                    self.tiers[best_match + 1].volume_threshold_usdt - self.volume_30d;
+            } else {
+                self.volume_to_next_tier = 0.0;
+            }
+        }
+    }
+
+    /// CATEGORY 8 FIX: Fetch and auto-detect Gate.io fee tier from REST API.
+    ///
+    /// Queries GET /api/v4/futures/usdt/accounts and extracts the fee tier
+    /// from the response to keep the fee optimizer in sync with the exchange.
+    pub async fn auto_detect_gateio_tier(
+        &mut self,
+        client: &reqwest::Client,
+        base_url: &str,
+        api_key: &str,
+        api_secret: &[u8],
+    ) {
+        let path = "/futures/usdt/accounts";
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let full_path = format!("/api/v4{}", path);
+
+        // Compute Gate.io signature
+        use sha2::Digest;
+        let body_hash = hex::encode(sha2::Sha512::digest(b""));
+        let payload = format!("GET\n{}\n\n{}\n{}", full_path, body_hash, timestamp);
+        let mut mac = hmac::Hmac::<sha2::Sha512>::new_from_slice(api_secret)
+            .expect("HMAC key");
+        hmac::Mac::update(&mut mac, payload.as_bytes());
+        let signature = hex::encode(hmac::Mac::finalize(mac).into_bytes());
+
+        let url = format!("{}{}", base_url, path);
+        match client.get(&url)
+            .header("KEY", api_key)
+            .header("SIGN", &signature)
+            .header("Timestamp", timestamp.to_string())
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    // Gate.io returns "tier" field in account info
+                    if let Some(tier_num) = json.get("tier").and_then(|v| v.as_u64()) {
+                        let tier_idx = (tier_num as usize).min(self.tiers.len() - 1);
+                        if tier_idx != self.current_tier {
+                            let old = self.tiers[self.current_tier].tier_name.clone();
+                            self.current_tier = tier_idx;
+                            tracing::info!(
+                                "[fee-optimizer] Gate.io tier auto-detected: {} -> {} (tier={})",
+                                old, self.tiers[tier_idx].tier_name, tier_num
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {
+                tracing::debug!("[fee-optimizer] Could not auto-detect Gate.io tier");
+            }
+        }
+    }
     
     /// Get statistics.
     pub fn stats(&self) -> FeeStats {

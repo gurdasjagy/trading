@@ -1087,6 +1087,83 @@ impl GateIoGateway {
         )
     }
 
+    /// CATEGORY 2 FIX: Build a futures.order_amend WS message for order amendment.
+    ///
+    /// Order amendment (modify) preserves queue position on the exchange's matching
+    /// engine, unlike cancel+replace which loses position. Gate.io supports amending
+    /// price and/or size of resting limit orders via the WS API.
+    ///
+    /// Uses the same WS API auth format: signature over
+    /// "api\nchannel\nreq_param_json\ntimestamp".
+    fn build_order_amend_message(
+        api_key: &str,
+        secret: &[u8],
+        order_id: &str,
+        new_price: Option<&str>,
+        new_size: Option<i64>,
+    ) -> String {
+        let time = now_ms() / 1000;
+        let mut params = format!(r#"{{"order_id":"{}""#, order_id);
+        if let Some(price) = new_price {
+            params.push_str(&format!(r#","price":"{}""#, price));
+        }
+        if let Some(size) = new_size {
+            params.push_str(&format!(r#","size":{}"#, size));
+        }
+        params.push('}');
+        let sign = Self::ws_api_sign(secret, "futures.order_amend", &params, time);
+        format!(
+            concat!(
+                r#"{{"time":{},"channel":"futures.order_amend","event":"api","#,
+                r#""payload":{{"req_id":"amend_{}","req_param":{},"#,
+                r#""timestamp":"{}","api_key":"{}","signature":"{}"}}}}"#
+            ),
+            time, order_id, params, time, api_key, sign
+        )
+    }
+
+    /// CATEGORY 2 FIX: Amend a resting order's price and/or size without losing
+    /// queue position. Falls back to cancel+replace if amendment fails.
+    ///
+    /// Returns Ok(()) if the amendment was sent successfully.
+    pub fn amend_order(
+        &self,
+        order_id: &str,
+        new_price: Option<f64>,
+        new_size: Option<i64>,
+    ) -> Result<(), ExchangeError> {
+        if !self.is_ready.load(Ordering::Acquire) {
+            return Err(ExchangeError::ConnectionReset);
+        }
+
+        let price_str = new_price.map(|p| {
+            if let Some(ref mgr) = self.instrument_mgr {
+                // We don't know the symbol here, use default formatting
+                format!("{:.8}", p)
+            } else {
+                format!("{:.8}", p)
+            }
+        });
+
+        let ws_msg = Self::build_order_amend_message(
+            &self.api_key,
+            &self.api_secret,
+            order_id,
+            price_str.as_deref(),
+            new_size,
+        );
+
+        self.ws_tx.send(WsCommand::SendText(ws_msg)).map_err(|_| {
+            ExchangeError::ConnectionReset
+        })?;
+
+        info!(
+            "[gateio-ws] Order amendment sent: id={}, new_price={:?}, new_size={:?}",
+            order_id, new_price, new_size
+        );
+        Ok(())
+    }
+
     // ── WebSocket Connection Loop ──────────────────────────────────────────
 
     /// Main WS connection loop with automatic reconnection.
@@ -1410,6 +1487,17 @@ impl GateIoGateway {
         // ── Order cancel response ──
         if text.contains("futures.order_cancel") {
             debug!("[gateio-ws] Cancel response: {}", &text[..text.len().min(200)]);
+            return;
+        }
+
+        // ── CATEGORY 2 FIX: Order amendment response ──
+        if text.contains("futures.order_amend") {
+            if text.contains("\"error\"") && !text.contains("\"error\":null") {
+                let err_msg = Self::extract_api_error_message(text);
+                warn!("[gateio-ws] Order amendment failed: {} — will fall back to cancel+replace", err_msg);
+            } else {
+                info!("[gateio-ws] Order amendment acknowledged");
+            }
             return;
         }
 

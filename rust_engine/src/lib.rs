@@ -131,6 +131,16 @@ pub mod ws_fill_receiver;   // FEAT 4: Binance & Bybit WebSocket fill updates
 pub mod twap_integration;   // FEAT 6: TWAP/Iceberg execution pipeline integration
 pub mod pnl_tracker;        // FEAT 7: Real-time PnL tracking & risk metrics
 
+// ── Institutional Gaps Implementation (prompt.txt) ──
+pub mod kelly_criterion;       // CAT 6: Kelly Criterion optimal bet sizing
+pub mod strategy_correlation;  // CAT 6: Strategy correlation matrix (anti-concentration)
+pub mod event_driven_signals;  // CAT 6: Event-driven signal generation (liquidation counter-trade)
+pub mod tca;                   // CAT 8: Trade Cost Analysis (execution quality)
+pub mod session_detector;      // CAT 8: Session-aware trading (Asian/London/NY)
+pub mod spread_analytics;      // CAT 5: Spread autocorrelation, imbalance decay, trade arrival rate
+pub mod kill_switch;           // CAT 8: Kill switch HTTP/Telegram API endpoint
+pub mod pnl_attribution;      // CAT 8: PnL attribution by strategy/signal/timeframe
+
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;
 mod orderbook;
