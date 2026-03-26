@@ -60,7 +60,7 @@ impl Default for CircuitBreakerConfig {
             max_spread_bps: 500,          // 5% spread = something is very wrong
             spread_zscore_threshold: 5.0,
             max_orders_per_second: 50,
-            cooldown_seconds: 0,          // manual reset by default
+            cooldown_seconds: 300,         // CATEGORY 1+4 FIX: Auto-reset after 5 minutes (was 0 = manual only)
             flatten_on_trip: false,       // conservative: don't auto-flatten
             max_single_loss_usdt_fp: 500_0000_0000, // $500 max single loss
             max_total_exposure_usdt_fp: 10_000_0000_0000, // $10,000 max exposure

@@ -75,6 +75,8 @@ const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
 const RECONNECT_MAX_MS: u64 = 30_000;
 const PING_INTERVAL_SECS: u64 = 15;
+/// Maximum time (seconds) to wait for a pong response before declaring connection dead.
+const PONG_TIMEOUT_SECS: u64 = 45;
 const RESPONSE_TIMEOUT_MS: u64 = 5_000;
 
 /// Precious metals symbol mapping: standard -> Gate.io contract format.
@@ -1232,10 +1234,27 @@ impl GateIoGateway {
                     is_ready.store(true, Ordering::Release);
                     info!("[gateio-ws] Ready — login confirmed, accepting orders");
 
+                    // ── CATEGORY 1 FIX: Auto-reset circuit breaker on successful reconnect ──
+                    // When connectivity is restored, reset the circuit breaker if it was
+                    // tripped due to ConnectivityLost. This prevents the bot from staying
+                    // halted after a transient network issue.
+                    if let Some(ref cb) = circuit_breaker {
+                        if cb.is_trading_halted() {
+                            let reason_code = cb.trip_reason_code();
+                            // TripReason::ConnectivityLost = 7
+                            if reason_code == 7 {
+                                info!("[gateio-ws] Connectivity restored — auto-resetting circuit breaker");
+                                cb.reset();
+                            }
+                        }
+                    }
+
                     // ── Step 3: Main read/write loop ──
                     let mut ping_interval = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
                     let pending_clone = pending.clone();
                     let order_state_clone = order_state.clone();
+                    // CATEGORY 1 FIX: Track last pong received time for heartbeat validation
+                    let mut last_pong_time = Instant::now();
 
                     loop {
                         tokio::select! {
@@ -1243,6 +1262,11 @@ impl GateIoGateway {
                             msg = ws_read.next() => {
                                 match msg {
                                     Some(Ok(Message::Text(txt))) => {
+                                        // CATEGORY 1 FIX: Track pong responses from Gate.io
+                                        // Gate.io sends text-based pong: {"time":...,"channel":"futures.pong"}
+                                        if txt.contains("futures.pong") {
+                                            last_pong_time = Instant::now();
+                                        }
                                         Self::handle_ws_message(
                                             &txt,
                                             &pending_clone,
@@ -1251,6 +1275,10 @@ impl GateIoGateway {
                                     }
                                     Some(Ok(Message::Ping(data))) => {
                                         let _ = ws_write.send(Message::Pong(data)).await;
+                                    }
+                                    Some(Ok(Message::Pong(_))) => {
+                                        // CATEGORY 1 FIX: Also handle binary pong frames
+                                        last_pong_time = Instant::now();
                                     }
                                     Some(Ok(Message::Close(_))) => {
                                         warn!("[gateio-ws] Server closed connection");
@@ -1289,6 +1317,17 @@ impl GateIoGateway {
                             }
                             // Periodic ping to keep connection alive
                             _ = ping_interval.tick() => {
+                                // CATEGORY 1 FIX: Validate pong responses — if no pong received
+                                // within PONG_TIMEOUT_SECS, the connection is likely dead even
+                                // though the TCP socket hasn't closed. Force reconnect.
+                                let pong_age = last_pong_time.elapsed();
+                                if pong_age > Duration::from_secs(PONG_TIMEOUT_SECS) {
+                                    error!(
+                                        "[gateio-ws] No pong received for {:.0}s (timeout={}s) — connection stale, forcing reconnect",
+                                        pong_age.as_secs_f64(), PONG_TIMEOUT_SECS
+                                    );
+                                    break;
+                                }
                                 let ping_msg = format!(r#"{{"time":{},"channel":"futures.ping"}}"#, now_ms() / 1000);
                                 if let Err(e) = ws_write.send(Message::Text(ping_msg)).await {
                                     error!("[gateio-ws] Ping failed: {}", e);
