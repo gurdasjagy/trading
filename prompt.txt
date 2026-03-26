@@ -1,0 +1,86 @@
+The file contains all the features that bot is currently having and the features that bot is lacking and needed to be add into the code base. you task is to understand all the features to add in the codebase search on the web how the features works and than understand the current codebase structure completely make a proper plan to implement all the features correctly in the current code.
+Note: There must be not fake , psuedo or partial code implementation. Proper real working code implementation should be there with proper planning and perfection.
+
+What Your Bot Already Has (Impressive)
+
+Dual-path architecture: Rust hot path + Python cold path with SHM communication
+100+ trading strategies across crypto, forex, and gold
+Microstructure analytics: VPIN, Kyle's Lambda, CVD, Volume Profile, Wyckoff, Fibonacci, Ichimoku
+Multi-exchange support: Gate.io (primary), Binance, Bybit with SOR
+Risk management: Circuit breaker, pre-trade risk, position slot manager, anti-liquidation
+AI/ML integration: LSTM, Transformer, XGBoost, RL optimization, sentiment analysis
+Execution quality: Smart entry, TWAP, Iceberg, maker rebate optimization
+Monitoring: Telegram alerts, web dashboard, trade journal
+
+Critical Gaps vs Institutional-Level Bots
+1. AUTHENTICATION & CONNECTIVITY (BLOCKING)
+
+futures.login signature uses wrong event type (login instead of api)
+Login payload structure is incorrect (auth in separate block vs inside payload)
+No circuit breaker auto-reset after connectivity restoration
+No WS heartbeat validation (only sends pings, doesn't validate pong responses)
+
+2. ORDER EXECUTION (PROFIT-CRITICAL)
+
+No order amendment (cancel+replace) support; always cancel then re-submit, losing queue position
+No partial fill handling in the WS response parser; only checks final status
+GateIoGatewaySlTpHelper::base_url() returns fx-api.gateio.ws for mainnet but GateIoGateway::base_url() returns api.gateio.ws - URL mismatch means SL/TP orders may fail on mainnet
+No fill-or-kill (FOK) or immediate-or-cancel (IOC) with minimum fill support
+500ms delay after leverage change is a hardcoded guess; should poll for confirmation
+No order book-aware limit price calculation (e.g., placing limit at best bid+1 tick for maker rebate)
+
+3. POSITION MANAGEMENT (MONEY-LOSING)
+
+Ghost position detection runs every 15s but has no mechanism to actually close ghost positions on the exchange
+Reconciliation creates "emergency tracking" but never submits actual SL orders for discovered positions
+No position netting across strategies; two strategies can open opposing positions on the same symbol
+No maximum notional value check per symbol (only contract count)
+PositionLifecycleManager reversal detection (30% drawdown from peak) is too aggressive for volatile crypto
+
+4. RISK MANAGEMENT (CAPITAL PRESERVATION)
+
+Circuit breaker cooldown_seconds defaults to 0 (manual reset required), meaning a connectivity blip halts trading until manual intervention
+No correlation-adjusted position sizing; the CorrelationLimiter exists but doesn't reduce size, only blocks
+No portfolio-level Greeks (delta, gamma, vega) for multi-asset positions
+No funding rate cost deducted from PnL tracking; positions held through funding events show inflated PnL
+max_daily_drawdown_pct is checked against daily_pnl_fp but daily_start_balance_fp is never set from actual balance
+No intraday VaR breach position reduction (VaR engine exists but doesn't trigger automatic de-risking)
+
+5. MARKET DATA (SIGNAL QUALITY)
+
+VPIN uses synthetic volume from depth proxy (total_depth * 0.01) instead of actual trade flow; this produces noisy toxicity scores
+Ichimoku Cloud only updates on 1h candle completion; no multi-timeframe Ichimoku (4h, daily)
+No order book imbalance decay tracking (how fast imbalance reverts)
+No trade arrival rate (Poisson intensity) for regime detection
+No tick-by-tick spread analytics (spread autocorrelation, mean-reversion speed)
+Candle aggregator doesn't handle gaps (exchange downtime creates artificial candles)
+
+6. STRATEGY ENGINE (ALPHA GENERATION)
+
+StrategyEngine::evaluate() uses a single confidence threshold; no Kelly Criterion for optimal bet sizing
+No strategy correlation matrix; multiple strategies can fire the same signal simultaneously, creating concentration risk
+Funding rate arbitrage uses fixed 100-contract size instead of dynamically sizing based on rate magnitude and available margin
+No mean-reversion vs momentum regime switch at the strategy level (regime detection exists in Python but the Rust strategy engine doesn't adapt its strategy mix)
+No event-driven signal generation (e.g., large liquidation detected -> immediate counter-trade)
+Toxicity threshold of 0.85 is too high; institutional bots typically halt at 0.6-0.7
+
+7. LATENCY & PERFORMANCE
+
+JSON parsing with serde_json::from_str on every WS message; should use simd-json or zero-copy parsing
+parking_lot::RwLock on order_state and pending maps; should use DashMap for concurrent access
+No kernel bypass (io_uring, DPDK) for network I/O
+REST calls for ticker/position use reqwest with default connection pooling; should use persistent HTTP/2 connections
+No pre-computed order templates (order JSON is rebuilt from scratch on every submission)
+
+8. MISSING INSTITUTIONAL FEATURES
+
+No kill switch API endpoint (can only trip circuit breaker programmatically, not via HTTP/Telegram command)
+No PnL attribution by strategy/signal/timeframe in the Rust engine
+No trade cost analysis (TCA) comparing execution price vs arrival price vs VWAP
+No market impact model calibration from historical fills
+No order flow toxicity-adjusted spread for limit order placement
+No dynamic fee tier detection (fee optimizer exists but doesn't auto-detect current VIP level)
+No cross-margin utilization optimization (using idle margin from profitable positions to increase size on new trades)
+No session-aware trading (Asian/London/NY session detection for crypto, which has different volatility profiles)
+No whale wallet tracking integration in the Rust hot path (exists in Python cold path only)
+No mempool monitoring for front-running protection on DEX-correlated pairs
