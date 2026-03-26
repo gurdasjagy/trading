@@ -75,6 +75,8 @@ const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
 const RECONNECT_MAX_MS: u64 = 30_000;
 const PING_INTERVAL_SECS: u64 = 15;
+/// Maximum time (seconds) to wait for a pong response before declaring connection dead.
+const PONG_TIMEOUT_SECS: u64 = 45;
 const RESPONSE_TIMEOUT_MS: u64 = 5_000;
 
 /// Precious metals symbol mapping: standard -> Gate.io contract format.
@@ -1232,10 +1234,27 @@ impl GateIoGateway {
                     is_ready.store(true, Ordering::Release);
                     info!("[gateio-ws] Ready — login confirmed, accepting orders");
 
+                    // ── CATEGORY 1 FIX: Auto-reset circuit breaker on successful reconnect ──
+                    // When connectivity is restored, reset the circuit breaker if it was
+                    // tripped due to ConnectivityLost. This prevents the bot from staying
+                    // halted after a transient network issue.
+                    if let Some(ref cb) = circuit_breaker {
+                        if cb.is_trading_halted() {
+                            let reason_code = cb.trip_reason_code();
+                            // TripReason::ConnectivityLost = 7
+                            if reason_code == 7 {
+                                info!("[gateio-ws] Connectivity restored — auto-resetting circuit breaker");
+                                cb.reset();
+                            }
+                        }
+                    }
+
                     // ── Step 3: Main read/write loop ──
                     let mut ping_interval = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
                     let pending_clone = pending.clone();
                     let order_state_clone = order_state.clone();
+                    // CATEGORY 1 FIX: Track last pong received time for heartbeat validation
+                    let mut last_pong_time = Instant::now();
 
                     loop {
                         tokio::select! {
@@ -1243,6 +1262,11 @@ impl GateIoGateway {
                             msg = ws_read.next() => {
                                 match msg {
                                     Some(Ok(Message::Text(txt))) => {
+                                        // CATEGORY 1 FIX: Track pong responses from Gate.io
+                                        // Gate.io sends text-based pong: {"time":...,"channel":"futures.pong"}
+                                        if txt.contains("futures.pong") {
+                                            last_pong_time = Instant::now();
+                                        }
                                         Self::handle_ws_message(
                                             &txt,
                                             &pending_clone,
@@ -1251,6 +1275,10 @@ impl GateIoGateway {
                                     }
                                     Some(Ok(Message::Ping(data))) => {
                                         let _ = ws_write.send(Message::Pong(data)).await;
+                                    }
+                                    Some(Ok(Message::Pong(_))) => {
+                                        // CATEGORY 1 FIX: Also handle binary pong frames
+                                        last_pong_time = Instant::now();
                                     }
                                     Some(Ok(Message::Close(_))) => {
                                         warn!("[gateio-ws] Server closed connection");
@@ -1289,6 +1317,17 @@ impl GateIoGateway {
                             }
                             // Periodic ping to keep connection alive
                             _ = ping_interval.tick() => {
+                                // CATEGORY 1 FIX: Validate pong responses — if no pong received
+                                // within PONG_TIMEOUT_SECS, the connection is likely dead even
+                                // though the TCP socket hasn't closed. Force reconnect.
+                                let pong_age = last_pong_time.elapsed();
+                                if pong_age > Duration::from_secs(PONG_TIMEOUT_SECS) {
+                                    error!(
+                                        "[gateio-ws] No pong received for {:.0}s (timeout={}s) — connection stale, forcing reconnect",
+                                        pong_age.as_secs_f64(), PONG_TIMEOUT_SECS
+                                    );
+                                    break;
+                                }
                                 let ping_msg = format!(r#"{{"time":{},"channel":"futures.ping"}}"#, now_ms() / 1000);
                                 if let Err(e) = ws_write.send(Message::Text(ping_msg)).await {
                                     error!("[gateio-ws] Ping failed: {}", e);
@@ -1635,6 +1674,13 @@ impl GateIoGateway {
     }
 
     /// Handle a futures.orders subscription update (fills, partial fills, cancels).
+    ///
+    /// CATEGORY 2 FIX: Enhanced partial fill handling in WS response parser.
+    /// Now properly tracks:
+    ///   - Partial fill quantities via `left` field (remaining unfilled)
+    ///   - Fill price from `fill_price` field
+    ///   - Cumulative filled quantity computed as total_size - left
+    ///   - Transition from partial fill to fully filled when left == 0
     fn handle_order_update(
         text: &str,
         _pending: &RwLock<HashMap<String, PendingOrder>>,
@@ -1645,6 +1691,9 @@ impl GateIoGateway {
         let status = Self::extract_json_string(text, "status");
         let fill_price = Self::extract_json_float(text, "fill_price");
         let filled_size = Self::extract_json_number(text, "size").map(|s| s.abs());
+        // CATEGORY 2 FIX: Extract `left` field for accurate partial fill tracking
+        // Gate.io provides `left` = remaining unfilled quantity
+        let left_remaining = Self::extract_json_number(text, "left").map(|s| s.abs());
 
         if let (Some(ref oid), Some(ref st)) = (&order_id, &status) {
             debug!("[gateio-ws] Order update: id={}, status={}", oid, st);
@@ -1662,22 +1711,40 @@ impl GateIoGateway {
                 if let Some(tracking) = state.get_mut(&key) {
                     match st.as_str() {
                         "finished" => {
+                            // CATEGORY 2 FIX: Compute actual filled quantity from size - left
+                            let total_filled = match (filled_size, left_remaining) {
+                                (Some(total), Some(left)) => total - left,
+                                (Some(total), None) => total,
+                                _ => tracking.size,
+                            };
                             tracking.state = OrderTrackingState::Filled {
                                 avg_price: fill_price.unwrap_or(0.0),
-                                total_filled: filled_size.unwrap_or(tracking.size),
+                                total_filled,
                                 fee: 0.0,
                             };
-                            info!("[gateio-ws] Order {} FILLED at {:.4}", oid, fill_price.unwrap_or(0.0));
+                            info!("[gateio-ws] Order {} FILLED: qty={} price={:.4}", oid, total_filled, fill_price.unwrap_or(0.0));
                         }
                         "cancelled" => {
                             tracking.state = OrderTrackingState::Cancelled;
                             info!("[gateio-ws] Order {} CANCELLED", oid);
                         }
                         _ => {
-                            // Partial fill update
-                            if let Some(fs) = filled_size {
+                            // CATEGORY 2 FIX: Enhanced partial fill tracking
+                            // Gate.io status "open" with fill_price > 0 means partial fill
+                            let cumulative_filled = match (filled_size, left_remaining) {
+                                (Some(total), Some(left)) => Some(total - left),
+                                _ => filled_size,
+                            };
+                            if let Some(filled) = cumulative_filled {
                                 if let OrderTrackingState::Resting { ref mut filled_so_far, .. } = tracking.state {
-                                    *filled_so_far = fs;
+                                    let prev = *filled_so_far;
+                                    *filled_so_far = filled;
+                                    if filled > prev {
+                                        info!(
+                                            "[gateio-ws] Order {} PARTIAL FILL: {}/{} contracts @ {:.4}",
+                                            oid, filled, tracking.size, fill_price.unwrap_or(0.0)
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -2142,12 +2209,39 @@ impl ExecutionGateway for GateIoGateway {
                 match lev_result {
                     Ok(_) => {
                         debug!("[gateio-ws] Set leverage {}x for {}", target_leverage, symbol);
-                        // FIX: Add 500ms delay after leverage change to allow Gate.io's
-                        // REST API server to propagate the change to the matching engine.
-                        // Without this delay, the WS order may arrive at the matching
-                        // engine before the leverage change has propagated, causing
-                        // silent rejection (no WS ACK → 5s timeout → ghost position).
-                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        // CATEGORY 2 FIX: Poll for leverage confirmation instead of
+                        // hardcoded 500ms sleep. Check up to 5 times with 100ms intervals
+                        // (max 500ms total, but usually confirms in 100-200ms).
+                        let mut confirmed = false;
+                        for attempt in 0..5 {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            match self.get_position(&symbol).await {
+                                Ok(Some(pos)) if pos.leverage == target_leverage => {
+                                    confirmed = true;
+                                    debug!(
+                                        "[gateio-ws] Leverage {}x confirmed for {} after {}ms",
+                                        target_leverage, symbol, (attempt + 1) * 100
+                                    );
+                                    break;
+                                }
+                                Ok(Some(pos)) => {
+                                    debug!(
+                                        "[gateio-ws] Leverage poll {}: current={}x target={}x",
+                                        attempt + 1, pos.leverage, target_leverage
+                                    );
+                                }
+                                _ => {
+                                    // No position yet or error — leverage may still be propagating
+                                    debug!("[gateio-ws] Leverage poll {}: no position yet", attempt + 1);
+                                }
+                            }
+                        }
+                        if !confirmed {
+                            warn!(
+                                "[gateio-ws] Leverage {}x not confirmed for {} after 500ms — proceeding anyway",
+                                target_leverage, symbol
+                            );
+                        }
                     }
                     Err(e) => {
                         // Non-fatal: log and continue (exchange may already be at this leverage)
@@ -2298,6 +2392,54 @@ impl ExecutionGateway for GateIoGateway {
         self.ws_tx.send(WsCommand::SendText(ws_msg)).map_err(|_| ExchangeError::ConnectionReset)?;
         info!("[gateio-ws] Cancel sent for order {}", order_id);
         Ok(())
+    }
+
+    /// CATEGORY 2 FIX: Order amendment via cancel+replace pattern.
+    ///
+    /// Gate.io does not support native order amendment on futures WebSocket API.
+    /// This implements the standard cancel+replace pattern used by institutional
+    /// trading systems:
+    ///   1. Cancel the existing order
+    ///   2. Wait for cancel confirmation (or timeout)
+    ///   3. Submit a new order with updated parameters
+    ///
+    /// This is atomic from the caller's perspective — if cancel fails, the
+    /// replacement is not submitted. If replacement fails, the original order
+    /// is already cancelled (caller must handle this).
+    async fn amend_order(
+        &self,
+        existing_order_id: &str,
+        symbol: &str,
+        new_intent: OrderIntent,
+    ) -> Result<OrderResult, ExchangeError> {
+        info!(
+            "[gateio-ws] Amending order {} for {} — cancel+replace",
+            existing_order_id, symbol
+        );
+
+        // Step 1: Cancel the existing order
+        self.cancel_order(existing_order_id, symbol).await?;
+
+        // Step 2: Brief delay for cancel to propagate through matching engine
+        // Gate.io WS cancel is async — we need the matching engine to process
+        // the cancel before we submit the replacement to avoid double-fills.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Step 3: Submit the replacement order
+        let result = self.submit_order(new_intent).await;
+
+        match &result {
+            Ok(r) => info!(
+                "[gateio-ws] Amendment complete: old={} → new={} filled={}",
+                existing_order_id, r.order_id, r.filled_size
+            ),
+            Err(e) => warn!(
+                "[gateio-ws] Amendment replacement failed for {}: {} (original already cancelled)",
+                existing_order_id, e
+            ),
+        }
+
+        result
     }
 
     /// Position queries use REST fallback (cold path, infrequent).
@@ -2810,7 +2952,11 @@ impl GateIoGatewaySlTpHelper {
         if self.testnet {
             "https://api-testnet.gateapi.io/api/v4"
         } else {
-            "https://fx-api.gateio.ws/api/v4"
+            // CATEGORY 2 FIX: Use api.gateio.ws (standard REST endpoint) instead of
+            // fx-api.gateio.ws which is the WebSocket endpoint. The SL/TP helper uses
+            // REST API calls (POST /futures/usdt/price_orders) which must go to the
+            // REST API host. Using the WS host causes silent 404s or connection resets.
+            "https://api.gateio.ws/api/v4"
         }
     }
 

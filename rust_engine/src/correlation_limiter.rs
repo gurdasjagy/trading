@@ -180,6 +180,66 @@ impl CorrelationLimiter {
     pub fn clear_all_positions(&mut self) {
         self.positions.clear();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CATEGORY 4 FIX: Correlation-Adjusted Position Sizing
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Compute a correlation-adjusted position size.
+    ///
+    /// Reduces the raw position size based on existing correlated exposure.
+    /// The adjustment formula is:
+    ///   adjusted_size = raw_size * (1 - correlated_utilization)
+    ///
+    /// Where correlated_utilization = current_correlated_exposure / max_allowed.
+    ///
+    /// This ensures that as correlated exposure builds up, new positions in
+    /// correlated assets are automatically scaled down, preventing portfolio
+    /// concentration risk.
+    ///
+    /// # Arguments
+    /// * `symbol` — Symbol for the new position
+    /// * `raw_size_usdt` — Desired position size before adjustment (USDT)
+    ///
+    /// # Returns
+    /// Adjusted position size in USDT (may be smaller than raw_size)
+    pub fn correlation_adjusted_size(
+        &self,
+        symbol: &str,
+        raw_size_usdt: f64,
+    ) -> f64 {
+        let max_exposure = self.max_single_position * self.max_correlated_exposure_multiplier;
+        if max_exposure <= 0.0 {
+            return raw_size_usdt;
+        }
+
+        let current_correlated = self.compute_correlated_exposure(symbol);
+        let utilization = (current_correlated / max_exposure).clamp(0.0, 1.0);
+
+        // Scale down linearly as utilization approaches limit
+        // At 0% utilization: full size
+        // At 50% utilization: 50% size
+        // At 100% utilization: 0 size
+        let scale = (1.0 - utilization).max(0.0);
+        let adjusted = raw_size_usdt * scale;
+
+        if adjusted < raw_size_usdt * 0.99 {
+            info!(
+                "[correlation-limiter] Adjusted {} size: ${:.2} → ${:.2} \
+                 (corr_utilization={:.1}%, scale={:.2})",
+                symbol, raw_size_usdt, adjusted, utilization * 100.0, scale
+            );
+        }
+
+        adjusted
+    }
+
+    /// Add a dynamic correlation pair (for runtime updates from ML pipeline).
+    pub fn update_correlation(&mut self, sym1: &str, sym2: &str, correlation: f64) {
+        let corr = correlation.clamp(-1.0, 1.0);
+        self.correlations.insert((sym1.to_string(), sym2.to_string()), corr);
+        self.correlations.insert((sym2.to_string(), sym1.to_string()), corr);
+    }
 }
 
 impl Default for CorrelationLimiter {
