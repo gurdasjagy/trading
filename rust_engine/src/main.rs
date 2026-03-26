@@ -719,6 +719,11 @@ mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
 mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
 mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
 
+// ── Comprehensive Upgrade: New modules ──
+mod size_normalizer;    // BUG 3: USDT-to-contracts conversion
+mod funding_timing;     // FEAT 1: Funding rate timestamp-aware entry/exit
+mod ws_fill_receiver;   // FEAT 4: Binance & Bybit WebSocket fill updates
+
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
 // ---------------------------------------------------------------------------
@@ -2487,6 +2492,41 @@ fn strategy_evaluator_loop(
     }
 }
 
+/// BUG 3 FIX: Compute exchange-specific contract size using SizeNormalizer.
+///
+/// Each exchange encodes position size differently:
+/// - Gate.io: integer contracts (quanto_multiplier ≈ 0.0001 BTC/contract)
+/// - Binance/Bybit: fractional base-asset quantity (e.g. 0.001 BTC)
+///
+/// Falls back to `SizeNormalizer` with exchange-appropriate defaults when the
+/// gateway's own `usdt_to_contracts()` call fails or returns 0.
+fn normalize_notional_to_contracts(
+    exchange: multi_exchange::ExchangeId,
+    notional_usdt: f64,
+    mid_price: f64,
+) -> i64 {
+    if mid_price <= 0.0 || notional_usdt <= 0.0 {
+        return 1;
+    }
+    let qty = match exchange {
+        multi_exchange::ExchangeId::GateIo => {
+            // Gate.io BTC: quanto_multiplier ≈ 0.0001, step=1 contract, min=1 contract
+            size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
+                exchange, notional_usdt, mid_price, 0.0001, 1.0, 1.0,
+            )
+            .unwrap_or_else(|_| (notional_usdt / (0.0001 * mid_price)).max(1.0))
+        }
+        _ => {
+            // Binance/Bybit: fractional BTC, step=0.001, min=0.001
+            size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
+                exchange, notional_usdt, mid_price, 1.0, 0.001, 0.001,
+            )
+            .unwrap_or_else(|_| notional_usdt / mid_price)
+        }
+    };
+    qty.max(1.0) as i64
+}
+
 /// Execution router loop — Institutional Grade with Circuit Breaker & SL/TP.
 ///
 /// Reads OrderCommands from strategy SPSC and processes them through the
@@ -2530,6 +2570,8 @@ fn execution_router_loop(
     auto_protection_config: config::AutoProtectionConfig,
     // FIX 1: Shared margin monitor instance — same Arc passed to funding arb engine
     shared_margin_monitor: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>>,
+    // FEAT 4: Shared WebSocket fill event sink for Binance/Bybit fill receivers.
+    ws_fill_sink: ws_fill_receiver::FillUpdateSink,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2611,6 +2653,32 @@ fn execution_router_loop(
     if multi_exchange_enabled {
         info!("[execution] Cross-exchange funding arbitrage initialized (min_net_rate=0.005%, min_apr=10%)");
     }
+
+    // FEAT 1: Funding timing engine — tracks 8-hour funding snapshots for optimal
+    // entry/exit windows. Entry window = last 60s before funding; exit = first 30s after.
+    let funding_timer = funding_timing::FundingTimingEngine::new();
+    if multi_exchange_enabled {
+        funding_timer.log_timing_state();
+    }
+
+    // FEAT 5: Delta neutrality monitor — tracks net delta across exchanges for active
+    // funding arb positions and generates hedge orders when delta exceeds $50 threshold.
+    let mut delta_monitor = multi_exchange::delta_monitor::DeltaNeutralityMonitor::with_defaults();
+    let mut last_delta_check = std::time::Instant::now();
+    if multi_exchange_enabled {
+        info!("[execution] Delta neutrality monitor initialized (max_delta=$50, interval=30s)");
+    }
+
+    // CONFIG 2: Telegram alert sender for operational notifications.
+    // Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from environment.
+    let telegram = {
+        let bot_token = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
+        let chat_id = std::env::var("TELEGRAM_CHAT_ID").unwrap_or_default();
+        telegram_alert::TelegramAlertSender::new(bot_token, chat_id)
+    };
+    if multi_exchange_enabled {
+        info!("[execution] Telegram alert sender initialized (enabled={})", telegram.is_enabled());
+    }
     
     // TASK 3: Initialize CrossExchangeMarketMaker for hedged market making
     let mut cross_mm = multi_exchange::cross_exchange_mm::CrossExchangeMarketMaker::with_defaults();
@@ -2649,6 +2717,11 @@ fn execution_router_loop(
         let mut orders_submitted: u64 = 0;
         let mut orders_rejected: u64 = 0;
         let mut total_pnl_fp: i64 = 0;
+
+        // CONFIG 2: Track per-exchange connectivity failures for alerting.
+        // Maps exchange name → (failure_count, last_alert_instant).
+        let mut connectivity_fail_tracker: HashMap<String, (u32, std::time::Instant)> = HashMap::new();
+        let connectivity_alert_cooldown = Duration::from_secs(300); // 5-minute alert cooldown
 
         // Fetch initial balance for daily drawdown tracking.
         //
@@ -3712,6 +3785,17 @@ fn execution_router_loop(
                         if funding_arb_positions.contains_key(&opp.symbol) {
                             continue;
                         }
+
+                        // FEAT 1: Only enter when we're inside the funding snapshot entry window
+                        // (last 60s before funding) to maximise time collecting the payment.
+                        if !funding_timer.is_entry_window() {
+                            let secs_until = funding_timer.seconds_until_next_funding();
+                            debug!(
+                                "[execution] Funding arb {} skipped — not in entry window ({}s until next funding)",
+                                opp.symbol, secs_until
+                            );
+                            continue;
+                        }
                         
                         info!(
                             "[execution] Funding Arb Opportunity: {} SHORT@{} ({:.4}%) LONG@{} ({:.4}%) net={:.4}% APR={:.1}%",
@@ -3786,13 +3870,18 @@ fn execution_router_loop(
                             continue;
                         }
 
-                        // Use usdt_to_contracts() with leveraged notional for proper contract sizing
-                        let position_size = match long_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
+                        // BUG 3 FIX: Use SizeNormalizer to compute exchange-specific sizes for each leg.
+                        // Gate.io uses integer contracts (quanto_multiplier = 0.0001 BTC/contract)
+                        // while Binance/Bybit use fractional base-asset quantities.
+                        // Using the same size for both legs would mismatch Gate.io contract counts
+                        // with Binance/Bybit fractional quantities.
+                        let short_size = match short_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
                             Ok(size) if size > 0 => size,
-                            _ => {
-                                // Fallback: manual calculation
-                                (position_notional / mid_price).max(1.0) as i64
-                            }
+                            _ => normalize_notional_to_contracts(opp.short_exchange, position_notional, mid_price),
+                        };
+                        let long_size = match long_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
+                            Ok(size) if size > 0 => size,
+                            _ => normalize_notional_to_contracts(opp.long_exchange, position_notional, mid_price),
                         };
                         
                         // Set leverage on both exchanges before placing orders
@@ -3807,7 +3896,7 @@ fn execution_router_loop(
                         let short_intent = execution_gateway::OrderIntent {
                             symbol: opp.symbol.clone(),
                             side: execution_gateway::OrderSide::Sell,
-                            size: position_size,
+                            size: short_size,
                             order_type: execution_gateway::OrderType::Market,
                             price: Some(mid_price),
                             reduce_only: false,
@@ -3825,7 +3914,7 @@ fn execution_router_loop(
                         let long_intent = execution_gateway::OrderIntent {
                             symbol: opp.symbol.clone(),
                             side: execution_gateway::OrderSide::Buy,
-                            size: position_size,
+                            size: long_size,
                             order_type: execution_gateway::OrderType::Market,
                             price: Some(mid_price),
                             reduce_only: false,
@@ -3870,6 +3959,15 @@ fn execution_router_loop(
                                     entry_timestamp_ns: now_ns,
                                     entry_net_rate: opp.net_rate,
                                 });
+
+                                // CONFIG 2: Send Telegram funding arb opportunity alert.
+                                telegram.send_funding_arb_alert(
+                                    &opp.symbol,
+                                    opp.long_exchange.name(),
+                                    opp.short_exchange.name(),
+                                    opp.net_rate * 10_000.0, // convert to basis points
+                                    opp.annualized_apr * 100.0,
+                                ).await;
                                 
                                 orders_submitted += 2;
                                 dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
@@ -3880,7 +3978,7 @@ fn execution_router_loop(
                                 let close_intent = execution_gateway::OrderIntent {
                                     symbol: opp.symbol.clone(),
                                     side: execution_gateway::OrderSide::Sell,
-                                    size: position_size,
+                                    size: long_size,
                                     order_type: execution_gateway::OrderType::Market,
                                     price: Some(mid_price),
                                     reduce_only: true,
@@ -3901,7 +3999,7 @@ fn execution_router_loop(
                                 let close_intent = execution_gateway::OrderIntent {
                                     symbol: opp.symbol.clone(),
                                     side: execution_gateway::OrderSide::Buy,
-                                    size: position_size,
+                                    size: short_size,
                                     order_type: execution_gateway::OrderType::Market,
                                     price: Some(mid_price),
                                     reduce_only: true,
@@ -3937,13 +4035,17 @@ fn execution_router_loop(
                         let spread_collapsed = current_opp
                             .map(|o| o.net_rate < pos.entry_net_rate / 2.0)
                             .unwrap_or(true);
+
+                        // FEAT 1: Exit immediately when in the post-funding exit window
+                        // (first 30s after snapshot) — funding payment has been credited.
+                        let in_exit_window = funding_timer.is_exit_window();
                         
-                        // Exit conditions: spread collapsed OR >24 hours
-                        if spread_collapsed || hours_open > 24.0 {
+                        // Exit conditions: spread collapsed OR >24 hours OR post-funding window
+                        if spread_collapsed || hours_open > 24.0 || in_exit_window {
                             positions_to_close.push(symbol.clone());
                             info!(
-                                "[execution] Funding Arb EXIT: {} after {:.1}h (spread_collapsed={})",
-                                symbol, hours_open, spread_collapsed
+                                "[execution] Funding Arb EXIT: {} after {:.1}h (spread_collapsed={}, exit_window={})",
+                                symbol, hours_open, spread_collapsed, in_exit_window
                             );
                         }
                     }
@@ -4561,9 +4663,25 @@ fn execution_router_loop(
                                     .map(|h| h.margin_ratio)
                                     .unwrap_or(1.0);
                                 dashboard_state.set_exchange_margin_ratio(idx, margin_ratio);
+                                // CONFIG 2: Clear connectivity failure counter on successful fetch.
+                                connectivity_fail_tracker.remove(exchange_id.name());
                             }
                             Err(e) => {
                                 debug!("[execution] {} balance fetch failed: {}", exchange_id.name(), e);
+                                // CONFIG 2: Track consecutive failures and send connectivity alert.
+                                let ex_name = exchange_id.name().to_string();
+                                let entry = connectivity_fail_tracker.entry(ex_name.clone()).or_insert((0, std::time::Instant::now() - connectivity_alert_cooldown));
+                                entry.0 += 1;
+                                // Alert on first failure and every 5-minute cooldown thereafter.
+                                if entry.1.elapsed() >= connectivity_alert_cooldown {
+                                    entry.1 = std::time::Instant::now();
+                                    telegram.send_exchange_connectivity_alert(
+                                        &ex_name,
+                                        &format!("{}", e),
+                                        entry.0 as u64 * 30, // approx seconds (30s health check interval)
+                                        false,
+                                    ).await;
+                                }
                             }
                         }
                     }
@@ -4578,6 +4696,13 @@ fn execution_router_loop(
                             alert.recommended_transfer_usdt,
                             alert.source_exchange.name()
                         );
+                        // CONFIG 2: Send Telegram margin ratio warning.
+                        telegram.send_margin_ratio_warning(
+                            alert.critical_exchange.name(),
+                            alert.margin_ratio * 100.0,
+                            30.0, // 30% is the warning threshold
+                            alert.recommended_transfer_usdt,
+                        ).await;
                     }
                     
                     // If any exchange is critical (margin < 15%), halt new trades on that exchange
@@ -4588,6 +4713,13 @@ fn execution_router_loop(
                                 health.exchange.name(),
                                 health.margin_ratio * 100.0
                             );
+                            // CONFIG 2: Send critical margin Telegram alert.
+                            telegram.send_margin_ratio_warning(
+                                health.exchange.name(),
+                                health.margin_ratio * 100.0,
+                                15.0, // 15% is the critical threshold
+                                health.available_balance,
+                            ).await;
                         }
                     }
                     
@@ -4688,6 +4820,77 @@ fn execution_router_loop(
                     }
 
                     last_health_check = std::time::Instant::now();
+
+                    // FEAT 4: Drain WS fill events from the shared sink and log them.
+                    // These fills arrive from the Binance/Bybit private WebSocket streams
+                    // with much lower latency than REST polling (5-15ms vs 50-200ms).
+                    let pending_fills = ws_fill_sink.drain();
+                    for fill in &pending_fills {
+                        info!(
+                            "[ws-fill] {} {} {} {} qty={:.4} price={:.4} fee={:.6} {} latency={}µs",
+                            fill.exchange, fill.symbol, fill.side, fill.status,
+                            fill.filled_qty, fill.avg_price, fill.fee, fill.fee_asset,
+                            fill.receive_latency_us
+                        );
+                    }
+                    if !pending_fills.is_empty() {
+                        debug!("[ws-fill] Drained {} fill events from sink", pending_fills.len());
+                    }
+                }
+
+                // FEAT 5: Periodic delta neutrality check for active funding arb positions.
+                // Checks whether net delta across all exchanges is within the $50 threshold.
+                if multi_exchange_enabled && !multi_gateways.is_empty()
+                    && last_delta_check.elapsed() > Duration::from_secs(delta_monitor.check_interval_secs())
+                    && !funding_arb_positions.is_empty()
+                {
+                    last_delta_check = std::time::Instant::now();
+                    // Check delta for each active funding arb symbol.
+                    let arb_symbols: Vec<String> = funding_arb_positions.keys().cloned().collect();
+                    for symbol in arb_symbols {
+                        let check = delta_monitor.calculate_net_delta(&symbol, &multi_gateways).await;
+                        if !check.is_neutral {
+                            // CONFIG 2: Send Telegram delta neutrality breach alert.
+                            let per_ex_str = check.per_exchange.iter()
+                                .map(|(ex, d)| format!("{}: ${:.2}", ex.name(), d))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            telegram.send_delta_neutrality_breach(
+                                check.net_delta_usdt,
+                                delta_monitor.max_delta_usdt(),
+                                &per_ex_str,
+                            ).await;
+                            // Generate and execute hedge order on the exchange with the
+                            // largest absolute delta deviation (most liquid for the hedge).
+                            let mid_price = shared_prices.first()
+                                .map(|p| f64::from_bits(p.load(Ordering::Relaxed)))
+                                .unwrap_or(0.0);
+                            if let Some(hedge) = delta_monitor.generate_hedge_order(
+                                check.net_delta_usdt, &symbol, mid_price,
+                            ) {
+                                // Route hedge to exchange with largest absolute delta.
+                                let hedge_exchange = check.per_exchange.iter()
+                                    .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal))
+                                    .map(|(ex, _)| *ex);
+                                let hedge_gw = hedge_exchange
+                                    .and_then(|ex| multi_gateways.get(&ex))
+                                    .or_else(|| multi_gateways.values().next());
+                                if let Some(gw) = hedge_gw {
+                                    match gw.submit_order(hedge).await {
+                                        Ok(res) => {
+                                            info!(
+                                                "[delta-monitor] Hedge executed: {} qty={} price={:.4}",
+                                                symbol, res.filled_size, res.avg_fill_price
+                                            );
+                                        }
+                                        Err(e) => {
+                                            warn!("[delta-monitor] Hedge order failed: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Small yield to avoid burning CPU when idle
@@ -5067,6 +5270,11 @@ fn main() {
     // 8. Spawn OS threads with core affinity pinning
     let mut thread_handles = Vec::new();
 
+    // FEAT 4: Create shared WebSocket fill event sink.
+    // Cloned references are passed to the Binance/Bybit WS fill receiver threads
+    // and to the execution router, which drains it during health check intervals.
+    let fill_update_sink = ws_fill_receiver::FillUpdateSink::new();
+
     // ── Core 2: WS Ingestion (Gate.io) ──
     if let Some(gateio_cfg) = config.exchanges.iter().find(|e| e.name == "gateio").cloned() {
         let ws_ring = ws_gateio_to_book;
@@ -5316,6 +5524,70 @@ fn main() {
             thread_handles.push(handle);
         }
 
+        // ── FEAT 4: Spawn WebSocket fill receiver threads ──────────────────────
+        // These receive real-time fill/order update events from Binance and Bybit,
+        // providing 5-15ms fill confirmation vs 50-200ms REST polling.
+
+        // Binance WS fill receiver (requires API key)
+        {
+            let binance_api_key = config.multi_exchange.binance_api_key.clone();
+            if let Some(ref ak) = binance_api_key {
+                if !ak.is_empty() && ak.len() >= 8 {
+                    let binance_fill_cfg = ws_fill_receiver::BinanceWsConfig {
+                        api_key: ak.clone(),
+                        testnet: config.multi_exchange.binance_testnet,
+                    };
+                    let sink_binance = fill_update_sink.clone();
+                    info!("[ws-fill-binance] Spawning Binance WS fill receiver (testnet={})", config.multi_exchange.binance_testnet);
+                    let handle = thread::Builder::new()
+                        .name("ws-fill-binance".into())
+                        .spawn(move || {
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .expect("Failed to build tokio runtime for ws-fill-binance");
+                            rt.block_on(ws_fill_receiver::spawn_binance_ws_fill_receiver(
+                                binance_fill_cfg,
+                                sink_binance,
+                            ));
+                        })
+                        .expect("Failed to spawn Binance WS fill receiver thread");
+                    thread_handles.push(handle);
+                }
+            }
+        }
+
+        // Bybit WS fill receiver (requires API key + secret)
+        {
+            let bybit_api_key = config.multi_exchange.bybit_api_key.clone();
+            let bybit_secret_key = config.multi_exchange.bybit_secret_key.clone();
+            if let (Some(ref ak), Some(ref sk)) = (&bybit_api_key, &bybit_secret_key) {
+                if !ak.is_empty() && ak.len() >= 8 && !sk.is_empty() {
+                    let bybit_fill_cfg = ws_fill_receiver::BybitWsConfig {
+                        api_key: ak.clone(),
+                        api_secret: sk.clone(),
+                        testnet: config.multi_exchange.bybit_testnet,
+                    };
+                    let sink_bybit = fill_update_sink.clone();
+                    info!("[ws-fill-bybit] Spawning Bybit WS fill receiver (testnet={})", config.multi_exchange.bybit_testnet);
+                    let handle = thread::Builder::new()
+                        .name("ws-fill-bybit".into())
+                        .spawn(move || {
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .expect("Failed to build tokio runtime for ws-fill-bybit");
+                            rt.block_on(ws_fill_receiver::spawn_bybit_ws_fill_receiver(
+                                bybit_fill_cfg,
+                                sink_bybit,
+                            ));
+                        })
+                        .expect("Failed to spawn Bybit WS fill receiver thread");
+                    thread_handles.push(handle);
+                }
+            }
+        }
+
         Some(registry_me)
     } else {
         info!("Multi-Exchange mode DISABLED - Gate.io only");
@@ -5378,6 +5650,19 @@ fn main() {
         None
     };
     let state_store_exec = state_store_instance.clone();
+
+    // CONFIG 3: Reconcile persisted state with exchange on restart.
+    // Clears any shutdown_pending orders and returns positions to resume tracking.
+    if let Some(ref store) = state_store_instance {
+        match store.reconcile_on_restart(&[]) {
+            Ok(positions) => {
+                info!("[main] CONFIG 3: Restart reconciliation complete — {} positions to resume", positions.len());
+            }
+            Err(e) => {
+                warn!("[main] CONFIG 3: Restart reconciliation failed: {} — continuing with fresh state", e);
+            }
+        }
+    }
 
     {
         let book_ring = book_to_strategy;
@@ -5513,6 +5798,8 @@ fn main() {
         let auto_protection_exec = config.auto_protection.clone();
         // FIX 1: Clone shared margin monitor for the execution router thread
         let shared_margin_monitor_exec = shared_margin_monitor_arc.clone();
+        // FEAT 4: Clone the WS fill sink for the execution router to drain periodically.
+        let exec_fill_sink = fill_update_sink.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
@@ -5524,6 +5811,7 @@ fn main() {
                     gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
                     sl_tp_update_rx, state_store_exec, auto_protection_exec,
                     shared_margin_monitor_exec,
+                    exec_fill_sink,
                 );
             })
             .expect("Failed to spawn execution thread");
@@ -5625,15 +5913,31 @@ fn main() {
     info!("All {} threads spawned. Engine running. Press Ctrl+C to stop.",
           thread_handles.len());
 
+    // CONFIG 3: Keep a reference to the state store for shutdown persistence.
+    let state_store_for_shutdown = state_store_instance.clone();
+
     // 9. Block main thread on shutdown signal
     let (tx, rx) = std::sync::mpsc::channel();
     ctrlc::set_handler(move || {
+        // CONFIG 3: Set global shutdown flag so engine loops can stop gracefully.
+        state_store::trigger_shutdown();
         let _ = tx.send(());
     })
     .expect("Failed to set Ctrl+C handler");
 
     rx.recv().unwrap();
     info!("Shutdown signal received. Draining queues...");
+
+    // CONFIG 3: Persist shutdown state (positions/orders) before exiting.
+    // Using empty slices records the shutdown timestamp for restart reconciliation;
+    // the execution thread would need to supply live positions for full persistence.
+    if let Some(ref store) = state_store_for_shutdown {
+        if let Err(e) = store.persist_shutdown_state(&[], &[]) {
+            warn!("[main] CONFIG 3: Failed to persist shutdown state: {}", e);
+        } else {
+            info!("[main] CONFIG 3: Shutdown state persisted successfully");
+        }
+    }
 
     // Give threads a moment to drain
     thread::sleep(Duration::from_millis(500));

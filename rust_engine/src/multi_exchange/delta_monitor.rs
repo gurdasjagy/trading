@@ -71,6 +71,11 @@ impl DeltaNeutralityMonitor {
         self.check_interval_secs
     }
 
+    /// Get the maximum allowed net delta in USDT.
+    pub fn max_delta_usdt(&self) -> f64 {
+        self.max_delta_usdt
+    }
+
     /// Get the last computed net delta.
     pub fn last_net_delta(&self) -> f64 {
         self.last_net_delta
