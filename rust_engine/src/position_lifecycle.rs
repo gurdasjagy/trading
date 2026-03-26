@@ -18,7 +18,7 @@
 //! - **State exported to shared memory** for Python dashboard (read-only)
 
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Configuration
@@ -27,7 +27,11 @@ use tracing::{info, warn};
 /// Configuration for the position lifecycle manager.
 #[derive(Debug, Clone)]
 pub struct LifecycleConfig {
-    /// Close if PnL reverses this % from peak profit (default: 30%).
+    /// Close if PnL reverses this % from peak profit (default: 50%).
+    /// CATEGORY 3 FIX: Increased from 30% to 50% for crypto volatility.
+    /// Crypto assets routinely swing 5-15% intraday; a 30% reversal threshold
+    /// causes premature exits on normal retracements. Institutional crypto
+    /// desks typically use 50-60% reversal thresholds with regime adaptation.
     pub reversal_close_pct: f64,
     /// Only protect profits above this % (default: 0.5%).
     pub min_profit_to_protect_pct: f64,
@@ -37,16 +41,31 @@ pub struct LifecycleConfig {
     pub consecutive_decline_threshold: u32,
     /// Minimum ticks before generating exit signals (warm-up).
     pub min_ticks_before_exit: u32,
+    /// CATEGORY 3 FIX: Maximum notional value per symbol in USDT.
+    /// Prevents concentration risk by capping exposure to any single asset.
+    /// Default: $50,000 per symbol.
+    pub max_notional_per_symbol_usdt: f64,
+    /// CATEGORY 3 FIX: Reversal threshold for high-volatility regime.
+    /// When realized volatility exceeds vol_regime_threshold, use this
+    /// more lenient reversal threshold instead of reversal_close_pct.
+    pub reversal_close_pct_high_vol: f64,
+    /// CATEGORY 3 FIX: Realized volatility threshold to switch to high-vol regime.
+    /// Measured as annualized % (e.g., 80.0 = 80% annual vol).
+    pub vol_regime_threshold: f64,
 }
 
 impl Default for LifecycleConfig {
     fn default() -> Self {
         Self {
-            reversal_close_pct: 30.0,
+            // CATEGORY 3 FIX: 50% reversal for crypto (was 30%)
+            reversal_close_pct: 50.0,
             min_profit_to_protect_pct: 0.5,
             max_loss_pct: 2.0,
             consecutive_decline_threshold: 10,
             min_ticks_before_exit: 5,
+            max_notional_per_symbol_usdt: 50_000.0,
+            reversal_close_pct_high_vol: 65.0,
+            vol_regime_threshold: 80.0,
         }
     }
 }
@@ -102,6 +121,10 @@ pub enum CloseReason {
     MaxLoss,
     /// Manual or external close.
     External,
+    /// CATEGORY 3 FIX: Ghost position detected — exchange has position we don't track.
+    GhostPosition,
+    /// CATEGORY 3 FIX: Maximum notional value breached.
+    MaxNotionalBreached,
 }
 
 impl std::fmt::Display for CloseReason {
@@ -112,6 +135,8 @@ impl std::fmt::Display for CloseReason {
             Self::SustainedDecline => write!(f, "sustained_decline"),
             Self::MaxLoss => write!(f, "max_loss"),
             Self::External => write!(f, "external"),
+            Self::GhostPosition => write!(f, "ghost_position"),
+            Self::MaxNotionalBreached => write!(f, "max_notional_breached"),
         }
     }
 }
@@ -316,6 +341,43 @@ pub struct PositionLifecycleManager {
     pub reversal_closes: u64,
     pub hard_sl_closes: u64,
     pub sustained_decline_closes: u64,
+    /// CATEGORY 3 FIX: Ghost position close counter.
+    pub ghost_closes: u64,
+    /// CATEGORY 3 FIX: Notional breach close counter.
+    pub notional_breach_closes: u64,
+    /// CATEGORY 3 FIX: Net position per symbol across all strategies.
+    /// Used for position netting — maps symbol_id → net contracts.
+    /// Positive = net long, negative = net short.
+    net_positions: HashMap<u16, i64>,
+    /// CATEGORY 3 FIX: Current notional value per symbol (USDT).
+    notional_values: HashMap<u16, f64>,
+    /// CATEGORY 3 FIX: Current realized volatility estimate per symbol
+    /// (annualized %). Used for regime-adaptive reversal threshold.
+    realized_vol: HashMap<u16, f64>,
+    /// CATEGORY 3 FIX: Pending emergency SL orders that need to be submitted.
+    /// Populated by reconciliation when ghost positions are found.
+    /// The execution thread should drain this queue and submit actual orders.
+    pub pending_emergency_sl: Vec<EmergencySlOrder>,
+}
+
+/// CATEGORY 3 FIX: Emergency stop-loss order for ghost/unprotected positions.
+/// The execution thread should drain `pending_emergency_sl` and submit these
+/// as actual conditional orders via the gateway.
+#[derive(Debug, Clone)]
+pub struct EmergencySlOrder {
+    /// Symbol identifier.
+    pub symbol_id: u16,
+    /// Symbol string name (for gateway API call).
+    pub symbol: String,
+    /// Position side: true = long, false = short.
+    pub is_long: bool,
+    /// Position size in contracts (absolute).
+    pub size: i64,
+    /// Emergency SL trigger price.
+    /// For longs: entry_price * (1 - sl_pct), for shorts: entry_price * (1 + sl_pct).
+    pub sl_price: f64,
+    /// Source of this emergency SL (for logging/attribution).
+    pub source: &'static str,
 }
 
 impl PositionLifecycleManager {
@@ -329,6 +391,12 @@ impl PositionLifecycleManager {
             reversal_closes: 0,
             hard_sl_closes: 0,
             sustained_decline_closes: 0,
+            ghost_closes: 0,
+            notional_breach_closes: 0,
+            net_positions: HashMap::with_capacity(8),
+            notional_values: HashMap::with_capacity(8),
+            realized_vol: HashMap::with_capacity(8),
+            pending_emergency_sl: Vec::new(),
         }
     }
 
@@ -337,6 +405,10 @@ impl PositionLifecycleManager {
     }
 
     /// Register a new position for lifecycle tracking.
+    ///
+    /// CATEGORY 3 FIX: Now includes position netting and max notional checks.
+    /// Returns `Some(CloseAction)` if the position should be immediately rejected
+    /// due to notional limit breach.
     pub fn track_position(
         &mut self,
         symbol_id: u16,
@@ -344,17 +416,51 @@ impl PositionLifecycleManager {
         entry_price: f64,
         size: i64,
         leverage: i32,
-    ) {
+    ) -> Option<CloseAction> {
+        // CATEGORY 3 FIX: Position netting — update net position across strategies
+        let direction = if is_long { size } else { -size };
+        let net = self.net_positions.entry(symbol_id).or_insert(0);
+        *net += direction;
+        info!(
+            "[lifecycle] Position netting: sym={} added={} net={}",
+            symbol_id, direction, *net
+        );
+
+        // CATEGORY 3 FIX: Maximum notional value check per symbol
+        let notional = (size.abs() as f64) * entry_price;
+        let current_notional = self.notional_values.entry(symbol_id).or_insert(0.0);
+        *current_notional += notional;
+
+        if *current_notional > self.config.max_notional_per_symbol_usdt {
+            warn!(
+                "[lifecycle] MAX NOTIONAL BREACHED sym={}: ${:.0} > limit ${:.0}",
+                symbol_id, *current_notional, self.config.max_notional_per_symbol_usdt
+            );
+            // Don't prevent tracking — but return a close action so the execution
+            // layer can decide whether to reduce or reject.
+            let pos = TrackedPosition::new(symbol_id, is_long, entry_price, size, leverage);
+            self.positions.insert(symbol_id, pos);
+            return Some(CloseAction {
+                symbol_id,
+                reason: CloseReason::MaxNotionalBreached,
+                trigger_pnl_pct: 0.0,
+                peak_pnl_pct: 0.0,
+                cancel_resting_orders: false,
+            });
+        }
+
         let pos = TrackedPosition::new(symbol_id, is_long, entry_price, size, leverage);
         info!(
-            "[lifecycle] Tracking {} {} @ {:.4} size={} lev={}x",
+            "[lifecycle] Tracking {} {} @ {:.4} size={} lev={}x notional=${:.0}",
             if is_long { "LONG" } else { "SHORT" },
             symbol_id,
             entry_price,
             size,
             leverage,
+            notional,
         );
         self.positions.insert(symbol_id, pos);
+        None
     }
 
     /// Set the resting SL/TP order IDs for a tracked position.
@@ -375,6 +481,17 @@ impl PositionLifecycleManager {
         if let Some(mut pos) = self.positions.remove(&symbol_id) {
             pos.state = PositionState::Closed;
             pos.close_ns = now_ns();
+
+            // CATEGORY 3 FIX: Update net position and notional on close
+            let direction = if pos.is_long { pos.size } else { -pos.size };
+            if let Some(net) = self.net_positions.get_mut(&symbol_id) {
+                *net -= direction;
+            }
+            let notional = (pos.size.abs() as f64) * pos.entry_price;
+            if let Some(nv) = self.notional_values.get_mut(&symbol_id) {
+                *nv = (*nv - notional).max(0.0);
+            }
+
             if self.closed_history.len() >= self.max_history {
                 self.closed_history.remove(0);
             }
@@ -482,8 +599,19 @@ impl PositionLifecycleManager {
         }
 
         // 2. Profit reversal check
+        // CATEGORY 3 FIX: Use regime-adaptive reversal threshold.
+        // In high-volatility regimes, use a more lenient threshold to avoid
+        // premature exits on normal crypto retracements.
+        let effective_reversal_pct = {
+            let vol = self.realized_vol.get(&symbol_id).copied().unwrap_or(0.0);
+            if vol > self.config.vol_regime_threshold {
+                self.config.reversal_close_pct_high_vol
+            } else {
+                self.config.reversal_close_pct
+            }
+        };
         if pos.peak_pnl_pct >= self.config.min_profit_to_protect_pct
-            && pos.pnl_from_peak_pct >= self.config.reversal_close_pct
+            && pos.pnl_from_peak_pct >= effective_reversal_pct
         {
             let action = CloseAction {
                 symbol_id,
@@ -551,6 +679,128 @@ impl PositionLifecycleManager {
     /// Get closed position history for dashboard.
     pub fn closed_history(&self) -> &[TrackedPosition] {
         &self.closed_history
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CATEGORY 3 FIX: Ghost Position Detection & Closing
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Reconcile local tracking state with exchange positions.
+    ///
+    /// Called periodically (e.g., every 15s) with the list of positions from
+    /// the exchange REST API. If the exchange reports a position that we are
+    /// NOT tracking, it's a "ghost" position — created by a race condition,
+    /// manual trade, or missed fill.
+    ///
+    /// CATEGORY 3 FIX: Instead of just logging "emergency tracking", this now:
+    ///   1. Creates an actual CloseAction for immediate market close
+    ///   2. Queues an EmergencySlOrder for the execution thread to submit
+    ///   3. Tracks the ghost position for lifecycle management
+    ///
+    /// Returns a list of CloseActions for ghost positions that should be closed.
+    pub fn reconcile_with_exchange(
+        &mut self,
+        exchange_positions: &[(u16, String, i64, f64, i32)], // (symbol_id, symbol, size, entry_price, leverage)
+    ) -> Vec<CloseAction> {
+        let mut close_actions = Vec::new();
+
+        for &(symbol_id, ref symbol, size, entry_price, leverage) in exchange_positions {
+            if size == 0 {
+                continue;
+            }
+
+            if !self.is_tracking(symbol_id) {
+                let is_long = size > 0;
+                error!(
+                    "[lifecycle] GHOST POSITION DETECTED: sym={} ({}) size={} entry={:.4} — \
+                     exchange has position we don't track! Initiating emergency close.",
+                    symbol_id, symbol, size, entry_price
+                );
+
+                // Track it so we can manage it
+                let pos = TrackedPosition::new(
+                    symbol_id, is_long, entry_price, size.abs(), leverage,
+                );
+                self.positions.insert(symbol_id, pos);
+
+                // CATEGORY 3 FIX: Generate actual close action (not just logging)
+                close_actions.push(CloseAction {
+                    symbol_id,
+                    reason: CloseReason::GhostPosition,
+                    trigger_pnl_pct: 0.0,
+                    peak_pnl_pct: 0.0,
+                    cancel_resting_orders: true, // Cancel any unknown resting orders too
+                });
+                self.ghost_closes += 1;
+                self.total_closes += 1;
+
+                // CATEGORY 3 FIX: Queue emergency SL order for the execution thread.
+                // Even if market close is attempted, we want a backup SL in case
+                // the market close fails (network issue, etc.).
+                let sl_pct = 0.02; // 2% emergency SL
+                let sl_price = if is_long {
+                    entry_price * (1.0 - sl_pct)
+                } else {
+                    entry_price * (1.0 + sl_pct)
+                };
+                self.pending_emergency_sl.push(EmergencySlOrder {
+                    symbol_id,
+                    symbol: symbol.clone(),
+                    is_long,
+                    size: size.abs(),
+                    sl_price,
+                    source: "ghost_position_reconciliation",
+                });
+                info!(
+                    "[lifecycle] Queued emergency SL for ghost: sym={} sl_price={:.4}",
+                    symbol_id, sl_price
+                );
+            }
+        }
+
+        close_actions
+    }
+
+    /// Drain pending emergency SL orders for the execution thread to submit.
+    /// Returns the queued orders and clears the internal queue.
+    pub fn drain_emergency_sl_orders(&mut self) -> Vec<EmergencySlOrder> {
+        std::mem::take(&mut self.pending_emergency_sl)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CATEGORY 3 FIX: Position Netting
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Get net position for a symbol across all strategies.
+    /// Positive = net long, negative = net short, 0 = flat.
+    pub fn net_position(&self, symbol_id: u16) -> i64 {
+        self.net_positions.get(&symbol_id).copied().unwrap_or(0)
+    }
+
+    /// Get current notional exposure for a symbol in USDT.
+    pub fn notional_exposure(&self, symbol_id: u16) -> f64 {
+        self.notional_values.get(&symbol_id).copied().unwrap_or(0.0)
+    }
+
+    /// Check if adding a new position would exceed the notional limit.
+    pub fn would_exceed_notional(
+        &self,
+        symbol_id: u16,
+        additional_notional: f64,
+    ) -> bool {
+        let current = self.notional_exposure(symbol_id);
+        current + additional_notional > self.config.max_notional_per_symbol_usdt
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CATEGORY 3 FIX: Volatility Regime Updates
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Update the realized volatility estimate for a symbol.
+    /// Called by the market data pipeline when new vol estimates are available.
+    /// The reversal threshold automatically adjusts based on this value.
+    pub fn update_realized_vol(&mut self, symbol_id: u16, annualized_vol_pct: f64) {
+        self.realized_vol.insert(symbol_id, annualized_vol_pct);
     }
 }
 
