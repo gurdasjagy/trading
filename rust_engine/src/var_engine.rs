@@ -356,6 +356,80 @@ impl VaREngine {
         }
     }
     
+    // ═══════════════════════════════════════════════════════════════════════
+    // CATEGORY 4 FIX: Intraday VaR Breach Position Reduction
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Check for VaR limit breach and compute position reduction recommendations.
+    ///
+    /// When portfolio VaR exceeds the configured limit, this method computes
+    /// how much each position should be reduced to bring VaR back within limits.
+    ///
+    /// Returns a list of (symbol_id, reduction_fraction) tuples.
+    /// `reduction_fraction` is in [0.0, 1.0] where 1.0 = close entire position.
+    ///
+    /// The execution layer should use these to submit reduce-only orders.
+    pub fn compute_var_breach_reductions(&mut self) -> Vec<(u16, f64)> {
+        let metrics = self.compute();
+        let limit = self.portfolio_value * self.var_limit_pct;
+
+        if limit <= 0.0 || metrics.var_99 <= limit {
+            return Vec::new(); // No breach
+        }
+
+        // How much VaR needs to decrease (as fraction of current VaR)
+        let overshoot_pct = (metrics.var_99 - limit) / metrics.var_99;
+        let reduction_target = overshoot_pct * 1.2; // Reduce 20% more than needed for safety margin
+
+        warn!(
+            "[var] VaR BREACH: ${:.2} > limit ${:.2} ({:.1}% overshoot) — computing reductions",
+            metrics.var_99, limit, overshoot_pct * 100.0
+        );
+
+        // Distribute reduction across positions proportional to their
+        // contribution to portfolio VaR (component VaR).
+        let mut reductions = Vec::new();
+        let total_exposure: f64 = self.symbol_exposures.iter().sum();
+
+        if total_exposure <= 0.0 {
+            return reductions;
+        }
+
+        for (i, &exposure) in self.symbol_exposures.iter().enumerate() {
+            if exposure <= 0.0 {
+                continue;
+            }
+
+            let weight = exposure / total_exposure;
+            let vol = self.symbol_volatilities[i];
+            // Higher-vol positions get proportionally larger reductions
+            let vol_weight = vol / 0.02; // Normalized to 2% baseline vol
+            let position_reduction = (reduction_target * weight * vol_weight).clamp(0.0, 1.0);
+
+            if position_reduction > 0.01 {
+                reductions.push((i as u16, position_reduction));
+                info!(
+                    "[var] Reduce sym={}: {:.1}% (exposure=${:.0}, vol={:.1}%)",
+                    i, position_reduction * 100.0, exposure, vol * 100.0
+                );
+            }
+        }
+
+        reductions
+    }
+
+    /// Get the VaR limit percentage.
+    pub fn var_limit_pct(&self) -> f64 {
+        self.var_limit_pct
+    }
+
+    /// Check if VaR is currently breached.
+    pub fn is_var_breached(&mut self) -> bool {
+        let metrics = self.compute();
+        let limit = self.portfolio_value * self.var_limit_pct;
+        limit > 0.0 && metrics.var_99 > limit
+    }
+
     /// Reset all state.
     pub fn reset(&mut self) {
         self.returns.clear();

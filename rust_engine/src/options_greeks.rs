@@ -330,44 +330,144 @@ pub struct OptionPosition {
     pub implied_vol: f64,
 }
 
-/// Portfolio Greeks aggregator.
+/// CATEGORY 4 FIX: Portfolio-level Greeks aggregator.
+///
+/// Tracks aggregate delta, gamma, theta, vega, and rho across all options
+/// positions in the portfolio. Institutional desks use portfolio Greeks for:
+///   - Delta hedging: maintain delta-neutral portfolio
+///   - Gamma scalping: trade around gamma exposure
+///   - Vega risk: manage sensitivity to implied vol changes
+///   - Theta decay: track daily time decay P&L
+///   - Risk limits: set max portfolio delta/gamma/vega limits
 #[derive(Debug, Clone, Default)]
 pub struct PortfolioGreeks {
     pub net_delta: f64,
     pub net_gamma: f64,
     pub net_theta: f64,
     pub net_vega: f64,
+    /// CATEGORY 4 FIX: Added net rho for interest rate sensitivity.
+    pub net_rho: f64,
+    /// CATEGORY 4 FIX: Number of positions contributing to portfolio Greeks.
+    pub position_count: usize,
+    /// CATEGORY 4 FIX: Dollar delta (notional delta exposure in USDT).
+    pub dollar_delta: f64,
+    /// CATEGORY 4 FIX: Dollar gamma (P&L from 1% underlying move).
+    pub dollar_gamma_1pct: f64,
+    /// CATEGORY 4 FIX: Dollar vega (P&L from 1% IV increase).
+    pub dollar_vega_1pct: f64,
+    /// CATEGORY 4 FIX: Daily theta (expected daily time decay in USDT).
+    pub daily_theta: f64,
 }
 
 impl PortfolioGreeks {
     /// Calculate aggregate Greeks for a portfolio of options.
+    ///
+    /// CATEGORY 4 FIX: Enhanced to compute dollar-denominated Greeks,
+    /// net rho, and risk metrics needed for institutional risk management.
     pub fn from_positions(spot: f64, positions: &[OptionPosition], rate: f64) -> Self {
         let mut result = Self::default();
-        
+        result.position_count = positions.len();
+
         for pos in positions {
             let greeks = if pos.is_call {
                 call_greeks(spot, pos.strike, pos.expiry_years, rate, pos.implied_vol)
             } else {
                 put_greeks(spot, pos.strike, pos.expiry_years, rate, pos.implied_vol)
             };
-            
+
             result.net_delta += greeks.delta * pos.quantity;
             result.net_gamma += greeks.gamma * pos.quantity;
             result.net_theta += greeks.theta * pos.quantity;
             result.net_vega += greeks.vega * pos.quantity;
+            result.net_rho += greeks.rho * pos.quantity;
         }
-        
+
+        // CATEGORY 4 FIX: Compute dollar-denominated risk metrics
+        result.dollar_delta = result.net_delta * spot;
+        result.dollar_gamma_1pct = 0.5 * result.net_gamma * spot * spot * 0.01 * 0.01;
+        result.dollar_vega_1pct = result.net_vega; // Vega already per 1%
+        result.daily_theta = result.net_theta / 365.0;
+
+        if result.position_count > 0 {
+            info!(
+                "[greeks] Portfolio Greeks: delta={:.4} gamma={:.6} theta={:.4} vega={:.4} rho={:.4} \
+                 $delta={:.2} $gamma1%={:.2} $vega1%={:.2} daily_theta={:.2} ({} positions)",
+                result.net_delta, result.net_gamma, result.net_theta,
+                result.net_vega, result.net_rho,
+                result.dollar_delta, result.dollar_gamma_1pct,
+                result.dollar_vega_1pct, result.daily_theta,
+                result.position_count
+            );
+        }
+
         result
     }
-    
+
     /// Calculate delta-equivalent position (underlying shares to delta-hedge).
     pub fn delta_equivalent(&self, spot: f64) -> f64 {
         self.net_delta * spot
     }
-    
+
     /// Calculate dollar gamma (P&L from a 1% move).
     pub fn dollar_gamma(&self, spot: f64) -> f64 {
         0.5 * self.net_gamma * spot * spot * 0.0001
+    }
+
+    /// CATEGORY 4 FIX: Check if portfolio Greeks exceed risk limits.
+    ///
+    /// Returns a list of breached limits with descriptions.
+    pub fn check_risk_limits(
+        &self,
+        max_abs_delta: f64,
+        max_abs_gamma: f64,
+        max_abs_vega: f64,
+    ) -> Vec<String> {
+        let mut breaches = Vec::new();
+
+        if self.net_delta.abs() > max_abs_delta {
+            breaches.push(format!(
+                "Delta limit breached: {:.4} (limit: +/-{:.4})",
+                self.net_delta, max_abs_delta
+            ));
+        }
+        if self.net_gamma.abs() > max_abs_gamma {
+            breaches.push(format!(
+                "Gamma limit breached: {:.6} (limit: +/-{:.6})",
+                self.net_gamma, max_abs_gamma
+            ));
+        }
+        if self.net_vega.abs() > max_abs_vega {
+            breaches.push(format!(
+                "Vega limit breached: {:.4} (limit: +/-{:.4})",
+                self.net_vega, max_abs_vega
+            ));
+        }
+
+        if !breaches.is_empty() {
+            for breach in &breaches {
+                warn!("[greeks] RISK LIMIT: {}", breach);
+            }
+        }
+
+        breaches
+    }
+
+    /// CATEGORY 4 FIX: Compute the hedge order needed to neutralize delta.
+    ///
+    /// Returns (quantity, is_buy) for the underlying to achieve delta-neutral.
+    /// Positive quantity with is_buy=true means buy underlying.
+    pub fn delta_hedge_order(&self) -> (f64, bool) {
+        let hedge_qty = self.net_delta.abs();
+        let is_buy = self.net_delta < 0.0; // Short delta → buy underlying
+        (hedge_qty, is_buy)
+    }
+
+    /// CATEGORY 4 FIX: Estimate P&L impact of a given price move.
+    ///
+    /// Uses Taylor expansion: dP ≈ delta * dS + 0.5 * gamma * dS²
+    pub fn estimate_pnl_from_move(&self, spot: f64, price_change_pct: f64) -> f64 {
+        let ds = spot * price_change_pct;
+        self.net_delta * ds + 0.5 * self.net_gamma * ds * ds
     }
 }
 

@@ -88,6 +88,9 @@ pub struct PnLTracker {
     total_realized_pnl: f64,
     /// Cumulative fees paid.
     total_fees: f64,
+    /// CATEGORY 4 FIX: Cumulative funding rate costs.
+    /// Funding payments are deducted from PnL to reflect true cost of carry.
+    total_funding_costs: f64,
     /// Peak equity (for drawdown calculation).
     peak_equity: f64,
     /// Current equity (balance + unrealized PnL).
@@ -132,6 +135,7 @@ impl PnLTracker {
             positions: HashMap::new(),
             total_realized_pnl: 0.0,
             total_fees: 0.0,
+            total_funding_costs: 0.0,
             peak_equity: starting_balance,
             current_equity: starting_balance,
             starting_balance,
@@ -346,7 +350,39 @@ impl PnLTracker {
         self.positions.values().map(|p| p.unrealized_pnl).sum()
     }
 
-    /// Get total PnL (realized + unrealized).
+    /// CATEGORY 4 FIX: Record a funding rate payment.
+    ///
+    /// Funding rates are periodic payments between long and short holders.
+    /// Positive `amount` = we paid funding (cost), negative = we received.
+    /// This is deducted from PnL to reflect true cost of carry.
+    ///
+    /// Called by the funding rate monitor when payments are detected.
+    pub fn record_funding_payment(
+        &mut self,
+        symbol: &str,
+        exchange: &str,
+        amount: f64,
+    ) {
+        self.total_funding_costs += amount;
+        // Funding costs affect realized PnL (they are settled immediately)
+        self.total_realized_pnl -= amount;
+        self.update_equity_and_drawdown();
+
+        if amount.abs() > 0.01 {
+            info!(
+                "[pnl] Funding payment: {} {} ${:.4} (total funding costs: ${:.2})",
+                exchange, symbol, amount, self.total_funding_costs
+            );
+        }
+    }
+
+    /// CATEGORY 4 FIX: Get total funding costs paid.
+    pub fn total_funding_costs(&self) -> f64 {
+        self.total_funding_costs
+    }
+
+    /// Get total PnL (realized + unrealized - funding costs).
+    /// CATEGORY 4 FIX: Now includes funding rate costs in PnL calculation.
     pub fn total_pnl(&self) -> f64 {
         self.total_realized_pnl + self.total_unrealized_pnl()
     }

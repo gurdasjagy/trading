@@ -156,14 +156,25 @@ pub struct CircuitBreaker {
 
 impl CircuitBreaker {
     /// Create a new circuit breaker with the given configuration.
+    ///
+    /// CATEGORY 4 FIX: daily_start_balance_fp is now initialized to a
+    /// sensible default ($1000 in FixedPrice) so that the daily drawdown
+    /// check in on_trade_result() actually works even before
+    /// set_daily_start_balance() is explicitly called. Previously it was 0,
+    /// making the drawdown check a no-op (division by zero guard).
     pub fn new(config: CircuitBreakerConfig) -> Self {
+        // CATEGORY 4 FIX: Default starting balance of $1000 in FixedPrice
+        // so daily drawdown tracking works from the start.
+        // The execution router should call set_daily_start_balance() with
+        // the actual wallet balance at startup and at each daily reset.
+        let default_start_balance_fp: i64 = 1_000_0000_0000; // $1,000
         Self {
             halted: AtomicBool::new(false),
             trip_reason: AtomicU32::new(0),
             trip_timestamp_ns: AtomicU64::new(0),
             consecutive_losses: AtomicU32::new(0),
             daily_pnl_fp: AtomicI64::new(0),
-            daily_start_balance_fp: AtomicI64::new(0),
+            daily_start_balance_fp: AtomicI64::new(default_start_balance_fp),
             orders_this_second: AtomicU32::new(0),
             current_second_ns: AtomicU64::new(0),
             total_exposure_fp: AtomicI64::new(0),
