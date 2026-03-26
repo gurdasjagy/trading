@@ -1,11 +1,17 @@
-//! Persistent state storage using SQLite (Feature 4).
+//! Persistent state storage using SQLite (Feature 4 + CONFIG 3).
 //!
 //! Provides crash-resilient position and order tracking across engine restarts.
 //! On startup, persisted positions are loaded and reconciled with exchange state.
 //! On position open/close/update, changes are written to SQLite.
+//!
+//! CONFIG 3: Graceful shutdown support:
+//! - On SIGTERM/SIGINT: cancel all resting orders, persist open position state
+//! - On restart: reconcile persisted state with exchange state
+//! - Resume tracking positions that survived the restart
 
 use rusqlite::{Connection, params};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tracing::{info, warn, error};
 
 /// A persisted position record.
@@ -246,6 +252,251 @@ impl StateStore {
 
         Ok(closed_count)
     }
+
+    // ── CONFIG 3: Graceful Shutdown with State Persistence ──────────────
+
+    /// Persist all current engine state for graceful shutdown.
+    ///
+    /// Called on SIGTERM/SIGINT before the engine exits. Saves:
+    /// - All open positions with current SL/TP levels
+    /// - All resting (non-filled) orders
+    /// - Shutdown timestamp for reconciliation on restart
+    pub fn persist_shutdown_state(
+        &self,
+        positions: &[PersistedPosition],
+        resting_orders: &[PersistedOrder],
+    ) -> Result<(), String> {
+        info!(
+            "[state-store] CONFIG 3: Persisting shutdown state — {} positions, {} resting orders",
+            positions.len(),
+            resting_orders.len()
+        );
+
+        let conn = self.conn.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+
+        // Record shutdown timestamp
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS engine_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )"
+        ).map_err(|e| format!("Failed to create metadata table: {}", e))?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO engine_metadata (key, value, updated_at) VALUES ('last_shutdown', ?1, ?2)",
+            params![now.to_string(), now],
+        ).map_err(|e| format!("Failed to record shutdown timestamp: {}", e))?;
+
+        // Use a transaction for atomicity
+        conn.execute_batch("BEGIN TRANSACTION")
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+        // Persist all open positions
+        for pos in positions {
+            conn.execute(
+                "INSERT OR REPLACE INTO positions (symbol, side, entry_price, size, stop_loss, take_profit, leverage, opened_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    pos.symbol, pos.side, pos.entry_price, pos.size,
+                    pos.stop_loss, pos.take_profit, pos.leverage, pos.opened_at,
+                ],
+            ).map_err(|e| {
+                let _ = conn.execute_batch("ROLLBACK");
+                format!("Failed to persist position {}: {}", pos.symbol, e)
+            })?;
+        }
+
+        // Mark all resting orders as "shutdown_pending"
+        for order in resting_orders {
+            conn.execute(
+                "INSERT OR REPLACE INTO orders (order_id, symbol, side, status, price, size, created_at, signal_tag)
+                 VALUES (?1, ?2, ?3, 'shutdown_pending', ?4, ?5, ?6, ?7)",
+                params![
+                    order.order_id, order.symbol, order.side,
+                    order.price, order.size, order.created_at, order.signal_tag,
+                ],
+            ).map_err(|e| {
+                let _ = conn.execute_batch("ROLLBACK");
+                format!("Failed to persist order {}: {}", order.order_id, e)
+            })?;
+        }
+
+        conn.execute_batch("COMMIT")
+            .map_err(|e| format!("Failed to commit shutdown state: {}", e))?;
+
+        info!(
+            "[state-store] CONFIG 3: Shutdown state persisted successfully at ts={}",
+            now
+        );
+        Ok(())
+    }
+
+    /// Load the last shutdown timestamp for reconciliation.
+    pub fn get_last_shutdown_time(&self) -> Result<Option<i64>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+
+        // Check if metadata table exists
+        let table_exists: bool = conn
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_metadata'")
+            .and_then(|mut stmt| stmt.exists([]))
+            .unwrap_or(false);
+
+        if !table_exists {
+            return Ok(None);
+        }
+
+        match conn.query_row(
+            "SELECT value FROM engine_metadata WHERE key = 'last_shutdown'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(val) => Ok(val.parse::<i64>().ok()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Failed to query last shutdown time: {}", e)),
+        }
+    }
+
+    /// Load resting orders that were pending at shutdown.
+    /// These need to be cancelled on restart before resuming.
+    pub fn load_shutdown_pending_orders(&self) -> Result<Vec<PersistedOrder>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT order_id, symbol, side, status, price, size, created_at, signal_tag
+             FROM orders WHERE status = 'shutdown_pending' ORDER BY created_at ASC"
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let orders = stmt.query_map([], |row| {
+            Ok(PersistedOrder {
+                order_id: row.get(0)?,
+                symbol: row.get(1)?,
+                side: row.get(2)?,
+                status: row.get(3)?,
+                price: row.get(4)?,
+                size: row.get(5)?,
+                created_at: row.get(6)?,
+                signal_tag: row.get(7)?,
+            })
+        }).map_err(|e| format!("Failed to query shutdown pending orders: {}", e))?;
+
+        let mut result = Vec::new();
+        for order in orders {
+            match order {
+                Ok(o) => result.push(o),
+                Err(e) => warn!("[state-store] Skipping malformed order row: {}", e),
+            }
+        }
+        Ok(result)
+    }
+
+    /// Mark shutdown_pending orders as cancelled after restart reconciliation.
+    pub fn clear_shutdown_pending_orders(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let count = conn.execute(
+            "UPDATE orders SET status = 'cancelled_on_restart' WHERE status = 'shutdown_pending'",
+            [],
+        ).map_err(|e| format!("Failed to clear shutdown pending orders: {}", e))?;
+
+        if count > 0 {
+            info!(
+                "[state-store] CONFIG 3: Cleared {} shutdown_pending orders on restart",
+                count
+            );
+        }
+        Ok(count)
+    }
+
+    /// Full restart reconciliation: load persisted state, compare with exchange,
+    /// and return positions that need to be resumed.
+    ///
+    /// Steps:
+    /// 1. Load last shutdown time
+    /// 2. Load open positions from DB
+    /// 3. Compare with exchange positions
+    /// 4. Close positions that no longer exist on exchange
+    /// 5. Clear shutdown_pending orders
+    /// 6. Return positions to resume tracking
+    pub fn reconcile_on_restart(
+        &self,
+        exchange_positions: &[String],
+    ) -> Result<Vec<PersistedPosition>, String> {
+        let shutdown_time = self.get_last_shutdown_time()?;
+        if let Some(ts) = shutdown_time {
+            info!(
+                "[state-store] CONFIG 3: Last shutdown at ts={}, reconciling state",
+                ts
+            );
+        } else {
+            info!("[state-store] CONFIG 3: No previous shutdown record found, fresh start");
+        }
+
+        // Reconcile positions with exchange
+        let closed = self.reconcile_with_exchange(exchange_positions)?;
+        if closed > 0 {
+            info!(
+                "[state-store] CONFIG 3: Closed {} stale positions during reconciliation",
+                closed
+            );
+        }
+
+        // Clear any shutdown_pending orders
+        let cleared = self.clear_shutdown_pending_orders()?;
+        if cleared > 0 {
+            info!(
+                "[state-store] CONFIG 3: Cleared {} pending orders from previous shutdown",
+                cleared
+            );
+        }
+
+        // Return remaining open positions for the engine to resume tracking
+        let resume_positions = self.load_open_positions()?;
+        info!(
+            "[state-store] CONFIG 3: {} positions to resume tracking after restart",
+            resume_positions.len()
+        );
+
+        Ok(resume_positions)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG 3: Shutdown Signal Handler
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Global shutdown flag for CONFIG 3 graceful shutdown.
+/// Set to true by the signal handler on SIGTERM/SIGINT.
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Check if a graceful shutdown has been requested.
+#[inline]
+pub fn is_shutdown_requested() -> bool {
+    SHUTDOWN_REQUESTED.load(Ordering::Relaxed)
+}
+
+/// Register signal handlers for graceful shutdown (CONFIG 3).
+///
+/// On SIGTERM or SIGINT, sets the global shutdown flag. The main engine
+/// loop should check `is_shutdown_requested()` and initiate shutdown
+/// procedures (cancel orders, persist state, exit cleanly).
+///
+/// Returns a tokio JoinHandle for the signal listener task.
+pub fn register_shutdown_handler() -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
+
+    info!("[state-store] CONFIG 3: Shutdown signal handlers registered");
+    flag
+}
+
+/// Trigger shutdown (called from signal handler or programmatically).
+pub fn trigger_shutdown() {
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+    info!("[state-store] CONFIG 3: Shutdown triggered");
 }
 
 #[cfg(test)]

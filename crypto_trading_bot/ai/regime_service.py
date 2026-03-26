@@ -35,14 +35,298 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mmap
 import os
 import statistics
+import struct
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 from loguru import logger
 from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# FEAT 11: Hidden Markov Model (HMM) Regime Detector
+# ---------------------------------------------------------------------------
+
+
+class HMMRegimeDetector:
+    """Hidden Markov Model-based regime detector with 4 states.
+
+    States:
+        0 = Trending Up (momentum bullish)
+        1 = Trending Down (momentum bearish)
+        2 = Mean-Reverting (range-bound)
+        3 = High Volatility (crisis / choppy)
+
+    Uses hmmlearn's GaussianHMM with 2 features:
+        - Log returns (captures direction)
+        - Realized volatility (captures vol regime)
+
+    The model supports online learning: parameters are updated hourly
+    with new market data to adapt to changing conditions.
+    """
+
+    STATE_NAMES = ["trending_up", "trending_down", "mean_reverting", "high_volatility"]
+    N_STATES = 4
+
+    def __init__(
+        self,
+        lookback_periods: int = 100,
+        vol_window: int = 20,
+        online_update_interval_secs: int = 3600,
+    ):
+        self._lookback = lookback_periods
+        self._vol_window = vol_window
+        self._online_update_interval = online_update_interval_secs
+        self._last_online_update: float = 0.0
+        self._model = None
+        self._is_fitted = False
+
+        # Rolling data buffer for online learning
+        self._price_buffer: List[float] = []
+        self._max_buffer = 2000  # Keep last 2000 prices
+
+        # State probabilities (uniform prior)
+        self._state_probs = np.array([0.25, 0.25, 0.25, 0.25])
+        self._current_state = 2  # Default: mean-reverting
+
+        self._init_model()
+
+    def _init_model(self):
+        """Initialize the HMM with sensible priors for financial data."""
+        try:
+            from hmmlearn.hmm import GaussianHMM
+
+            self._model = GaussianHMM(
+                n_components=self.N_STATES,
+                covariance_type="full",
+                n_iter=50,
+                random_state=42,
+                init_params="",  # We set initial params manually
+            )
+
+            # Initial transition matrix: states tend to persist
+            self._model.transmat_ = np.array([
+                [0.90, 0.03, 0.05, 0.02],  # Trending up: stays, rarely flips
+                [0.03, 0.90, 0.05, 0.02],  # Trending down: stays
+                [0.05, 0.05, 0.85, 0.05],  # Mean-reverting: more transitions
+                [0.04, 0.04, 0.07, 0.85],  # High vol: somewhat sticky
+            ])
+
+            # Initial state distribution
+            self._model.startprob_ = np.array([0.25, 0.25, 0.30, 0.20])
+
+            # Initial means: [log_return, volatility]
+            # Trending Up: positive returns, moderate vol
+            # Trending Down: negative returns, moderate vol
+            # Mean-Reverting: near-zero returns, low vol
+            # High Volatility: near-zero returns, high vol
+            self._model.means_ = np.array([
+                [0.002, 0.01],   # Trending Up
+                [-0.002, 0.01],  # Trending Down
+                [0.0, 0.005],    # Mean-Reverting
+                [0.0, 0.03],     # High Volatility
+            ])
+
+            # Initial covariances
+            self._model.covars_ = np.array([
+                [[0.0001, 0.0], [0.0, 0.0001]],  # Trending Up
+                [[0.0001, 0.0], [0.0, 0.0001]],  # Trending Down
+                [[0.00005, 0.0], [0.0, 0.00005]], # Mean-Reverting
+                [[0.0005, 0.0], [0.0, 0.0005]],   # High Volatility
+            ])
+
+            logger.info("FEAT 11: HMM Regime Detector initialized with 4 states")
+        except ImportError:
+            logger.warning(
+                "FEAT 11: hmmlearn not installed, HMM regime detection disabled. "
+                "Install with: pip install hmmlearn"
+            )
+            self._model = None
+
+    def _prepare_features(self, prices: List[float]) -> Optional[np.ndarray]:
+        """Convert price series to [log_returns, realized_vol] feature matrix."""
+        if len(prices) < self._vol_window + 2:
+            return None
+
+        prices_arr = np.array(prices)
+        # Log returns
+        log_returns = np.diff(np.log(prices_arr))
+
+        # Realized volatility (rolling std of log returns)
+        vol = np.array([
+            np.std(log_returns[max(0, i - self._vol_window):i])
+            if i >= self._vol_window else np.std(log_returns[:i + 1])
+            for i in range(len(log_returns))
+        ])
+
+        # Stack features: [log_return, volatility]
+        features = np.column_stack([log_returns, vol])
+
+        # Replace NaN/Inf with 0
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return features
+
+    def update_prices(self, prices: List[float]) -> None:
+        """Add new price data to the buffer for online learning."""
+        self._price_buffer.extend(prices)
+        if len(self._price_buffer) > self._max_buffer:
+            self._price_buffer = self._price_buffer[-self._max_buffer:]
+
+    def fit(self, prices: List[float]) -> bool:
+        """Fit the HMM on historical price data.
+
+        Args:
+            prices: List of close prices (at least vol_window + 2 elements)
+
+        Returns:
+            True if fitting succeeded
+        """
+        if self._model is None:
+            return False
+
+        features = self._prepare_features(prices)
+        if features is None or len(features) < 10:
+            logger.warning("FEAT 11: Not enough data to fit HMM (need >= {} prices)", self._vol_window + 12)
+            return False
+
+        try:
+            self._model.fit(features)
+            self._is_fitted = True
+            self.update_prices(prices)
+            logger.info("FEAT 11: HMM fitted on {} data points", len(features))
+            return True
+        except Exception as exc:
+            logger.error("FEAT 11: HMM fitting failed: {}", exc)
+            return False
+
+    def predict(self, prices: List[float]) -> tuple[str, np.ndarray]:
+        """Predict the current regime from recent prices.
+
+        Args:
+            prices: Recent price series
+
+        Returns:
+            (regime_name, state_probabilities) tuple
+        """
+        if self._model is None or not self._is_fitted:
+            return self.STATE_NAMES[self._current_state], self._state_probs
+
+        features = self._prepare_features(prices)
+        if features is None or len(features) < 2:
+            return self.STATE_NAMES[self._current_state], self._state_probs
+
+        try:
+            # Get posterior state probabilities
+            log_prob, state_seq = self._model.decode(features, algorithm="viterbi")
+            posteriors = self._model.predict_proba(features)
+
+            # Use the last time step's state and probabilities
+            self._current_state = int(state_seq[-1])
+            self._state_probs = posteriors[-1]
+
+            return self.STATE_NAMES[self._current_state], self._state_probs
+
+        except Exception as exc:
+            logger.warning("FEAT 11: HMM prediction failed: {}", exc)
+            return self.STATE_NAMES[self._current_state], self._state_probs
+
+    def maybe_online_update(self, prices: List[float]) -> bool:
+        """Perform online learning if the update interval has elapsed.
+
+        Re-fits the HMM on the accumulated price buffer plus new data.
+        Called periodically (default: every hour).
+
+        Returns:
+            True if an update was performed
+        """
+        now = time.time()
+        if now - self._last_online_update < self._online_update_interval:
+            return False
+
+        self.update_prices(prices)
+
+        if len(self._price_buffer) < self._vol_window + 20:
+            return False
+
+        success = self.fit(self._price_buffer)
+        if success:
+            self._last_online_update = now
+            logger.info(
+                "FEAT 11: HMM online update completed with {} prices",
+                len(self._price_buffer),
+            )
+        return success
+
+    def write_regime_probabilities_shm(
+        self, shm_path: str = "/dev/shm/regime_weights"
+    ) -> bool:
+        """Write HMM state probabilities to shared memory.
+
+        Appends HMM probabilities to the existing regime_weights SHM file
+        at a dedicated offset (starting at byte 112, within the _reserved area).
+
+        Layout at offset 112:
+            [112..116]  hmm_state         u32 (0=up, 1=down, 2=mean_rev, 3=high_vol)
+            [116..120]  prob_trending_up   f32 (float, fixed-point 1e4)
+            [120..124]  prob_trending_down f32
+            [124..128]  prob_mean_rev     f32
+            (128 is end of the 128-byte regime struct, so we stay within bounds
+             using the _reserved area from bytes 88-112, offset 112 is at the edge)
+
+        Actually, the reserved area is [88..112] = 24 bytes. Let's use offset 88.
+        """
+        try:
+            if not os.path.exists(shm_path):
+                return False
+
+            fd = os.open(shm_path, os.O_RDWR)
+            try:
+                mm = mmap.mmap(fd, 128, access=mmap.ACCESS_WRITE)
+                try:
+                    # Write HMM data into the _reserved area starting at offset 88
+                    # [88..92] hmm_state (u32)
+                    # [92..96] prob_trending_up (i32, fixed-point 1e4)
+                    # [96..100] prob_trending_down (i32, fixed-point 1e4)
+                    # [100..104] prob_mean_rev (i32, fixed-point 1e4)
+                    # [104..108] prob_high_vol (i32, fixed-point 1e4)
+                    struct.pack_into(
+                        "<Iiiii",
+                        mm,
+                        88,
+                        self._current_state,
+                        int(self._state_probs[0] * 10_000),
+                        int(self._state_probs[1] * 10_000),
+                        int(self._state_probs[2] * 10_000),
+                        int(self._state_probs[3] * 10_000),
+                    )
+                    mm.flush()
+                    return True
+                finally:
+                    mm.close()
+            finally:
+                os.close(fd)
+        except Exception as exc:
+            logger.warning("FEAT 11: Failed to write HMM probabilities to SHM: {}", exc)
+            return False
+
+    @property
+    def current_state_name(self) -> str:
+        """Current regime state name."""
+        return self.STATE_NAMES[self._current_state]
+
+    @property
+    def state_probabilities(self) -> Dict[str, float]:
+        """Current state probabilities as a dict."""
+        return {
+            name: float(prob)
+            for name, prob in zip(self.STATE_NAMES, self._state_probs)
+        }
+
 
 # ---------------------------------------------------------------------------
 # RegimeState model (mirrors the Rust regime.rs struct)
@@ -156,6 +440,14 @@ class RegimeService:
         self._update_count: int = 0
         self._error_count: int = 0
         
+        # ── FEAT 11: HMM Regime Detector ────────────────────────────
+        self._hmm_detector = HMMRegimeDetector(
+            lookback_periods=100,
+            vol_window=20,
+            online_update_interval_secs=3600,  # Re-fit every hour
+        )
+        logger.info("RegimeService: HMMRegimeDetector initialized")
+
         # ── Task 12: Gamma Exposure Writer initialization ────
         self._gamma_writer: Optional[Any] = None
         self._tasks: Dict[str, asyncio.Task] = {}
@@ -343,19 +635,106 @@ class RegimeService:
         state.funding_rate_bias = _extract_funding_rate_bias(market_data)
         state.fear_greed_index = _extract_fear_greed(market_data)
 
-        # ── 5. LLM market analysis (optional slow step) ──────────────────
+        # ── 5. FEAT 11: HMM regime detection ─────────────────────────
+        prices = self._extract_prices_for_hmm(market_data)
+        if prices and len(prices) >= 25:
+            # Try online update (re-fit every hour)
+            self._hmm_detector.maybe_online_update(prices)
+
+            # If not fitted yet, do initial fit
+            if not self._hmm_detector._is_fitted:
+                self._hmm_detector.fit(prices)
+
+            # Get HMM prediction
+            hmm_regime, hmm_probs = self._hmm_detector.predict(prices)
+
+            # Use HMM to refine the data-driven regime when it's uncertain
+            hmm_regime_map = {
+                "trending_up": "trending_bullish",
+                "trending_down": "trending_bearish",
+                "mean_reverting": "ranging",
+                "high_volatility": "high_volatility",
+            }
+            mapped_hmm = hmm_regime_map.get(hmm_regime, "unknown")
+
+            # If data-driven regime is unknown or HMM is very confident,
+            # let HMM override
+            max_hmm_prob = float(max(hmm_probs))
+            if state.overall_regime == "unknown" and max_hmm_prob > 0.5:
+                state.overall_regime = mapped_hmm
+                logger.info(
+                    f"FEAT 11: HMM overriding unknown regime → {mapped_hmm} "
+                    f"(prob={max_hmm_prob:.3f})"
+                )
+            elif max_hmm_prob > 0.8 and mapped_hmm != state.overall_regime:
+                # HMM very confident and disagrees — log but don't override
+                # unless data-driven was ambiguous
+                logger.info(
+                    f"FEAT 11: HMM suggests {mapped_hmm} (prob={max_hmm_prob:.3f}) "
+                    f"vs data-driven {state.overall_regime}"
+                )
+
+            # Write HMM probabilities to shared memory
+            self._hmm_detector.write_regime_probabilities_shm()
+        else:
+            logger.debug("FEAT 11: Not enough price data for HMM detection")
+
+        # ── 6. LLM market analysis (optional slow step) ──────────────────
         if self._llm is not None:
             llm_signals = await self._run_llm_analysis(market_data, state)
             if llm_signals:
                 _merge_llm_signals(state, llm_signals)
 
-        # ── 6. Compute strategy recommendations ─────────────────────────
+        # ── 7. Compute strategy recommendations ─────────────────────────
         state.recommended_position_scale = _compute_position_scale(state)
         state.recommended_strategy_filter = _compute_allowed_strategies(state)
         state.blocked_strategies = _compute_blocked_strategies(state)
         state.max_leverage_override = _compute_leverage_override(state)
 
         return state
+
+    def _extract_prices_for_hmm(
+        self, market_data: Optional[Dict[str, Any]]
+    ) -> List[float]:
+        """Extract a price series from market_data for HMM input.
+
+        Looks for:
+            1. market_data["prices"]["BTC/USDT"] or first available symbol
+            2. market_data["price_history"] as a list of floats
+            3. market_data["ohlcv"] as a list of [t,o,h,l,c,v] candles
+        """
+        if not market_data:
+            return []
+
+        # Try explicit price_history
+        history = market_data.get("price_history")
+        if isinstance(history, list) and len(history) > 0:
+            return [float(p) for p in history if isinstance(p, (int, float))]
+
+        # Try ohlcv candles (use close price)
+        ohlcv = market_data.get("ohlcv")
+        if isinstance(ohlcv, list) and len(ohlcv) > 0:
+            closes = []
+            for candle in ohlcv:
+                if isinstance(candle, (list, tuple)) and len(candle) >= 5:
+                    closes.append(float(candle[4]))  # Close price
+            if closes:
+                return closes
+
+        # Try prices dict (pick BTC/USDT or first)
+        prices_dict = market_data.get("prices", {})
+        if isinstance(prices_dict, dict):
+            for key in ["BTC/USDT", "BTCUSDT"]:
+                if key in prices_dict:
+                    val = prices_dict[key]
+                    if isinstance(val, list):
+                        return [float(p) for p in val if isinstance(p, (int, float))]
+            # Try first available
+            for val in prices_dict.values():
+                if isinstance(val, list) and len(val) > 10:
+                    return [float(p) for p in val if isinstance(p, (int, float))]
+
+        return []
 
     async def _fetch_news(self) -> List[Dict[str, str]]:
         """Fetch news from all configured news sources."""

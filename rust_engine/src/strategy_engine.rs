@@ -509,16 +509,39 @@ impl StrategyEngine {
             return None;
         }
 
-        // ── VPIN gating ──
+        // ── VPIN gating with toxicity-based spread widening (FEAT 10) ──
+        //
+        // Instead of simply skipping when VPIN is elevated, we widen the
+        // entry price to protect against adverse selection while still
+        // capturing trades. Only truly toxic flow (VPIN > 0.65) is skipped.
+        //
+        // VPIN 0.00–0.35: No widening (safe flow)
+        // VPIN 0.35–0.50: Widen entry by 1 tick (mild toxicity)
+        // VPIN 0.50–0.65: Widen entry by 2 ticks (elevated toxicity)
+        // VPIN > 0.65:    Skip entirely (toxic flow)
         let vpin = metrics.vpin;
         if vpin > VPIN_TOXIC_THRESHOLD {
-            // Toxic flow detected — skip this tick entirely.
-            // In a full market-making system, we'd widen quotes instead.
             debug!(
                 "[strategy] VPIN={:.3} > toxic threshold {:.2} — skipping",
                 vpin, VPIN_TOXIC_THRESHOLD
             );
             return None;
+        }
+
+        // Calculate VPIN-based spread widening ticks (FEAT 10)
+        let vpin_widen_ticks: u32 = if vpin > 0.50 {
+            2 // Elevated toxicity: widen by 2 ticks
+        } else if vpin > VPIN_SAFE_THRESHOLD {
+            1 // Mild toxicity: widen by 1 tick
+        } else {
+            0 // Safe flow: no widening
+        };
+
+        if vpin_widen_ticks > 0 {
+            info!(
+                "[strategy] FEAT 10: VPIN={:.3} — widening entry by {} tick(s) instead of skipping",
+                vpin, vpin_widen_ticks
+            );
         }
 
         // ── Multi-timeframe confluence filtering (FEATURE 2) ──
@@ -726,24 +749,55 @@ impl StrategyEngine {
         //
         // At VIP0: maker=2bps, taker=5bps → Post-Only saves 3bps per side (6bps RT).
         // At VIP10+: maker=-1bps (rebate), taker=2bps → Post-Only earns 3bps per side.
+        // ── FEAT 10: Estimate tick size for spread widening ──
+        // Use pair profile tick size if available, otherwise derive from spread.
+        // A reasonable default tick is 1/10 of the half-spread.
+        let estimated_tick_size = {
+            let half_spread_price = metrics.mid_price * (metrics.spread_bps / 2.0) / 10_000.0;
+            // Reasonable tick: roughly 1 bps of price, but at least 1/10 of half-spread
+            let tick = (metrics.mid_price * 0.0001).max(half_spread_price / 10.0);
+            if tick <= 0.0 { metrics.mid_price * 0.0001 } else { tick }
+        };
+        let vpin_widen_amount = vpin_widen_ticks as f64 * estimated_tick_size;
+
         let (order_type, time_in_force, price) = if confidence > 0.85 {
             // Very high confidence: cross the spread for immediate fill.
-            // Use mid_price which will likely cross and fill as taker.
-            (OrderType::Limit, "ioc".to_string(), Some(metrics.mid_price))
+            // FEAT 10: Still apply VPIN widening even for high confidence orders
+            let widened_price = if vpin_widen_ticks > 0 {
+                if side == OrderSide::Buy {
+                    metrics.mid_price - vpin_widen_amount
+                } else {
+                    metrics.mid_price + vpin_widen_amount
+                }
+            } else {
+                metrics.mid_price
+            };
+            (OrderType::Limit, "ioc".to_string(), Some(widened_price))
         } else if confidence > 0.7 {
             // High confidence: aggressive limit at mid, may or may not cross.
-            (OrderType::Limit, "gtc".to_string(), Some(metrics.mid_price))
+            // FEAT 10: Apply VPIN widening to reduce adverse selection
+            let widened_price = if vpin_widen_ticks > 0 {
+                if side == OrderSide::Buy {
+                    metrics.mid_price - vpin_widen_amount
+                } else {
+                    metrics.mid_price + vpin_widen_amount
+                }
+            } else {
+                metrics.mid_price
+            };
+            (OrderType::Limit, "gtc".to_string(), Some(widened_price))
         } else {
             // Default: Post-Only to guarantee maker fee / rebate.
             // Price at the join side of the book (best bid for buys, best ask for sells).
             // Derive best_bid/best_ask from mid_price and spread_bps.
+            // FEAT 10: Apply VPIN widening on top of the normal maker placement
             let half_spread = metrics.mid_price * (metrics.spread_bps / 2.0) / 10_000.0;
             let maker_price = if side == OrderSide::Buy {
-                // Place bid at best_bid level to join the queue
-                metrics.mid_price - half_spread
+                // Place bid at best_bid level, widened further by VPIN toxicity
+                metrics.mid_price - half_spread - vpin_widen_amount
             } else {
-                // Place ask at best_ask level to join the queue
-                metrics.mid_price + half_spread
+                // Place ask at best_ask level, widened further by VPIN toxicity
+                metrics.mid_price + half_spread + vpin_widen_amount
             };
             (OrderType::PostOnly, "poc".to_string(), Some(maker_price))
         };

@@ -297,13 +297,16 @@ pub struct FlatBookSymbolConfig {
     pub max_levels: usize,
 }
 
-/// Task 7: Pair-specific trading profile configuration (Phase 2 Feature 8).
+/// CONFIG 1: Per-symbol trading profile configuration.
 ///
 /// Allows per-symbol customization of:
 /// - Imbalance threshold for signal generation
 /// - VPIN bucket size for toxicity detection
 /// - Trailing stop ATR multiplier
 /// - Maximum leverage cap
+/// - Maximum position size (contracts)
+/// - Stop-loss percentage
+/// - Take-profit percentage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairProfile {
     /// Symbol name (e.g. "BTC_USDT").
@@ -320,12 +323,61 @@ pub struct PairProfile {
     /// Maximum leverage for this pair (e.g., 20).
     #[serde(default = "default_max_leverage_pair")]
     pub max_leverage: i32,
+    // ── CONFIG 1: Additional per-symbol overrides ──
+    /// Maximum position size in contracts for this pair.
+    #[serde(default)]
+    pub max_position_size: Option<i64>,
+    /// Leverage override for this pair (separate from max_leverage).
+    /// If set, the engine uses this instead of the global strategy leverage.
+    #[serde(default)]
+    pub leverage: Option<i32>,
+    /// Stop-loss percentage (e.g., 1.5 = 1.5% below entry).
+    #[serde(default)]
+    pub sl_pct: Option<f64>,
+    /// Take-profit percentage (e.g., 3.0 = 3.0% above entry).
+    #[serde(default)]
+    pub tp_pct: Option<f64>,
+    /// Tick size override for this pair (e.g., 0.01 for BTC).
+    /// Used by FEAT 10 spread widening for more accurate tick estimation.
+    #[serde(default)]
+    pub tick_size: Option<f64>,
 }
 
 fn default_imbalance_threshold() -> f64 { 0.03 }
 fn default_vpin_bucket_size() -> f64 { 100_000.0 }
 fn default_trailing_stop_atr_multiplier() -> f64 { 2.0 }
 fn default_max_leverage_pair() -> i32 { 20 }
+
+impl PairProfile {
+    /// Get the effective leverage for this pair, falling back to the given default.
+    pub fn effective_leverage(&self, default: i32) -> i32 {
+        self.leverage.unwrap_or(default).min(self.max_leverage)
+    }
+
+    /// Get the stop-loss price for a given entry price and side.
+    /// Returns None if sl_pct is not configured.
+    pub fn stop_loss_price(&self, entry_price: f64, is_long: bool) -> Option<f64> {
+        self.sl_pct.map(|pct| {
+            if is_long {
+                entry_price * (1.0 - pct / 100.0)
+            } else {
+                entry_price * (1.0 + pct / 100.0)
+            }
+        })
+    }
+
+    /// Get the take-profit price for a given entry price and side.
+    /// Returns None if tp_pct is not configured.
+    pub fn take_profit_price(&self, entry_price: f64, is_long: bool) -> Option<f64> {
+        self.tp_pct.map(|pct| {
+            if is_long {
+                entry_price * (1.0 + pct / 100.0)
+            } else {
+                entry_price * (1.0 - pct / 100.0)
+            }
+        })
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(untagged)]
