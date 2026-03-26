@@ -347,10 +347,9 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         for ex in cfg.exchanges.iter_mut() {
             if ex.name == "gateio" {
                 ex.testnet = true;
-                // Gate.io migrated USDT futures testnet WS to ws-testnet.gate.com.
-                // The old wss://fx-ws-testnet.gateio.ws/v4/ws/usdt defaults to BTC
-                // contracts per the official docs warning.
-                ex.ws_url = "wss://ws-testnet.gate.com/v4/ws/futures/usdt".to_string();
+                // Gate.io USDT futures testnet WebSocket endpoint.
+                // Per official docs: wss://fx-ws-testnet.gateio.ws/v4/ws/usdt
+                ex.ws_url = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt".to_string();
                 // CRITICAL: The correct testnet REST URL is api-testnet.gateapi.io
                 // (same as CCXT's set_sandbox_mode). The old fx-api-testnet.gateio.ws
                 // is a DIFFERENT server with a DIFFERENT API key pool — keys created
@@ -1166,7 +1165,11 @@ fn strategy_evaluator_loop(
     info!("[strategy] 🌊 Liquidation cascade detector initialized");
     // Phase 2 Feature 4: Gamma exposure reader initialization
     let gamma_reader = gamma_shm::GammaExposureReader::new("/dev/shm/gamma_exposure");
-    info!("[strategy] 📊 Gamma exposure reader initialized");
+    if gamma_reader.is_some() {
+        info!("[strategy] 📊 Gamma exposure reader initialized");
+    } else {
+        info!("[strategy] 📊 Gamma exposure reader not available (SHM file missing, will run without gamma data)");
+    }
     
     // Phase 2 Feature 7: Execution Analytics initialization
     // let exec_analytics = exec_analytics.lock();
@@ -1501,8 +1504,8 @@ fn strategy_evaluator_loop(
                 cvd_5m: cvd_tracker.get_cvd_5m(),
                 cvd_15m: cvd_tracker.get_cvd_15m(),
                 cvd_1h: cvd_tracker.get_cvd_1h(),
-                gamma_flip_btc: gamma_reader.get_gamma_flip_level("BTC"),
-                gamma_flip_eth: gamma_reader.get_gamma_flip_level("ETH"),
+                gamma_flip_btc: gamma_reader.as_ref().and_then(|r| r.get_gamma_flip_level("BTC")),
+                gamma_flip_eth: gamma_reader.as_ref().and_then(|r| r.get_gamma_flip_level("ETH")),
                 wyckoff_phase: format!("{:?}", wyckoff_phase),
                 fib_nearest_level: fib_level_pct,
                 ichimoku_cloud_position: format!("{:?}", ichimoku_position),
