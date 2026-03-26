@@ -128,6 +128,8 @@ pub mod instrument_manager;
 pub mod size_normalizer;    // BUG 3: USDT-to-contracts conversion
 pub mod funding_timing;     // FEAT 1: Funding rate timestamp-aware entry/exit
 pub mod ws_fill_receiver;   // FEAT 4: Binance & Bybit WebSocket fill updates
+pub mod twap_integration;   // FEAT 6: TWAP/Iceberg execution pipeline integration
+pub mod pnl_tracker;        // FEAT 7: Real-time PnL tracking & risk metrics
 
 // PyO3-specific modules (only compiled into the cdylib)
 mod execution_prep;
