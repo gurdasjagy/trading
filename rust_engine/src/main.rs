@@ -3363,7 +3363,7 @@ fn execution_router_loop(
                         confidence: 0.0,
                         signal_tag: String::new(),
                         min_fill_size: None,
-                        strategy_name: String::new(),
+                        strategy_name: "strategy_signal".to_string(),
                     };
 
                     // Submit the main order with retry logic
@@ -3571,7 +3571,7 @@ fn execution_router_loop(
                                                     confidence: 0.0,
                                                     signal_tag: "sl_conditional".to_string(),
                                                     min_fill_size: None,
-                                                    strategy_name: String::new(),
+                                                    strategy_name: "stop_loss".to_string(),
                                                 };
                                                 match gw_clone.submit_conditional_sl(
                                                     &sym_for_sltp, &parent_side, filled_size, sl
