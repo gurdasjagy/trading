@@ -813,11 +813,11 @@ impl StrategyEngine {
             // Convert fractional contract size to integer contracts.
             // .round().max(1.0) ensures at least 1 contract.
             size: position_size.round().max(1.0) as i64,
-            order_type,
+            order_type: order_type.clone(),
             price,
             reduce_only: false,
             leverage: Some(self.config().leverage.unwrap_or(5).max(1).min(125) as i32),
-            time_in_force,
+            time_in_force: time_in_force.clone(),
             slippage_cap_pct: Some(0.001), // 10 bps slippage cap
             placement: PlacementType::AtBest,
             stop_loss: None,   // Computed by execution router based on ATR

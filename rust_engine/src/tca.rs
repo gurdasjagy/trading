@@ -197,19 +197,19 @@ impl TcaEngine {
         let metrics = record.compute_metrics();
 
         // Update global aggregate
-        self.update_aggregate(&mut self.global_stats.clone(), &metrics, record.fees_usdt);
+        Self::update_aggregate(&mut self.global_stats, &metrics, record.fees_usdt);
 
         // Update per-strategy aggregate
         let strategy_agg = self.strategy_stats
             .entry(record.strategy_name.clone())
             .or_insert_with(TcaAggregate::default);
-        self.update_aggregate(strategy_agg, &metrics, record.fees_usdt);
+        Self::update_aggregate(strategy_agg, &metrics, record.fees_usdt);
 
         // Update per-symbol aggregate
         let symbol_agg = self.symbol_stats
             .entry(record.symbol.clone())
             .or_insert_with(TcaAggregate::default);
-        self.update_aggregate(symbol_agg, &metrics, record.fees_usdt);
+        Self::update_aggregate(symbol_agg, &metrics, record.fees_usdt);
 
         info!(
             "[tca] {} {} {}: IS={:.2}bps, VWAP_slip={:.2}bps, total={:.2}bps, latency={}us",
@@ -229,7 +229,7 @@ impl TcaEngine {
         self.records.push_back(record);
     }
 
-    fn update_aggregate(&self, agg: &mut TcaAggregate, metrics: &TcaMetrics, fees: f64) {
+    fn update_aggregate(agg: &mut TcaAggregate, metrics: &TcaMetrics, fees: f64) {
         let n = agg.trade_count as f64;
         let new_n = n + 1.0;
 

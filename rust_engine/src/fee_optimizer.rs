@@ -534,6 +534,7 @@ impl FeeOptimizer {
 
         // Compute Gate.io signature
         use sha2::Digest;
+        use hmac::Mac;
         let body_hash = hex::encode(sha2::Sha512::digest(b""));
         let payload = format!("GET\n{}\n\n{}\n{}", full_path, body_hash, timestamp);
         let mut mac = hmac::Hmac::<sha2::Sha512>::new_from_slice(api_secret)

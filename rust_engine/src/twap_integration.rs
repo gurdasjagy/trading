@@ -233,6 +233,8 @@ impl IcebergOrder {
             take_profit: None,
             confidence: 1.0,
             signal_tag: format!("iceberg_child_{}", self.children_placed),
+            min_fill_size: None,
+            strategy_name: "iceberg".to_string(),
         })
     }
 
@@ -502,6 +504,8 @@ impl TwapRunner {
                 take_profit: None,
                 confidence: 1.0,
                 signal_tag: "twap_child".to_string(),
+                min_fill_size: None,
+                strategy_name: "twap".to_string(),
             });
         }
 
@@ -542,6 +546,8 @@ impl TwapRunner {
                     take_profit: None,
                     confidence: 1.0,
                     signal_tag: "adaptive_twap_child".to_string(),
+                    min_fill_size: None,
+                    strategy_name: "adaptive_twap".to_string(),
                 });
             }
         }

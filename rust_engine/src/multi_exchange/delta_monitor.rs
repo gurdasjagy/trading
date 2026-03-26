@@ -209,6 +209,8 @@ impl DeltaNeutralityMonitor {
             take_profit: None,
             confidence: 1.0,
             signal_tag: "delta_hedge".to_string(),
+            min_fill_size: None,
+            strategy_name: "delta_monitor".to_string(),
         })
     }
 
