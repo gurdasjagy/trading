@@ -31,6 +31,142 @@ pub struct IchimokuCloud {
     displacement: usize,    // 26
 }
 
+/// CATEGORY 5 FIX: Multi-timeframe Ichimoku Cloud.
+///
+/// Manages Ichimoku calculations across multiple timeframes (1h, 4h, daily).
+/// The original implementation only updated on 1h candle completion.
+/// Institutional bots use multi-timeframe Ichimoku for confluence filtering:
+///   - 1h Ichimoku: Entry timing
+///   - 4h Ichimoku: Intermediate trend
+///   - Daily Ichimoku: Major trend direction
+pub struct MultiTimeframeIchimoku {
+    /// 1-hour Ichimoku (original, entry timing).
+    pub h1: IchimokuCloud,
+    /// 4-hour Ichimoku (intermediate trend).
+    pub h4: IchimokuCloud,
+    /// Daily Ichimoku (major trend direction).
+    pub daily: IchimokuCloud,
+    /// Candle counter for 4h aggregation (every 4 1h candles).
+    h4_counter: u32,
+    /// Running H4 candle accumulators.
+    h4_high: f64,
+    h4_low: f64,
+    h4_close: f64,
+    h4_open_set: bool,
+    /// Candle counter for daily aggregation (every 24 1h candles).
+    daily_counter: u32,
+    /// Running daily candle accumulators.
+    daily_high: f64,
+    daily_low: f64,
+    daily_close: f64,
+    daily_open_set: bool,
+}
+
+impl MultiTimeframeIchimoku {
+    /// Create a new multi-timeframe Ichimoku system.
+    pub fn new() -> Self {
+        Self {
+            h1: IchimokuCloud::new(),
+            h4: IchimokuCloud::new(),
+            daily: IchimokuCloud::new(),
+            h4_counter: 0,
+            h4_high: f64::NEG_INFINITY,
+            h4_low: f64::INFINITY,
+            h4_close: 0.0,
+            h4_open_set: false,
+            daily_counter: 0,
+            daily_high: f64::NEG_INFINITY,
+            daily_low: f64::INFINITY,
+            daily_close: 0.0,
+            daily_open_set: false,
+        }
+    }
+
+    /// Update all timeframes from a new 1h candle.
+    ///
+    /// This is the main entry point. Feed 1h candles and it automatically
+    /// aggregates into 4h and daily candles.
+    pub fn update_1h_candle(&mut self, high: f64, low: f64, close: f64) {
+        // Update 1h directly
+        self.h1.update_candle(high, low, close);
+
+        // Aggregate into 4h
+        if !self.h4_open_set {
+            self.h4_open_set = true;
+        }
+        self.h4_high = self.h4_high.max(high);
+        self.h4_low = self.h4_low.min(low);
+        self.h4_close = close;
+        self.h4_counter += 1;
+
+        if self.h4_counter >= 4 {
+            self.h4.update_candle(self.h4_high, self.h4_low, self.h4_close);
+            self.h4_counter = 0;
+            self.h4_high = f64::NEG_INFINITY;
+            self.h4_low = f64::INFINITY;
+            self.h4_open_set = false;
+        }
+
+        // Aggregate into daily
+        if !self.daily_open_set {
+            self.daily_open_set = true;
+        }
+        self.daily_high = self.daily_high.max(high);
+        self.daily_low = self.daily_low.min(low);
+        self.daily_close = close;
+        self.daily_counter += 1;
+
+        if self.daily_counter >= 24 {
+            self.daily.update_candle(self.daily_high, self.daily_low, self.daily_close);
+            self.daily_counter = 0;
+            self.daily_high = f64::NEG_INFINITY;
+            self.daily_low = f64::INFINITY;
+            self.daily_open_set = false;
+        }
+    }
+
+    /// Get multi-timeframe cloud confluence.
+    ///
+    /// Returns a score from -3.0 (all bearish) to +3.0 (all bullish).
+    /// Each timeframe contributes +-1.0 based on cloud position.
+    pub fn confluence_score(&self, price: f64) -> f64 {
+        let mut score = 0.0;
+
+        // 1h contribution
+        match self.h1.get_cloud_position(price) {
+            CloudPosition::AboveCloud => score += 1.0,
+            CloudPosition::BelowCloud => score -= 1.0,
+            CloudPosition::InCloud => {} // Neutral
+        }
+
+        // 4h contribution (weighted higher for intermediate trend)
+        if self.h4.is_warmed_up() {
+            match self.h4.get_cloud_position(price) {
+                CloudPosition::AboveCloud => score += 1.0,
+                CloudPosition::BelowCloud => score -= 1.0,
+                CloudPosition::InCloud => {}
+            }
+        }
+
+        // Daily contribution (weighted highest for major trend)
+        if self.daily.is_warmed_up() {
+            match self.daily.get_cloud_position(price) {
+                CloudPosition::AboveCloud => score += 1.0,
+                CloudPosition::BelowCloud => score -= 1.0,
+                CloudPosition::InCloud => {}
+            }
+        }
+
+        score
+    }
+
+    /// Check if all timeframes agree on direction (strong confluence).
+    pub fn all_timeframes_agree(&self, price: f64) -> bool {
+        let score = self.confluence_score(price);
+        score.abs() >= 2.0 // At least 2 of 3 timeframes agree
+    }
+}
+
 impl IchimokuCloud {
     pub fn new() -> Self {
         Self {

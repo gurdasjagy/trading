@@ -70,6 +70,50 @@ impl FundingSignal {
         }
     }
 
+    /// CATEGORY 6 FIX: Dynamic funding arb sizing based on rate magnitude
+    /// and available margin. Replaces fixed 100-contract size.
+    ///
+    /// # Arguments
+    /// * `available_margin_usdt` - Available margin for this trade
+    /// * `last_price` - Current price of the contract
+    /// * `quanto_multiplier` - Contract multiplier (from exchange)
+    /// * `max_portfolio_pct` - Maximum % of portfolio to use (e.g., 0.05 = 5%)
+    ///
+    /// # Returns
+    /// Optimal contract count based on funding rate magnitude
+    pub fn dynamic_size(
+        &self,
+        available_margin_usdt: f64,
+        last_price: f64,
+        quanto_multiplier: f64,
+        max_portfolio_pct: f64,
+    ) -> i64 {
+        if last_price <= 0.0 || quanto_multiplier <= 0.0 {
+            return 1; // Minimum safe default
+        }
+
+        let abs_rate = self.rate_pct.abs() / 100.0; // Convert back to decimal
+
+        // Scale allocation with rate magnitude:
+        // 0.01% rate -> 1% of max allocation
+        // 0.05% rate -> 25% of max allocation
+        // 0.10% rate -> 50% of max allocation
+        // 0.50% rate -> 100% of max allocation
+        let rate_scale = (abs_rate / 0.005).sqrt().clamp(0.01, 1.0);
+
+        // Maximum USDT allocation for this trade
+        let max_usdt = available_margin_usdt * max_portfolio_pct * rate_scale;
+
+        // Convert USDT to contracts
+        let contract_value = quanto_multiplier * last_price;
+        if contract_value <= 0.0 {
+            return 1;
+        }
+
+        let contracts = (max_usdt / contract_value).floor() as i64;
+        contracts.max(1) // At least 1 contract
+    }
+
     pub fn direction(&self) -> &str {
         if self.is_short { "SHORT" } else { "LONG" }
     }

@@ -75,6 +75,17 @@ pub struct OrderIntent {
     /// Signal source tag for attribution (e.g. "microstructure_imbalance_vpin").
     #[serde(default)]
     pub signal_tag: String,
+    /// CATEGORY 2 FIX: Minimum fill size for IOC orders.
+    /// If set and the IOC order fills less than this amount, the partial fill
+    /// is considered insufficient and the remaining exposure is managed.
+    /// Institutional bots use this to ensure they get meaningful fills
+    /// rather than dust amounts from IOC sweeps.
+    #[serde(default)]
+    pub min_fill_size: Option<i64>,
+    /// CATEGORY 8 FIX: Strategy name for PnL attribution.
+    /// Tracks which strategy generated this signal for per-strategy P&L reporting.
+    #[serde(default)]
+    pub strategy_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

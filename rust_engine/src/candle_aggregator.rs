@@ -483,6 +483,12 @@ impl CandleBuilder {
 
     /// Process a trade event.
     ///
+    /// CATEGORY 5 FIX: Handles exchange downtime gaps properly.
+    /// When trades arrive after a gap (e.g., exchange was down for 30 minutes),
+    /// the aggregator detects skipped candle periods and fills them with
+    /// flat candles (OHLC = last known close, volume = 0) instead of
+    /// creating artificial candles that span the gap.
+    ///
     /// # Arguments
     /// * `timestamp_ns` — Trade timestamp in nanoseconds
     /// * `price` — Trade price
@@ -492,7 +498,40 @@ impl CandleBuilder {
 
         // Check if we need to close the current candle
         if self.current_start_ns > 0 && candle_start > self.current_start_ns {
-            self.close_candle();
+            // CATEGORY 5 FIX: Detect and handle gaps from exchange downtime.
+            // If more than one candle period was skipped, insert flat candles
+            // to prevent artificial candle creation that spans the gap.
+            let gap_periods = (candle_start - self.current_start_ns) / self.timeframe.duration_ns();
+            if gap_periods > 1 {
+                // Close the current candle first
+                let last_close = self.current.close;
+                self.close_candle();
+
+                // Insert flat candles for skipped periods (up to 10 to avoid flooding)
+                let fill_count = ((gap_periods - 1) as usize).min(10);
+                for i in 0..fill_count {
+                    let gap_start = self.current_start_ns
+                        + (i as u64 + 1) * self.timeframe.duration_ns();
+                    // Flat candle: OHLC = last known close, volume = 0
+                    self.current_start_ns = gap_start;
+                    self.current.timestamp_ns = gap_start + self.timeframe.duration_ns();
+                    self.current.open = last_close;
+                    self.current.high = last_close;
+                    self.current.low = last_close;
+                    self.current.close = last_close;
+                    self.current.volume = 0.0;
+                    self.close_candle();
+                }
+
+                if gap_periods > 11 {
+                    tracing::warn!(
+                        "[candle-agg] Large gap detected: {} periods skipped for {:?}",
+                        gap_periods, self.timeframe
+                    );
+                }
+            } else {
+                self.close_candle();
+            }
         }
 
         // Initialize new candle if needed
