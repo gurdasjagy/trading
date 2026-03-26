@@ -68,8 +68,8 @@ use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_
 // Constants
 // ---------------------------------------------------------------------------
 
-const GATEIO_WS_URL: &str = "wss://ws.gate.com/v4/ws/futures/usdt";
-const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
+const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
+const GATEIO_WS_TESTNET_URL: &str = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
 const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
@@ -992,9 +992,9 @@ impl GateIoGateway {
 
     /// Build explicit futures.login message for WS authentication.
     ///
-    /// BUG 1 FIX: Gate.io WS v4 requires an explicit login before
+    /// Gate.io WS v4 requires an explicit login before
     /// futures.order_place calls. The login signature format is:
-    ///   HMAC_SHA512(secret, "channel=futures.login&event=api&time={time}")
+    ///   HMAC_SHA512(secret, "channel=futures.login&event=login&time={time}")
     fn build_login_message(api_key: &str, secret: &[u8]) -> String {
         let time = now_ms() / 1000;
         // Event MUST be "login", not "api"
@@ -1172,7 +1172,7 @@ impl GateIoGateway {
                     // BUG 1 FIX: Gate.io WS v4 requires an explicit login step before
                     // futures.order_place calls. Without this, order placement may be
                     // silently rejected. The login uses HMAC-SHA512 signature:
-                    //   sig = HMAC_SHA512(secret, "channel=futures.login&event=api&time={time}")
+                    //   sig = HMAC_SHA512(secret, "channel=futures.login&event=login&time={time}")
                     let login_msg = Self::build_login_message(&api_key, &api_secret);
                     info!("[gateio-ws] Sending explicit futures.login");
                     if let Err(e) = ws_write.send(Message::Text(login_msg)).await {

@@ -81,22 +81,33 @@ pub struct GammaExposureReader {
 }
 
 impl GammaExposureReader {
-    pub fn new(path: &str) -> Self {
-        let file = OpenOptions::new()
+    pub fn new(path: &str) -> Option<Self> {
+        let file = match OpenOptions::new()
             .read(true)
             .write(false)
             .open(path)
-            .unwrap_or_else(|e| panic!("Failed to open gamma exposure SHM at {}: {}", path, e));
+        {
+            Ok(f) => f,
+            Err(e) => {
+                warn!("Gamma exposure SHM not available at {}: {} (will run without gamma data)", path, e);
+                return None;
+            }
+        };
 
-        let mmap = unsafe {
+        let mmap = match unsafe {
             MmapOptions::new()
                 .len(TOTAL_SIZE)
                 .map(&file)
-                .unwrap_or_else(|e| panic!("Failed to mmap gamma exposure SHM: {}", e))
+        } {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Failed to mmap gamma exposure SHM: {} (will run without gamma data)", e);
+                return None;
+            }
         };
 
         debug!("📊 Gamma exposure reader initialized at {}", path);
-        Self { mmap }
+        Some(Self { mmap })
     }
 
     /// Try to read gamma exposure data using seqlock protocol
