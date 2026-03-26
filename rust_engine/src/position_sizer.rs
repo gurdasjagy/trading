@@ -25,6 +25,8 @@
 use std::collections::HashMap;
 use tracing::{info, warn, error};
 
+use crate::realized_vol::VolatilityRegime;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Contract Specification
 // ═══════════════════════════════════════════════════════════════════════════
@@ -382,6 +384,221 @@ impl Default for PositionSizer {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FEATURE 9: Volatility-Adjusted Position Sizing
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// FEAT 9: Volatility regime thresholds and scale factors as specified:
+/// - Low vol (< 20% annualized): 1.5x base size
+/// - Normal vol (20-50%): 1.0x base size
+/// - High vol (50-80%): 0.5x base size
+/// - Extreme vol (> 80%): 0.25x base size
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VolAdjustedRegime {
+    /// Low volatility (< 20% annualized) — increase position size
+    Low,
+    /// Normal volatility (20-50%) — baseline position size
+    Normal,
+    /// High volatility (50-80%) — reduce position size
+    High,
+    /// Extreme volatility (> 80%) — aggressively reduce position size
+    Extreme,
+}
+
+impl VolAdjustedRegime {
+    /// Classify volatility into a FEAT 9 regime.
+    pub fn from_annualized_vol(vol_pct: f64) -> Self {
+        if vol_pct < 20.0 {
+            VolAdjustedRegime::Low
+        } else if vol_pct < 50.0 {
+            VolAdjustedRegime::Normal
+        } else if vol_pct < 80.0 {
+            VolAdjustedRegime::High
+        } else {
+            VolAdjustedRegime::Extreme
+        }
+    }
+
+    /// Get the position size multiplier for this regime.
+    pub fn scale_factor(&self) -> f64 {
+        match self {
+            VolAdjustedRegime::Low => 1.5,
+            VolAdjustedRegime::Normal => 1.0,
+            VolAdjustedRegime::High => 0.5,
+            VolAdjustedRegime::Extreme => 0.25,
+        }
+    }
+
+    /// Get the regime name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            VolAdjustedRegime::Low => "low",
+            VolAdjustedRegime::Normal => "normal",
+            VolAdjustedRegime::High => "high",
+            VolAdjustedRegime::Extreme => "extreme",
+        }
+    }
+}
+
+/// FEAT 9: Result of volatility-adjusted sizing.
+#[derive(Debug, Clone)]
+pub struct VolAdjustedSizingResult {
+    /// The final sizing result.
+    pub sizing: SizingResult,
+    /// Volatility regime used.
+    pub regime: VolAdjustedRegime,
+    /// Annualized volatility percentage.
+    pub volatility_pct: f64,
+    /// Scale factor applied.
+    pub vol_scale_factor: f64,
+    /// Kelly fraction applied (if Kelly is enabled).
+    pub kelly_fraction: Option<f64>,
+    /// Original target notional before adjustment.
+    pub original_notional_usdt: f64,
+    /// Adjusted target notional after volatility scaling.
+    pub adjusted_notional_usdt: f64,
+}
+
+impl PositionSizer {
+    /// FEAT 9: Calculate position size adjusted for current realized volatility.
+    ///
+    /// Uses the FEAT 9 thresholds:
+    /// - < 20% annualized vol: 1.5x base size
+    /// - 20-50%: 1.0x base size
+    /// - 50-80%: 0.5x base size
+    /// - > 80%: 0.25x base size
+    ///
+    /// Optionally applies Kelly Criterion for optimal sizing.
+    pub fn calculate_vol_adjusted(
+        &self,
+        symbol: &str,
+        base_notional_usdt: f64,
+        entry_price: f64,
+        leverage: i32,
+        available_margin: f64,
+        annualized_vol_pct: f64,
+        kelly_params: Option<&KellyParams>,
+    ) -> VolAdjustedSizingResult {
+        // Step 1: Classify regime and get scale factor
+        let regime = VolAdjustedRegime::from_annualized_vol(annualized_vol_pct);
+        let vol_scale = regime.scale_factor();
+
+        // Step 2: Apply Kelly Criterion if parameters provided
+        let (kelly_fraction, kelly_scale) = match kelly_params {
+            Some(params) => {
+                let fraction = params.half_kelly_fraction();
+                // Kelly fraction scales the position; use it as a multiplier
+                // but clamp to [0.1, 2.0] to avoid extremes
+                let scale = fraction.clamp(0.1, 2.0);
+                (Some(fraction), scale)
+            }
+            None => (None, 1.0),
+        };
+
+        // Step 3: Calculate adjusted notional
+        let adjusted_notional = base_notional_usdt * vol_scale * kelly_scale;
+
+        info!(
+            "[sizer] FEAT9 vol-adjusted {}: vol={:.1}% regime={} scale={:.2}x kelly={:.3} -> notional ${:.2} (base ${:.2})",
+            symbol, annualized_vol_pct, regime.name(), vol_scale,
+            kelly_scale, adjusted_notional, base_notional_usdt
+        );
+
+        // Step 4: Calculate contracts using adjusted notional
+        let sizing = self.calculate_contracts(
+            symbol,
+            adjusted_notional,
+            entry_price,
+            leverage,
+            available_margin,
+        );
+
+        VolAdjustedSizingResult {
+            sizing,
+            regime,
+            volatility_pct: annualized_vol_pct,
+            vol_scale_factor: vol_scale,
+            kelly_fraction,
+            original_notional_usdt: base_notional_usdt,
+            adjusted_notional_usdt: adjusted_notional,
+        }
+    }
+
+    /// FEAT 9: Convenience method using a RealizedVolatilityCalculator directly.
+    ///
+    /// Reads the current volatility from the calculator and delegates to
+    /// `calculate_vol_adjusted`.
+    pub fn calculate_with_vol_calculator(
+        &self,
+        symbol: &str,
+        base_notional_usdt: f64,
+        entry_price: f64,
+        leverage: i32,
+        available_margin: f64,
+        vol_calculator: &crate::realized_vol::RealizedVolatilityCalculator,
+        kelly_params: Option<&KellyParams>,
+    ) -> VolAdjustedSizingResult {
+        let vol_pct = vol_calculator.get_volatility();
+        self.calculate_vol_adjusted(
+            symbol,
+            base_notional_usdt,
+            entry_price,
+            leverage,
+            available_margin,
+            vol_pct,
+            kelly_params,
+        )
+    }
+}
+
+/// FEAT 9: Kelly Criterion parameters for optimal position sizing.
+#[derive(Debug, Clone)]
+pub struct KellyParams {
+    /// Historical win rate (0.0 to 1.0).
+    pub win_rate: f64,
+    /// Average win / average loss ratio (e.g., 2.0 = wins are 2x losses).
+    pub win_loss_ratio: f64,
+}
+
+impl KellyParams {
+    /// Create new Kelly parameters.
+    pub fn new(win_rate: f64, win_loss_ratio: f64) -> Self {
+        Self {
+            win_rate: win_rate.clamp(0.01, 0.99),
+            win_loss_ratio: win_loss_ratio.max(0.01),
+        }
+    }
+
+    /// Calculate full Kelly fraction: f* = (p * b - q) / b
+    /// where p = win_rate, b = win/loss ratio, q = 1 - p
+    pub fn full_kelly_fraction(&self) -> f64 {
+        let p = self.win_rate;
+        let b = self.win_loss_ratio;
+        let q = 1.0 - p;
+        let f = (p * b - q) / b;
+        f.max(0.0) // Never go negative (no edge)
+    }
+
+    /// Calculate half-Kelly fraction (safer: f*/2).
+    pub fn half_kelly_fraction(&self) -> f64 {
+        self.full_kelly_fraction() * 0.5
+    }
+
+    /// Calculate quarter-Kelly fraction (very conservative: f*/4).
+    pub fn quarter_kelly_fraction(&self) -> f64 {
+        self.full_kelly_fraction() * 0.25
+    }
+}
+
+impl Default for KellyParams {
+    fn default() -> Self {
+        Self {
+            win_rate: 0.55,
+            win_loss_ratio: 1.5,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Upgrade 2: Dynamic Position Sizing — Kelly Criterion + Volatility Scaling
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -701,5 +918,96 @@ mod tests {
         );
         // $5 / $60000 / 0.0001 = 0.833 → floor = 0, clamped to min=1
         assert_eq!(result.contracts, 1);
+    }
+
+    // ─── FEAT 9 Tests ───
+
+    #[test]
+    fn test_vol_regime_classification() {
+        assert_eq!(VolAdjustedRegime::from_annualized_vol(10.0), VolAdjustedRegime::Low);
+        assert_eq!(VolAdjustedRegime::from_annualized_vol(30.0), VolAdjustedRegime::Normal);
+        assert_eq!(VolAdjustedRegime::from_annualized_vol(60.0), VolAdjustedRegime::High);
+        assert_eq!(VolAdjustedRegime::from_annualized_vol(90.0), VolAdjustedRegime::Extreme);
+    }
+
+    #[test]
+    fn test_vol_scale_factors() {
+        assert!((VolAdjustedRegime::Low.scale_factor() - 1.5).abs() < 0.01);
+        assert!((VolAdjustedRegime::Normal.scale_factor() - 1.0).abs() < 0.01);
+        assert!((VolAdjustedRegime::High.scale_factor() - 0.5).abs() < 0.01);
+        assert!((VolAdjustedRegime::Extreme.scale_factor() - 0.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_vol_adjusted_sizing_low_vol() {
+        let mut sizer = PositionSizer::new();
+        sizer.register_spec(btc_spec());
+
+        // Low vol (15%) should give 1.5x base size
+        let result = sizer.calculate_vol_adjusted(
+            "BTC_USDT", 100.0, 60000.0, 10, 10000.0,
+            15.0, // < 20% = Low
+            None,
+        );
+
+        assert_eq!(result.regime, VolAdjustedRegime::Low);
+        assert!((result.vol_scale_factor - 1.5).abs() < 0.01);
+        assert!((result.adjusted_notional_usdt - 150.0).abs() < 0.01);
+        assert!(result.sizing.contracts > 0);
+    }
+
+    #[test]
+    fn test_vol_adjusted_sizing_extreme_vol() {
+        let mut sizer = PositionSizer::new();
+        sizer.register_spec(btc_spec());
+
+        // Extreme vol (90%) should give 0.25x base size
+        let result = sizer.calculate_vol_adjusted(
+            "BTC_USDT", 1000.0, 60000.0, 10, 10000.0,
+            90.0, // > 80% = Extreme
+            None,
+        );
+
+        assert_eq!(result.regime, VolAdjustedRegime::Extreme);
+        assert!((result.vol_scale_factor - 0.25).abs() < 0.01);
+        assert!((result.adjusted_notional_usdt - 250.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_vol_adjusted_with_kelly() {
+        let mut sizer = PositionSizer::new();
+        sizer.register_spec(btc_spec());
+
+        let kelly = KellyParams::new(0.60, 2.0);
+        // Full Kelly = (0.60 * 2.0 - 0.40) / 2.0 = 0.40
+        // Half Kelly = 0.20
+        assert!((kelly.half_kelly_fraction() - 0.20).abs() < 0.01);
+
+        // Normal vol + Kelly should apply both scalars
+        let result = sizer.calculate_vol_adjusted(
+            "BTC_USDT", 1000.0, 60000.0, 10, 10000.0,
+            30.0, // Normal vol
+            Some(&kelly),
+        );
+
+        assert_eq!(result.regime, VolAdjustedRegime::Normal);
+        assert!(result.kelly_fraction.is_some());
+        // adjusted = 1000 * 1.0 (vol) * 0.20 (kelly, clamped to 0.1 min)
+        // Kelly half = 0.20, clamped to [0.1, 2.0] = 0.20
+        assert!((result.adjusted_notional_usdt - 200.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_kelly_params() {
+        // Edge case: no edge (win_rate < break-even)
+        let no_edge = KellyParams::new(0.30, 1.0);
+        assert_eq!(no_edge.full_kelly_fraction(), 0.0);
+        assert_eq!(no_edge.half_kelly_fraction(), 0.0);
+
+        // Good edge
+        let good_edge = KellyParams::new(0.55, 1.5);
+        let f = good_edge.full_kelly_fraction();
+        assert!(f > 0.0);
+        assert!(f < 1.0);
     }
 }

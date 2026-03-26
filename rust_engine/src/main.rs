@@ -3046,12 +3046,13 @@ fn execution_router_loop(
                     let gbr = global_book_registry.as_ref().unwrap();
                     if let Some(book_arc) = gbr.get(cmd.symbol_id) {
                         let book = book_arc.read();
-                        let multi_sor = multi_exchange::sor::SmartOrderRouter::new(
+                        let mut multi_sor = multi_exchange::sor::SmartOrderRouter::new(
                             multi_exchange::sor::SorConfig {
                                 min_split_size_usdt: 5000.0,
                                 max_venues: 3,
                                 max_slippage_bps: 30.0,
                                 prefer_maker: is_maker,
+                                ..multi_exchange::sor::SorConfig::default()
                             }
                         );
                         
