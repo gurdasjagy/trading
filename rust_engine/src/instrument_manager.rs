@@ -479,7 +479,7 @@ impl InstrumentManager {
     // -----------------------------------------------------------------------
     async fn fetch_gateio_specs(&self) -> Result<(), String> {
         let base = if self.testnet {
-            "https://fx-api-testnet.gateio.ws"
+            "https://api-testnet.gateapi.io"
         } else {
             "https://api.gateio.ws"
         };
