@@ -42,31 +42,58 @@ max_open_positions = 3
 circuit_breaker_loss_pct = 3.0
 position_size_pct = 2.0
 
-# Task 9: Pair-specific trading profiles (Phase 2 Feature 8)
+# CONFIG 1: Per-symbol trading profiles with full overrides
 # BTC: High liquidity, conservative thresholds
 [[pair_profiles]]
 symbol = "BTC_USDT"
-imbalance_threshold = 0.05
-vpin_bucket_size = 500000.0
+imbalance_threshold = 0.02
+vpin_bucket_size = 50000.0
 trailing_stop_atr_multiplier = 3.0
 max_leverage = 20
+max_position_size = 20
+leverage = 10
+sl_pct = 1.5
+tp_pct = 3.0
+tick_size = 0.1
 
 # ETH: Medium-high liquidity, moderate thresholds
 [[pair_profiles]]
 symbol = "ETH_USDT"
 imbalance_threshold = 0.03
-vpin_bucket_size = 200000.0
+vpin_bucket_size = 30000.0
 trailing_stop_atr_multiplier = 2.0
 max_leverage = 25
+max_position_size = 30
+leverage = 15
+sl_pct = 2.0
+tp_pct = 4.0
+tick_size = 0.01
 
-# Task 9: SOL-Specific Pair Profile (Phase 2 Feature 8)
 # SOL: Medium liquidity, aggressive thresholds
 [[pair_profiles]]
 symbol = "SOL_USDT"
 imbalance_threshold = 0.05
-vpin_bucket_size = 50000.0
+vpin_bucket_size = 10000.0
 trailing_stop_atr_multiplier = 3.0
 max_leverage = 10
+max_position_size = 100
+leverage = 5
+sl_pct = 3.0
+tp_pct = 6.0
+tick_size = 0.001
+
+# XAUT: Gold token, low volatility
+[[pair_profiles]]
+symbol = "XAUT_USDT"
+imbalance_threshold = 0.04
+vpin_bucket_size = 20000.0
+trailing_stop_atr_multiplier = 2.5
+max_leverage = 10
+max_position_size = 5
+leverage = 5
+sl_pct = 1.0
+tp_pct = 2.0
+tick_size = 0.01
 
 # ============================================================================
 # INSTITUTIONAL FEATURES CONFIGURATION
