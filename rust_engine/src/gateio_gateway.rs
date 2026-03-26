@@ -997,16 +997,13 @@ impl GateIoGateway {
     ///   HMAC_SHA512(secret, "channel=futures.login&event=api&time={time}")
     fn build_login_message(api_key: &str, secret: &[u8]) -> String {
         let time = now_ms() / 1000;
-        let sign = Self::ws_sign(secret, "futures.login", "api", time);
+        // Event MUST be "login", not "api"
+        let sign = Self::ws_sign(secret, "futures.login", "login", time);
+        
         format!(
-            r#"{{"time":{},"channel":"futures.login","event":"api","payload":{{"api_key":"{}","signature":"{}","timestamp":"{}"}}}}"#,
-            time, api_key, sign, time
+            r#"{{"time":{},"channel":"futures.login","event":"login","payload":{{}},"auth":{{"method":"api_key","KEY":"{}","SIGN":"{}"}}}}"#,
+            time, api_key, sign
         )
-    }
-
-    /// Alias for build_auth_subscribe_message.
-    fn build_order_sub_message(api_key: &str, secret: &[u8], contracts: &[String]) -> String {
-        Self::build_auth_subscribe_message(api_key, secret, contracts)
     }
 
     /// Build a futures.order_place WS message for order submission.
