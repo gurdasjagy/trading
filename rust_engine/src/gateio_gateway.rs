@@ -69,7 +69,7 @@ use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_
 // ---------------------------------------------------------------------------
 
 const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
-const GATEIO_WS_TESTNET_URL: &str = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gateapi.io/v4/ws/usdt";
 const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
