@@ -3018,6 +3018,8 @@ fn execution_router_loop(
                         take_profit: manual_req.take_profit,
                         confidence: 1.0,
                         signal_tag: "manual_dashboard".to_string(),
+                        min_fill_size: None,
+                        strategy_name: "manual".to_string(),
                     };
                     
                     match execution_gateway::submit_with_retry(&*gw, intent).await {
@@ -3199,6 +3201,8 @@ fn execution_router_loop(
                                         take_profit: if cmd.has_take_profit() { Some(FixedPrice(cmd.take_profit_fp).to_f64()) } else { None },
                                         confidence: 0.0,
                                         signal_tag: "multi_exchange_sor".to_string(),
+                                        min_fill_size: None,
+                                        strategy_name: "sor".to_string(),
                                     };
                                     
                                     futures.push(async move {
@@ -3358,6 +3362,8 @@ fn execution_router_loop(
                         },
                         confidence: 0.0,
                         signal_tag: String::new(),
+                        min_fill_size: None,
+                        strategy_name: String::new(),
                     };
 
                     // Submit the main order with retry logic
@@ -3564,6 +3570,8 @@ fn execution_router_loop(
                                                     take_profit: None,
                                                     confidence: 0.0,
                                                     signal_tag: "sl_conditional".to_string(),
+                                                    min_fill_size: None,
+                                                    strategy_name: String::new(),
                                                 };
                                                 match gw_clone.submit_conditional_sl(
                                                     &sym_for_sltp, &parent_side, filled_size, sl
@@ -3731,6 +3739,8 @@ fn execution_router_loop(
                                 take_profit: None,
                                 confidence: 0.0,
                                 signal_tag: "twap_slice".to_string(),
+                                min_fill_size: None,
+                                strategy_name: "twap".to_string(),
                             };
                             match gw.submit_order(intent).await {
                                 Ok(res) => {
@@ -3921,6 +3931,8 @@ fn execution_router_loop(
                             take_profit: None, // Hold for funding
                             confidence: 1.0,
                             signal_tag: "funding_arb_short".to_string(),
+                            min_fill_size: None,
+                            strategy_name: "funding_arb".to_string(),
                         };
                         
                         // Build LONG intent (on low funding exchange)
@@ -3939,6 +3951,8 @@ fn execution_router_loop(
                             take_profit: None,
                             confidence: 1.0,
                             signal_tag: "funding_arb_long".to_string(),
+                            min_fill_size: None,
+                            strategy_name: "funding_arb".to_string(),
                         };
                         
                         // Execute both legs in parallel
@@ -4003,6 +4017,8 @@ fn execution_router_loop(
                                     take_profit: None,
                                     confidence: 0.0,
                                     signal_tag: "funding_arb_unwind".to_string(),
+                                    min_fill_size: None,
+                                    strategy_name: "funding_arb".to_string(),
                                 };
                                 let _ = long_gw.submit_order(close_intent).await;
                             }
@@ -4024,6 +4040,8 @@ fn execution_router_loop(
                                     take_profit: None,
                                     confidence: 0.0,
                                     signal_tag: "funding_arb_unwind".to_string(),
+                                    min_fill_size: None,
+                                    strategy_name: "funding_arb".to_string(),
                                 };
                                 let _ = short_gw.submit_order(close_intent).await;
                             }
@@ -4090,6 +4108,8 @@ fn execution_router_loop(
                                     take_profit: None,
                                     confidence: 0.0,
                                     signal_tag: "funding_arb_close".to_string(),
+                                    min_fill_size: None,
+                                    strategy_name: "funding_arb".to_string(),
                                 };
                                 
                                 let close_long = execution_gateway::OrderIntent {
@@ -4107,6 +4127,8 @@ fn execution_router_loop(
                                     take_profit: None,
                                     confidence: 0.0,
                                     signal_tag: "funding_arb_close".to_string(),
+                                    min_fill_size: None,
+                                    strategy_name: "funding_arb".to_string(),
                                 };
                                 
                                 let sgw = sgw.clone();
@@ -4461,6 +4483,8 @@ fn execution_router_loop(
                                                 stop_loss: None, take_profit: None,
                                                 confidence: 0.0,
                                                 signal_tag: "stat_arb_fill_unwind".to_string(),
+                                                min_fill_size: None,
+                                                strategy_name: "stat_arb".to_string(),
                                             };
                                             let _ = lg.submit_order(unwind).await;
                                         } else if short_fill_size > 0 && long_fill_size == 0 {
@@ -4478,6 +4502,8 @@ fn execution_router_loop(
                                                 stop_loss: None, take_profit: None,
                                                 confidence: 0.0,
                                                 signal_tag: "stat_arb_fill_unwind".to_string(),
+                                                min_fill_size: None,
+                                                strategy_name: "stat_arb".to_string(),
                                             };
                                             let _ = sg.submit_order(unwind).await;
                                         }
@@ -4530,6 +4556,8 @@ fn execution_router_loop(
                                         take_profit: None,
                                         confidence: 0.0,
                                         signal_tag: "stat_arb_unwind".to_string(),
+                                        min_fill_size: None,
+                                        strategy_name: "stat_arb".to_string(),
                                     };
                                     let _ = sg.submit_order(unwind).await;
                                 }
@@ -4550,6 +4578,8 @@ fn execution_router_loop(
                                         take_profit: None,
                                         confidence: 0.0,
                                         signal_tag: "stat_arb_unwind".to_string(),
+                                        min_fill_size: None,
+                                        strategy_name: "stat_arb".to_string(),
                                     };
                                     let _ = lg.submit_order(unwind).await;
                                 }

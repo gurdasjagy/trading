@@ -716,6 +716,8 @@ pub fn build_stat_arb_entry_intents(
         take_profit: None,
         confidence: 1.0,
         signal_tag: "stat_arb_long".to_string(),
+        min_fill_size: None,
+        strategy_name: "stat_arb".to_string(),
     };
 
     let short_intent = OrderIntent {
@@ -733,6 +735,8 @@ pub fn build_stat_arb_entry_intents(
         take_profit: None,
         confidence: 1.0,
         signal_tag: "stat_arb_short".to_string(),
+        min_fill_size: None,
+        strategy_name: "stat_arb".to_string(),
     };
 
     (long_intent, short_intent)
@@ -760,6 +764,8 @@ pub fn build_stat_arb_exit_intents(
         take_profit: None,
         confidence: 0.0,
         signal_tag: "stat_arb_close_long".to_string(),
+        min_fill_size: None,
+        strategy_name: "stat_arb".to_string(),
     };
 
     // Close short: buy
@@ -778,6 +784,8 @@ pub fn build_stat_arb_exit_intents(
         take_profit: None,
         confidence: 0.0,
         signal_tag: "stat_arb_close_short".to_string(),
+        min_fill_size: None,
+        strategy_name: "stat_arb".to_string(),
     };
 
     (close_long, close_short)

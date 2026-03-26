@@ -317,6 +317,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 1.0,
             signal_tag: "funding_arb_short_entry".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         let long_intent = OrderIntent {
@@ -334,6 +336,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 1.0,
             signal_tag: "funding_arb_long_entry".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         // CRITICAL: Execute both legs simultaneously
@@ -645,6 +649,8 @@ impl DualLegExecutor {
                 take_profit: None,
                 confidence: 1.0,
                 signal_tag: "funding_arb_leg_retry".to_string(),
+                min_fill_size: None,
+                strategy_name: "funding_arb".to_string(),
             };
 
             match gw.submit_order(retry_intent).await {
@@ -742,6 +748,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 0.0,
             signal_tag: "funding_arb_short_exit".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         let close_long = OrderIntent {
@@ -759,6 +767,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 0.0,
             signal_tag: "funding_arb_long_exit".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         let (short_result, long_result) = tokio::join!(
@@ -872,6 +882,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 1.0,
             signal_tag: "funding_arb_maker_leg".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         info!(
@@ -1043,6 +1055,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 1.0,
             signal_tag: "funding_arb_taker_leg".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         info!(
@@ -1130,6 +1144,8 @@ impl DualLegExecutor {
             take_profit: None,
             confidence: 0.0,
             signal_tag: "funding_arb_legging_close".to_string(),
+            min_fill_size: None,
+            strategy_name: "funding_arb".to_string(),
         };
 
         warn!(

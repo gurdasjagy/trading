@@ -2951,6 +2951,8 @@ impl GateIoGateway {
                         take_profit: None,
                         confidence: 0.0,
                         signal_tag: "emergency_liquidation_close".to_string(),
+                        min_fill_size: None,
+                        strategy_name: "emergency_liquidation".to_string(),
                     };
 
                     match self.submit_order(close_intent).await {
@@ -2994,6 +2996,8 @@ impl GateIoGateway {
                         take_profit: None,
                         confidence: 0.0,
                         signal_tag: "auto_reduce_liquidation".to_string(),
+                        min_fill_size: None,
+                        strategy_name: "auto_reduce_liquidation".to_string(),
                     };
 
                     match self.submit_order(reduce_intent).await {

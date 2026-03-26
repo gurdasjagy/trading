@@ -187,7 +187,7 @@ impl EventDrivenSignals {
         };
 
         info!(
-            "[event-signal] {} {} on {} — ${:.0} liquidation counter-trade",
+            "[event-signal] {} on {} — ${:.0} liquidation counter-trade",
             if is_long { "LONG" } else { "SHORT" },
             symbol,
             liquidation_usdt,

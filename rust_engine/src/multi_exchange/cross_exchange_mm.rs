@@ -279,6 +279,8 @@ impl CrossExchangeMarketMaker {
                 take_profit: None,
                 confidence: 0.0,
                 signal_tag: "cross_mm_buy".to_string(),
+                min_fill_size: None,
+                strategy_name: "cross_exchange_mm".to_string(),
             });
         }
 
@@ -300,6 +302,8 @@ impl CrossExchangeMarketMaker {
                 take_profit: None,
                 confidence: 0.0,
                 signal_tag: "cross_mm_sell".to_string(),
+                min_fill_size: None,
+                strategy_name: "cross_exchange_mm".to_string(),
             });
         }
 
@@ -333,6 +337,8 @@ impl CrossExchangeMarketMaker {
             take_profit: None,
             confidence: 0.0,
             signal_tag: "cross_mm_hedge".to_string(),
+            min_fill_size: None,
+            strategy_name: "cross_exchange_mm".to_string(),
         }
     }
 
