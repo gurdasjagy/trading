@@ -1,0 +1,493 @@
+2026-03-26T08:26:28.152885Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+[config] Gate.io credentials loaded: key=172d...43a7 (32chars), secret=***64chars
+[config] TRADING_PAIRS override: ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+[config] DEFAULT_LEVERAGE override: 5x
+[config] MAX_OPEN_POSITIONS override: 5
+[config] USE_MULTI_EXCHANGE=on -> max_open_positions=5
+[config] Binance: testnet=true, endpoint=https://testnet.binancefuture.com, has_key=true, key_valid=true
+[config] Bybit: testnet=true, endpoint=https://api-demo.bybit.com, has_key=true, key_valid=true
+2026-03-26T08:21:01.355377Z  INFO trading_engine: Allocated FlatOrderBook for ETH_USDT
+(ID: 2)
+2026-03-26T08:21:01.355563Z  INFO trading_engine: Allocated FlatOrderBook for SOL_USDT
+(ID: 3)
+2026-03-26T08:21:01.355805Z  INFO trading_engine: Allocated FlatOrderBook for BTCUSDT (ID: 4)
+2026-03-26T08:21:01.356204Z  INFO trading_engine: Allocated FlatOrderBook for ETHUSDT (ID: 5)
+2026-03-26T08:21:01.357497Z  INFO trading_engine: Allocated FlatOrderBook for SOLUSDT (ID: 6)
+2026-03-26T08:21:01.399503Z  INFO trading_engine: SPSC ring buffers allocated: ws_to_book=0KB, book_to_strategy=0KB, strategy_to_exec=0KB
+2026-03-26T08:21:01.399611Z  INFO trading_engine: 🛡️ Circuit breaker initialized and armed
+2026-03-26T08:21:01.500542Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 649 Bybit linear specs
+2026-03-26T08:21:01.532568Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 569 Binance futures specs
+2026-03-26T08:21:01.694241Z ERROR trading_engine::instrument_manager: Failed to fetch Gate.io instrument specs: Gate.io contracts parse failed: error decoding response body
+2026-03-26T08:21:01.694264Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 1218 total contract specs
+2026-03-26T08:21:01.694271Z  INFO trading_engine: [startup] InstrumentManager initialized and specs refreshed from all exchanges
+2026-03-26T08:21:01.694280Z  INFO trading_engine: gateio: live gateway initialising (with circuit breaker, persistent runtime)
+2026-03-26T08:21:01.694288Z  INFO trading_engine::gateio_gateway: [gateio-ws] Initializing gateway: testnet=true, key_len=32, secret_len=64, key_prefix=172d58...
+============================================================
+[AUTH-DIAG] Gate.io TESTNET Authentication Diagnostic
+============================================================
+[AUTH-DIAG] Step 1 — Key sanity:
+  API Key length:  32
+  API Key prefix:  172d585c...
+  API Key suffix:  ...43a7
+  Secret length:   64
+  Has non-ASCII:   false ✅
+  Has whitespace:  false ✅
+  Testnet mode:    true
+  Base URL:        https://api-testnet.gateapi.io/api/v4
+[AUTH-DIAG] Step 2 — Public endpoint test (no auth):
+  URL: https://api-testnet.gateapi.io/api/v4/futures/usdt/contracts/BTC_USDT
+2026-03-26T08:21:01.695286Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+  Status: 200
+  ✅  Public endpoint reachable
+[AUTH-DIAG] Step 3 — Clock skew check:
+  Local timestamp: 1774513262 (unix seconds)
+  Server Date header: "Thu, 26 Mar 2026 08:21:02 GMT"
+  ✅  Server responded (clock skew check via Date header)
+[AUTH-DIAG] Step 4 — Authenticated request test:
+  Request URL:     https://api-testnet.gateapi.io/api/v4/futures/usdt/accounts
+  Method:          GET
+  Timestamp:       1774513262
+  Signature path:  /api/v4/futures/usdt/accounts
+  Body hash:       cf83e1357eefb8bd...f927da3e
+  Sign payload:    "GET\n/api/v4/futures/usdt/accounts\n\ncf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\n1774513262"
+  Signature:       d1c375b5bd031dc7...2bf4da37
+  Headers:
+    KEY:           172d585c4714cf6634aa7a53ae3343a7
+    Timestamp:     1774513262
+    SIGN:          d1c375b5bd031dc7...2bf4da37
+2026-03-26T08:21:02.277096Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:02.277148Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:02.283105Z  INFO trading_engine: [startup] ✅  Gate.io testnet auth verified — balance: $941.14
+2026-03-26T08:21:02.283130Z  INFO trading_engine: 📋 Order Lifecycle Tracker initialized (capacity=5000)
+2026-03-26T08:21:02.283160Z  INFO trading_engine: ⏱️ Pipeline Latency Tracker initialized (6 histograms)
+2026-03-26T08:21:02.283171Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+2026-03-26T08:21:02.283176Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+2026-03-26T08:21:02.283180Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=5, lock-free AtomicU32)
+2026-03-26T08:21:02.283188Z  INFO trading_engine::correlation_limiter: [correlation-limiter] Initialized: max_single=2000.00, max_correlated_mult=1.50
+2026-03-26T08:21:02.283195Z  INFO trading_engine: 🔗 CorrelationLimiter initialized (BTC-ETH=0.85, BTC-SOL=0.75, ETH-SOL=0.70, max_correlated=150%)
+2026-03-26T08:21:02.283199Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+2026-03-26T08:21:02.283262Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://api.gateio.ws/api/v4/futures/usdt/contracts
+  Response status:  200
+  Response body:    {"order_margin":"0","point":"0","bonus":"0","history":{"dnw":"1000","pnl":"79.193619999947","refr":"0","point_fee":"0","fund":"0.117860377115","bonus_dnw":"0","point_refr":"0","bonus_offset":"0","fee":"-138.17282106","point_dnw":"0","cross_settle":"-941.138659317062"},"unrealised_pnl":"0","total":"0","available":"941.13865","enable_credit":true,"in_dual_mode":false,"currency":"USDT","position_margin":"0","user":17500389,"update_time":1773931056,"update_id":1013,"position_initial_margin":"0","mai
+  ✅  AUTHENTICATION SUCCESSFUL!
+  Available balance: $941.1386
+2026-03-26T08:21:03.143466Z  INFO trading_engine::position_sizer: [sizer] Fetched 3 contract specs (656 total available)
+2026-03-26T08:21:03.147628Z  INFO trading_engine::position_sizer: [sizer] Registered ETH_USDT: quanto=0.01, min=0, max=3000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+2026-03-26T08:21:03.147680Z  INFO trading_engine::position_sizer: [sizer] Registered BTC_USDT: quanto=0.0001, min=1, max=15000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+2026-03-26T08:21:03.147688Z  INFO trading_engine::position_sizer: [sizer] Registered SOL_USDT: quanto=1, min=0, max=240000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+2026-03-26T08:21:03.148010Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+2026-03-26T08:21:03.148147Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes, 8192 slots)
+2026-03-26T08:21:03.148161Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+2026-03-26T08:21:03.148216Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+2026-03-26T08:21:03.148263Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+2026-03-26T08:21:03.148269Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+2026-03-26T08:21:03.148285Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+2026-03-26T08:21:03.148290Z  INFO trading_engine: 📡 Bridge: Health monitor initialized2026-03-26T08:21:03.148294Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)
+2026-03-26T08:21:03.150624Z  INFO trading_engine: 📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)
+2026-03-26T08:21:03.150667Z  INFO trading_engine::ml_weight_receiver: Initializing ML Weight Reader at /dev/shm/ml_weights
+2026-03-26T08:21:03.150844Z  WARN trading_engine::ml_weight_receiver: ML weights SHM magic mismatch, waiting for writer
+2026-03-26T08:21:03.151001Z  INFO trading_engine: Multi-Exchange mode ENABLED - initializing Binance + Bybit
+2026-03-26T08:21:03.151192Z  INFO trading_engine: Binance: live execution gateway initialised (testnet=true)
+2026-03-26T08:21:03.151250Z  INFO trading_engine: Bybit: live execution gateway initialised (testnet=true)
+2026-03-26T08:21:03.151277Z  INFO trading_engine: Multi-exchange gateways initialized:
+3 connected
+[config] Binance WS URL: wss://stream.binancefuture.com/stream
+[config] Bybit WS URL: wss://stream-testnet.bybit.com/v5/public/linear
+2026-03-26T08:21:03.151932Z  INFO trading_engine: [funding-arb] Spawning engine with 3
+gateways, 3 symbols
+2026-03-26T08:21:03.152038Z  INFO trading_engine: [ws-fill-binance] Spawning Binance WS fill receiver (testnet=true)
+2026-03-26T08:21:03.152127Z  INFO trading_engine: [ws-fill-bybit] Spawning Bybit WS fill receiver (testnet=true)
+2026-03-26T08:21:03.152283Z  INFO trading_engine: [ws-gateio] Pinned to core 1
+2026-03-26T08:21:03.152301Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on
+dedicated core
+2026-03-26T08:21:03.152441Z  INFO trading_engine: [ws-bybit] Pinned to core 1
+2026-03-26T08:21:03.152484Z  INFO trading_engine: [main] Persistent state disabled (set [persistent_state] enabled=true to enable)
+2026-03-26T08:21:03.152499Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-bybit] Connecting to wss://stream.bybit.com/v5/public/linear
+2026-03-26T08:21:03.152742Z  INFO trading_engine: [ws-gateio] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:03.152956Z  INFO trading_engine: [ws-binance] Pinned to core 1
+2026-03-26T08:21:03.153024Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-binance] Connecting to wss://stream.binancefuture.com/stream
+2026-03-26T08:21:03.153153Z  INFO trading_engine: [book-builder] Pinned to core 1
+2026-03-26T08:21:03.153166Z  INFO trading_engine: [book-builder] Starting orderbook builder on dedicated core
+2026-03-26T08:21:03.153178Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+2026-03-26T08:21:03.153047Z  INFO trading_engine: [funding-arb] Using TESTNET config with relaxed thresholds
+2026-03-26T08:21:03.153329Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Starting institutional funding rate arbitrage engine
+2026-03-26T08:21:03.153343Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Config: min_net_rate=0.0010%, min_apr=1.0%, max_positions=2
+2026-03-26T08:21:03.153393Z  INFO trading_engine: [main] Multi-exchange execution gateways: 3 connected
+2026-03-26T08:21:03.153458Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+2026-03-26T08:21:03.153865Z  INFO trading_engine: [strategy] Starting strategy evaluator on dedicated core
+2026-03-26T08:21:03.153908Z  INFO trading_engine: [strategy] 📊 CVD tracker initialized (5m/15m/1h windows)
+2026-03-26T08:21:03.153914Z  INFO trading_engine: [strategy] 📊 Volume Profile initialized (VPOC + Value Area)
+2026-03-26T08:21:03.153922Z  INFO trading_engine: [strategy] 🌊 Liquidation cascade detector initialized
+thread 'strategy' panicked at src/gamma_shm.rs:89:33:
+Failed to open gamma exposure SHM at /dev/shm/gamma_exposure: No such file or directory (os error 2)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-03-26T08:21:03.154124Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+2026-03-26T08:21:03.154240Z  INFO trading_engine: All 11 threads spawned. Engine running. Press Ctrl+C to stop.
+2026-03-26T08:21:03.156947Z  INFO trading_engine: [telemetry] Pinned to core 3 — Journal + SharedState + Health Monitor
+2026-03-26T08:21:03.157176Z  INFO trading_engine::telemetry: Journal writer initialized at /dev/shm/trading_journal (segment 0)
+2026-03-26T08:21:03.157262Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+2026-03-26T08:21:03.161771Z  INFO trading_engine: [execution] Pinned to core 2 (with Lifecycle + Latency + Multi-Exchange SOR)
+2026-03-26T08:21:03.161883Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+2026-03-26T08:21:03.162010Z  INFO trading_engine: [execution] Legacy SmartOrderRouter initialized with 3 venues (multi-exchange mode)
+2026-03-26T08:21:03.162038Z  INFO trading_engine: [execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)
+2026-03-26T08:21:03.162043Z  INFO trading_engine: [execution] Cross-exchange funding arbitrage initialized (min_net_rate=0.005%, min_apr=10%)
+2026-03-26T08:21:03.162050Z  INFO trading_engine::funding_timing: [funding-timing] Next funding in 27537s (458m), last funding 1263s ago, entry=false exit=false
+2026-03-26T08:21:03.162056Z  INFO trading_engine: [execution] Delta neutrality monitor
+initialized (max_delta=$50, interval=30s)
+2026-03-26T08:21:03.162119Z  INFO trading_engine: [execution] Telegram alert sender initialized (enabled=true)
+2026-03-26T08:21:03.162129Z  INFO trading_engine: [execution] Cross-exchange market maker initialized (Gate.io maker, Binance hedge)
+2026-03-26T08:21:03.162134Z  INFO trading_engine: [execution] Statistical arbitrage engine initialized (2-sigma entry, 0.5-sigma exit)
+2026-03-26T08:21:03.162139Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+2026-03-26T08:21:03.162250Z  INFO trading_engine: [execution] Testing Gate.io authentication with balance check...
+2026-03-26T08:21:03.193356Z  INFO trading_engine::dashboard_server: [dashboard] Loaded
+14 templates from /app/templates: ["forex_trades.html", "logs.html", "multi_exchange.html", "forex_performance.html", "dashboard.html", "trades.html", "advanced_features.html", "performance.html", "risk.html", "forex_risk.html", "base.html", "forex_dashboard.html", "forex_settings.html", "settings.html"]
+2026-03-26T08:21:03.193816Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+2026-03-26T08:21:03.193830Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io market data: always mainnet for public data (trading_mode=testnet, pairs=["BTC_USDT",
+"ETH_USDT", "SOL_USDT"])
+2026-03-26T08:21:03.194142Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+2026-03-26T08:21:03.195013Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+2026-03-26T08:21:03.242791Z  INFO trading_engine: [execution] ✅  Auth OK — Initial balance: $941.14 — circuit breaker armed
+2026-03-26T08:21:03.242823Z  INFO trading_engine: [execution] Setting margin mode to cross-margin for all symbols...
+2026-03-26T08:21:03.242831Z  INFO trading_engine: [execution] 🔄 Starting position reconciliation with exchange...
+2026-03-26T08:21:03.248463Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Listen key created successfully
+2026-03-26T08:21:03.324626Z  INFO trading_engine: [execution] Found 0 open positions on exchange
+2026-03-26T08:21:03.324657Z  INFO trading_engine: [execution] 🔄 Position reconciliation complete (0 positions synced)
+2026-03-26T08:21:03.609060Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:21:03.609113Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:21:03.609120Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:21:03.693986Z  INFO trading_engine::ws_fill_receiver: [bybit-ws] Connected to private stream
+2026-03-26T08:21:03.713994Z  INFO trading_engine::ws_fill_receiver: [bybit-ws] Authentication successful
+2026-03-26T08:21:03.714095Z  INFO trading_engine::ws_fill_receiver: [bybit-ws] Subscribed to order topic
+2026-03-26T08:21:04.042368Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Connected to user data stream
+2026-03-26T08:21:04.101917Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-bybit] Connected
+2026-03-26T08:21:04.102045Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-bybit] Subscribed to 3 symbols
+2026-03-26T08:21:04.108754Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-bybit] Subscription confirmed
+2026-03-26T08:21:04.593765Z  INFO trading_engine::multi_exchange::ws_ingestion_multi: [ws-binance] Connected, subscribed to 3 symbols
+2026-03-26T08:21:04.593896Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+2026-03-26T08:21:07.364086Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:07.897397Z ERROR trading_engine::circuit_breaker: 🚨 CIRCUIT BREAKER TRIPPED: reason=connectivity_lost, ts=1774513267897385695
+2026-03-26T08:21:07.897434Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:07.897444Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:08.495183Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:08.495230Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:11.697882Z  INFO trading_engine::gateio_gateway: [gateio-liq] Liquidation monitoring thread started (30s interval)
+2026-03-26T08:21:11.697896Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] REST reconciliation thread started (60s interval)
+2026-03-26T08:21:13.510920Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:14.020398Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:14.020428Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:14.607299Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:14.607336Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:19.721770Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:20.228420Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:20.228598Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:20.771361Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:20.771416Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:25.831002Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:26.335616Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:26.335955Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:26.892672Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:26.892751Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:31.994011Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:32.498652Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:32.500525Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:32.812436Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812471Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812477Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812482Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812486Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812490Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:21:32.812495Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:21:33.078064Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:33.078414Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:33.393986Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:21:33.394020Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:21:33.394028Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:21:38.120885Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:38.624915Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:38.624957Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:39.296138Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:39.296240Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:44.361926Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:44.865943Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:44.865980Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:45.558512Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:45.558551Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:50.603832Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:51.107769Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:51.107806Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:51.673458Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:51.673508Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:21:56.717685Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:21:57.222069Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:21:57.222104Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:21:57.782884Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:21:57.782933Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:02.848811Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848841Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848851Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848856Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848861Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848865Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:02.848870Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:22:02.848885Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":59,"channels":[]}
+2026-03-26T08:22:02.869534Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:03.375421Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:03.375466Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:03.392850Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:22:03.394012Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:22:03.394903Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:22:03.993968Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:03.994018Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:09.059765Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:09.564369Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:09.564437Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:10.181306Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:10.183654Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:15.257352Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:15.762256Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:15.762302Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:16.349875Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:16.350596Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:21.407073Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:21.910067Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:21.910100Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:22.477537Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:22.477630Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:27.530181Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:28.034776Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:28.035005Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:28.578496Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:28.578536Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:32.940780Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940828Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940836Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940843Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940850Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940856Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:22:32.940862Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:22:33.394800Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:22:33.394833Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:22:33.394840Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:22:33.624528Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:34.127571Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:34.127609Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:34.652853Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:34.652900Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:39.713080Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:40.216924Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:40.216958Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:40.838278Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:40.838608Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:45.885380Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:46.389836Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:46.389869Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:46.960464Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:46.960509Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:52.008261Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:52.511600Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:52.511738Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:53.160315Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:53.160362Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:22:58.196986Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:22:58.701092Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:22:58.701250Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:22:59.337231Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:22:59.337397Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:03.040059Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040094Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040102Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040108Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040115Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040122Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:03.040130Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:23:03.040139Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":119,"channels":[]}
+2026-03-26T08:23:03.397847Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:23:03.397888Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:23:03.397899Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:23:04.399621Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:04.902761Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:04.902814Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:05.453781Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:05.453945Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:10.511045Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:11.014973Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:11.015007Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:11.572246Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:11.572570Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:16.624538Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:17.128014Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:17.128173Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:17.664568Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:17.664623Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:22.711911Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:23.216033Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:23.216102Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:23.840283Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:23.840331Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:28.889693Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:29.393818Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:29.393858Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:29.969755Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:29.969792Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:33.102725Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102763Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102772Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102781Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102790Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102798Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:23:33.102807Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:23:33.522315Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:23:33.522364Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:23:33.522372Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:23:35.012072Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:35.515866Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:35.515908Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:36.154447Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:36.154496Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:41.196927Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:41.701220Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:41.701257Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:42.285350Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:42.285390Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:47.322758Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:47.826778Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:47.826815Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:48.458023Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:48.458085Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:53.493933Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:23:53.997694Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:23:53.997746Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:23:54.567817Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:23:54.567855Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:23:59.607929Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:00.111891Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:00.111936Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:00.731318Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:00.731371Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:03.130805Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130842Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130855Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130860Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130866Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130872Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:03.130878Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:24:03.130893Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":179,"channels":[]}
+2026-03-26T08:24:03.396867Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:24:03.396920Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:24:03.396930Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:24:05.789043Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:06.293099Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:06.293138Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:06.961213Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:06.961475Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:12.037737Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:12.541818Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:12.542153Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:13.081924Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:13.082415Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:18.151664Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:18.655137Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:18.655175Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:19.174008Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:19.174045Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending e2026-03-26T08:24:24.737168Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:24.737203Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:25.341970Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:25.342029Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:30.399346Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:30.902515Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:30.902556Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:31.473912Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:31.473961Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:33.177209Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177252Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177262Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177271Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177278Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177283Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:24:33.177293Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:24:33.401447Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:24:33.401490Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:24:33.401516Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:24:36.529044Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:37.033052Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:37.033194Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:37.582291Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:37.582335Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:42.632136Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:43.138031Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:43.138075Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:43.685978Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:43.686011Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:48.738645Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:49.241628Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:49.241672Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:49.816444Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:49.816494Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:24:54.856132Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:24:55.359919Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:24:55.359967Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:24:55.937799Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:24:55.937843Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:00.981238Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:01.486008Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:01.486054Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:02.127062Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:02.127113Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:03.270264Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270307Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270316Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270324Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270333Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270338Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:03.270344Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:25:03.270355Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":240,"channels":[]}
+2026-03-26T08:25:03.395327Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:25:03.395372Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:25:03.395380Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:25:07.166594Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:07.670457Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:07.670508Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:08.256688Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:08.256768Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:13.307258Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:13.810077Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:13.810231Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:14.374021Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:14.374272Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:19.417447Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:19.921250Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:19.921283Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:20.551683Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:20.551794Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:25.596696Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:26.104923Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:26.104963Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:26.673750Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:26.673791Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:31.739130Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:32.242970Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:32.243007Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:32.772640Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:32.772734Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:33.333105Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333159Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333165Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333170Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333175Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333180Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:25:33.333186Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:25:33.393748Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:25:33.393790Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:25:33.393798Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:25:37.839475Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:38.342452Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:38.342498Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:38.937274Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:38.937334Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:43.937443Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:44.443571Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:44.443618Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:45.032336Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:45.032390Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:50.097553Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:50.600651Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:50.600967Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:51.189042Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:51.189092Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:25:56.232376Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:25:56.736063Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:25:56.736337Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:25:57.350537Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:25:57.350594Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:26:02.416898Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:26:02.923430Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:26:02.923964Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:26:03.394853Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 2 actionable opportunities
+2026-03-26T08:26:03.394903Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:26:03.394921Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED SOL_USDT: Margin monitor not yet initialized for Bybit and/or Gate.io — skipping until balances are fetched
+2026-03-26T08:26:03.431640Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431680Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431685Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431690Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431695Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431701Z  INFO trading_engine::latency_tracker: [latency] ws_parse:
+      n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+2026-03-26T08:26:03.431877Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+2026-03-26T08:26:03.431942Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":300,"channels":[]}
+2026-03-26T08:26:03.549940Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:26:03.549986Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:26:08.620467Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:26:09.123706Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:26:09.128656Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:26:09.689265Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:26:09.689319Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:26:14.751038Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:26:15.255545Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:26:15.255604Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:26:15.847906Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:26:15.853407Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:26:20.910265Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:26:21.413262Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:26:21.413305Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:26:22.035430Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:26:22.035471Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
+2026-03-26T08:26:27.081582Z  WARN trading_engine::gateio_gateway: [gateio-ws] Login failed, reconnecting...
+2026-03-26T08:26:27.584833Z ERROR trading_engine::gateio_gateway: [gateio-ws] 🚨 Circuit breaker tripped: ConnectivityLost
+2026-03-26T08:26:27.584875Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+2026-03-26T08:26:28.152832Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected2026-03-26T08:26:28.152885Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending explicit futures.login
