@@ -89,7 +89,7 @@ impl MlWeightReader {
             unsafe {
                 let shm = &*(ptr);
                 if shm.magic != MAGIC_BYTES {
-                    warn!("ML weights SHM magic mismatch, waiting for writer");
+                    info!("ML weights SHM magic mismatch, waiting for writer — this is expected when the ML cold-path service is not running");
                 }
             }
         }

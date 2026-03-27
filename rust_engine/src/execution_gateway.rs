@@ -161,14 +161,21 @@ pub enum ExchangeError {
 
 impl ExchangeError {
     pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
+        match self {
             ExchangeError::RateLimited { .. }
                 | ExchangeError::Timeout
                 | ExchangeError::TimedOut { .. }
                 | ExchangeError::ConnectionReset
-                | ExchangeError::InternalServerError
-        )
+                | ExchangeError::InternalServerError => true,
+            // "Not login" is a transient WS auth error — the gateway's
+            // reconnect loop will re-authenticate automatically, so
+            // retrying after a short delay should succeed.
+            ExchangeError::Unknown { code, message } => {
+                message.contains("Not login")
+                    || code == "WS_REJECT" && message.contains("login")
+            }
+            _ => false,
+        }
     }
 }
 

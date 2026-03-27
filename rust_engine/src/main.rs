@@ -2692,6 +2692,17 @@ fn execution_router_loop(
     // engine created its own separate instance — so balances fetched here were never
     // visible to the funding arb engine's pre-trade checks.
     if multi_exchange_enabled {
+        // Mark all connected gateways as ready so the margin monitor will
+        // actually fetch their balances in refresh_all(). Previously,
+        // set_gateway_ready() was never called, so is_gateway_ready() always
+        // returned false and refresh_all() skipped every exchange — causing
+        // the perpetual "gateway not ready" / "balances not fetched" warnings.
+        {
+            let mut monitor = shared_margin_monitor.write();
+            for exchange_id in multi_gateways.keys() {
+                monitor.set_gateway_ready(*exchange_id, true);
+            }
+        }
         info!("[execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)");
     }
     

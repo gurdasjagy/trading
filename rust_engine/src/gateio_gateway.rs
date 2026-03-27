@@ -485,8 +485,8 @@ impl GateIoGateway {
                                             }
 
                                             if discrepancies > 0 {
-                                                warn!(
-                                                    "[gateio-reconcile] Cycle {}: {} discrepancies found",
+                                                info!(
+                                                    "[gateio-reconcile] Cycle {}: {} discrepancies found and self-healed",
                                                     cycle, discrepancies
                                                 );
                                             } else {
@@ -2369,8 +2369,8 @@ impl ExecutionGateway for GateIoGateway {
                             }
                         }
                         if !confirmed {
-                            warn!(
-                                "[gateio-ws] Leverage {}x not confirmed for {} after 500ms — proceeding anyway",
+                            info!(
+                                "[gateio-ws] Leverage {}x not confirmed for {} after 500ms — proceeding anyway (normal when no position exists yet)",
                                 target_leverage, symbol
                             );
                         }
