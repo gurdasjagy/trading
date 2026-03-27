@@ -1,6 +1,6 @@
 Note : You must write proper working code for all the fixes ( no fake , psuedo or partial code implementation should be there ). Read the full below prompt completely , it is designed by reviewing the logs.txt file ( in the repository you can check ). The logs.txt contains all the logs of the problems described below. You must firstly read logs.txt file understand the issues than check this prompt written below along with fixes and problems and search yourself for the problems in the repository. After confirming evrything that ( the fix and the exact root cause described below is true ) only than you must apply the fixes. Otherwise if you think some things is wrong below you must use your own knowledge to correct that one.
 
-
+Strict note : You must push the pr and commit the changes to the pr after completion of every fix ( or the task that you designed by yourself). No need to check for cargo tests. I will handle them manually or will ask you to check for that in later session.
 ---
 
 ## Comprehensive Coding Agent Prompt: Full Bug Fix & Feature Implementation
