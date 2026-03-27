@@ -1030,7 +1030,7 @@ fn orderbook_builder_loop(
     ws_ring_gateio: &'static SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>,
     strategy_ring: &'static SpscRingBuffer<BookSnapshot, BOOK_TO_STRATEGY_CAPACITY>,
     books: &mut Vec<FlatOrderBook>,
-    _registry: Arc<SymbolRegistry>,
+    registry: Arc<SymbolRegistry>,
     shared_prices: Arc<Vec<AtomicU64>>,
     global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>>,
 ) {
@@ -1097,7 +1097,8 @@ fn orderbook_builder_loop(
                             timestamp_ns: update.recv_ns,
                         };
                         
-                        let gbook = gbr.get_or_create(update.symbol_id);
+                        let sym_name = registry.get_name(update.symbol_id);
+                        let gbook = gbr.get_or_create_named(update.symbol_id, sym_name);
                         gbook.write().update_exchange_snapshot(gateio_snapshot);
                     }
                 }

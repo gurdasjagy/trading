@@ -1008,16 +1008,20 @@ impl GateIoGateway {
     /// Build explicit futures.login message for WS authentication.
     ///
     /// Gate.io WS v4 requires an explicit login before
-    /// futures.order_place calls. The login signature format is:
-    ///   HMAC_SHA512(secret, "channel=futures.login&event=login&time={time}")
+    /// futures.order_place calls. The login uses the **API-style** format
+    /// (same as order_place), NOT the subscription-style format:
+    ///   - event: "api" (not "login" or "subscribe")
+    ///   - auth inside payload: { api_key, signature, timestamp }
+    ///   - signature: HMAC_SHA512(secret, "api\nfutures.login\n\n{timestamp}")
     fn build_login_message(api_key: &str, secret: &[u8]) -> String {
         let time = now_ms() / 1000;
-        // Event MUST be "login", not "api"
-        let sign = Self::ws_sign(secret, "futures.login", "login", time);
-        
+        // Login uses API-style signature: "api\n{channel}\n{req_param}\n{timestamp}"
+        // For login, req_param is empty string.
+        let sign = Self::ws_api_sign(secret, "futures.login", "", time);
+
         format!(
-            r#"{{"time":{},"channel":"futures.login","event":"login","payload":{{}},"auth":{{"method":"api_key","KEY":"{}","SIGN":"{}"}}}}"#,
-            time, api_key, sign
+            r#"{{"time":{},"channel":"futures.login","event":"api","payload":{{"api_key":"{}","signature":"{}","timestamp":"{}"}}}}"#,
+            time, api_key, sign, time
         )
     }
 
@@ -1294,11 +1298,33 @@ impl GateIoGateway {
                                     Some(Ok(Message::Text(txt))) => {
                                         debug!("[gateio-ws] Login phase received: {}", txt);
                                         if txt.contains("futures.login") {
-                                            if txt.contains("\"error\":null") || txt.contains("\"status\":\"success\"") {
+                                            // Gate.io login success indicators:
+                                            // - {"error":null, "result":{"uid":"..."}}
+                                            // - {"error": null, ...} (with space after colon)
+                                            // - {"result":{"status":"success"}}
+                                            // We check for error being null (with or without
+                                            // space) OR a result object containing uid/status.
+                                            let has_null_error = txt.contains("\"error\":null")
+                                                || txt.contains("\"error\": null")
+                                                || txt.contains("\"error\" : null");
+                                            let has_result = txt.contains("\"result\"");
+                                            let has_status_success = txt.contains("\"status\":\"success\"")
+                                                || txt.contains("\"status\": \"success\"");
+                                            let has_uid = txt.contains("\"uid\"");
+
+                                            if has_null_error || has_status_success || (has_result && has_uid) {
                                                 info!("[gateio-ws] futures.login successful — WS trading API authenticated");
                                                 logged_in = true;
                                                 break;
-                                            } else if txt.contains("INVALID_KEY") || txt.contains("\"error\":{") {
+                                            } else if txt.contains("INVALID_KEY")
+                                                || txt.contains("INVALID_SIGNATURE")
+                                                || txt.contains("IP_NOT_ALLOWED")
+                                                || txt.contains("KEY_EXPIRED")
+                                            {
+                                                error!("[gateio-ws] futures.login rejected (auth error): {}", txt);
+                                                break;
+                                            } else if txt.contains("\"error\":") && !txt.contains("\"error\":null") && !txt.contains("\"error\": null") {
+                                                // Generic error object present
                                                 error!("[gateio-ws] futures.login rejected: {}", txt);
                                                 break;
                                             }

@@ -180,7 +180,7 @@ pub async fn run_binance_ws_ingestion(
                                             timestamp_ns: now_ns,
                                         };
 
-                                        let book = registry.get_or_create(sym_id);
+                                        let book = registry.get_or_create_named(sym_id, &internal_symbol);
                                         book.write().update_exchange_snapshot(snapshot);
                                         
                                         debug!("[ws-binance] {} book updated: bid={:.2} ask={:.2}",
@@ -403,7 +403,7 @@ pub async fn run_bybit_ws_ingestion(
                                             timestamp_ns: now_ns,
                                         };
 
-                                        let book = registry.get_or_create(sym_id);
+                                        let book = registry.get_or_create_named(sym_id, &internal_symbol);
                                         book.write().update_exchange_snapshot(snapshot);
                                         
                                         debug!("[ws-bybit] {} book updated: bid={:.2} ask={:.2}",

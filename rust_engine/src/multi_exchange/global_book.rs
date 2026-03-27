@@ -177,6 +177,9 @@ impl Default for ExchangeBookSnapshot {
 /// adjustments to produce a unified, sorted view of global liquidity.
 pub struct GlobalOrderBook {
     pub symbol_id: u16,
+    /// Human-readable symbol name (e.g. "BTC_USDT") for cross-referencing
+    /// with FundingArbOpportunity.symbol in the risk validator.
+    pub symbol_name: String,
     /// Per-exchange snapshots (indexed by ExchangeId as u8).
     exchange_snapshots: [Option<ExchangeBookSnapshot>; 3],
     /// Merged and sorted global bids (best bid first = highest price).
@@ -194,6 +197,7 @@ impl GlobalOrderBook {
     pub fn new(symbol_id: u16) -> Self {
         Self {
             symbol_id,
+            symbol_name: String::new(),
             exchange_snapshots: [None, None, None],
             global_bids: Vec::with_capacity(60),  // 20 levels × 3 exchanges
             global_asks: Vec::with_capacity(60),
@@ -471,6 +475,26 @@ impl GlobalBookRegistry {
             .entry(symbol_id)
             .or_insert_with(|| Arc::new(RwLock::new(GlobalOrderBook::new(symbol_id))))
             .clone()
+    }
+
+    /// Get or create a GlobalOrderBook for a symbol, storing its name.
+    pub fn get_or_create_named(&self, symbol_id: u16, symbol_name: &str) -> SharedGlobalBook {
+        let book = self.books
+            .entry(symbol_id)
+            .or_insert_with(|| {
+                let mut b = GlobalOrderBook::new(symbol_id);
+                b.symbol_name = symbol_name.to_string();
+                Arc::new(RwLock::new(b))
+            })
+            .clone();
+        // Ensure name is set even if the book already existed
+        {
+            let mut b = book.write();
+            if b.symbol_name.is_empty() {
+                b.symbol_name = symbol_name.to_string();
+            }
+        }
+        book
     }
 
     /// Get an existing GlobalOrderBook for a symbol.
