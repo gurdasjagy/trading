@@ -35,7 +35,11 @@ pub struct TelegramAlertSender {
     /// HTTP client for sending requests.
     client: Client,
     /// Whether the sender is enabled.
-    enabled: bool,
+    /// ISSUE 6 FIX: This is now mutable — set to false on first HTTP 404
+    /// to prevent spamming invalid requests every trade cycle.
+    enabled: std::sync::atomic::AtomicBool,
+    /// ISSUE 6 FIX: Count of consecutive send failures for backoff.
+    consecutive_failures: std::sync::atomic::AtomicU32,
 }
 
 impl TelegramAlertSender {
@@ -59,7 +63,40 @@ impl TelegramAlertSender {
                 .timeout(std::time::Duration::from_secs(5))
                 .build()
                 .unwrap_or_default(),
-            enabled,
+            enabled: std::sync::atomic::AtomicBool::new(enabled),
+            consecutive_failures: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    /// ISSUE 6 FIX: Validate the bot token on startup by calling `getMe`.
+    /// If the token is invalid (404 or 401), disable the sender permanently
+    /// for this session to prevent spamming failed HTTP requests.
+    pub async fn validate_token(&self) {
+        if !self.enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+
+        let url = format!(
+            "https://api.telegram.org/bot{}/getMe",
+            self.bot_token
+        );
+
+        match self.client.get(&url).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    debug!("[telegram] Bot token validated successfully");
+                } else {
+                    let status = resp.status();
+                    warn!(
+                        "[telegram] Bot token validation failed: HTTP {} — disabling alerts for this session",
+                        status
+                    );
+                    self.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            Err(e) => {
+                warn!("[telegram] Bot token validation request failed: {} — will retry on first send", e);
+            }
         }
     }
 
@@ -68,7 +105,7 @@ impl TelegramAlertSender {
     /// # Arguments
     /// * `text` — Message text (supports Markdown formatting)
     pub async fn send_message(&self, text: &str) {
-        if !self.enabled {
+        if !self.enabled.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
 
@@ -86,18 +123,53 @@ impl TelegramAlertSender {
 
         match self.client.post(&url).json(&body).send().await {
             Ok(resp) => {
-                if !resp.status().is_success() {
+                if resp.status().is_success() {
+                    // ISSUE 6 FIX: Reset failure counter on success
+                    self.consecutive_failures.store(0, std::sync::atomic::Ordering::Relaxed);
+                } else {
                     let status = resp.status();
                     let body_text = resp.text().await.unwrap_or_default();
+
+                    // ISSUE 6 FIX: Auto-disable on 404 (invalid token) or 401 (unauthorized)
+                    if status.as_u16() == 404 || status.as_u16() == 401 {
+                        warn!(
+                            "[telegram] Bot token appears invalid (HTTP {}). Disabling alerts for this session.",
+                            status
+                        );
+                        self.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+
+                    // ISSUE 6 FIX: Exponential backoff on repeated failures
+                    let failures = self.consecutive_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if failures >= 10 {
+                        warn!(
+                            "[telegram] {} consecutive failures — disabling alerts for this session",
+                            failures
+                        );
+                        self.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+
                     error!(
-                        "[telegram] Send failed: HTTP {} — {}",
+                        "[telegram] Send failed: HTTP {} — {} (failure {}/10)",
                         status,
-                        &body_text[..body_text.len().min(200)]
+                        &body_text[..body_text.len().min(200)],
+                        failures
                     );
                 }
             }
             Err(e) => {
-                error!("[telegram] Request failed: {}", e);
+                let failures = self.consecutive_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                if failures >= 10 {
+                    warn!(
+                        "[telegram] {} consecutive request failures — disabling alerts",
+                        failures
+                    );
+                    self.enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+                    return;
+                }
+                error!("[telegram] Request failed: {} (failure {}/10)", e, failures);
             }
         }
     }
@@ -420,7 +492,7 @@ impl TelegramAlertSender {
 
     /// Check if the sender is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
