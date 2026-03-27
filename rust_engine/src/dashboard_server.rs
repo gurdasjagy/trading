@@ -272,14 +272,14 @@ impl DashboardState {
         self.realized_pnl_fp.load(Ordering::Relaxed) as f64 / 1e8
     }
 
-    fn positions_str(&self) -> String {
+    pub fn positions_str(&self) -> String {
         self.positions_json
             .read()
             .map(|g| g.clone())
             .unwrap_or_else(|_| "[]".to_string())
     }
 
-    fn trades_str(&self) -> String {
+    pub fn trades_str(&self) -> String {
         self.trades_json
             .read()
             .map(|g| g.clone())

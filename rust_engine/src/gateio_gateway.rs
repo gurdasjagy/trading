@@ -330,6 +330,7 @@ impl GateIoGateway {
                         rate_limit_second_ns: Arc::new(AtomicU64::new(0)),
                         circuit_breaker: None,
                         instrument_mgr: None,
+                        ghost_positions: Arc::new(RwLock::new(Vec::new())),
                     };
 
                     if let Err(e) = temp_gw.monitor_liquidation_prices().await {
@@ -2635,7 +2636,6 @@ impl ExecutionGateway for GateIoGateway {
                     "[gateio-ws] Order {} ACK has filled=0 — polling REST for fill confirmation",
                     ack.order_id
                 );
-                let mut poll_result = None;
                 // Poll up to 25 times (200ms intervals = 5 seconds max)
                 for attempt in 1..=25 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -2648,8 +2648,7 @@ impl ExecutionGateway for GateIoGateway {
                             ack.filled_size = status.filled_size;
                             ack.avg_fill_price = status.avg_fill_price;
                             ack.status = status.status;
-                            poll_result = Some(Ok(ack));
-                            break;
+                            return Ok(ack);
                         }
                         Ok(Some(status)) if status.status == "finished" => {
                             // Order finished but filled_size still 0 = cancelled or expired
@@ -2658,8 +2657,7 @@ impl ExecutionGateway for GateIoGateway {
                                 ack.order_id
                             );
                             ack.status = status.status;
-                            poll_result = Some(Ok(ack));
-                            break;
+                            return Ok(ack);
                         }
                         Ok(_) => {
                             debug!(
@@ -2675,13 +2673,11 @@ impl ExecutionGateway for GateIoGateway {
                         }
                     }
                 }
-                poll_result.unwrap_or_else(|| {
-                    warn!(
-                        "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
-                        ack.order_id
-                    );
-                    Ok(ack)
-                })
+                warn!(
+                    "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
+                    ack.order_id
+                );
+                Ok(ack)
             }
             other => other,
         };
