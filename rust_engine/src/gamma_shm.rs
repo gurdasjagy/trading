@@ -12,7 +12,7 @@ use memmap2::MmapOptions;
 use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 const MAGIC: u64 = 0x47414D4D415F4558; // "GAMMA_EX"
 const VERSION: u32 = 1;
@@ -89,7 +89,7 @@ impl GammaExposureReader {
         {
             Ok(f) => f,
             Err(e) => {
-                warn!("Gamma exposure SHM not available at {}: {} (will run without gamma data)", path, e);
+                info!("Gamma exposure SHM not available at {}: {} (will run without gamma data)", path, e);
                 return None;
             }
         };

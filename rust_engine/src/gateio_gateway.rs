@@ -485,8 +485,8 @@ impl GateIoGateway {
                                             }
 
                                             if discrepancies > 0 {
-                                                warn!(
-                                                    "[gateio-reconcile] Cycle {}: {} discrepancies found",
+                                                info!(
+                                                    "[gateio-reconcile] Cycle {}: {} discrepancies found and self-healed",
                                                     cycle, discrepancies
                                                 );
                                             } else {
@@ -1270,10 +1270,64 @@ impl GateIoGateway {
 
                     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-                    // Gate.io futures WS v4 authenticates via the auth block
-                    // on subscription messages (Step 2 below), not via a
-                    // separate login channel. No explicit login step needed.
-                    info!("[gateio-ws] Proceeding to authenticated subscription");
+                    // ── Step 1: Explicit futures.login ──
+                    // Gate.io WS v4 requires an explicit futures.login before
+                    // any futures.order_place / futures.order_cancel API calls.
+                    // Without this, order placement returns "Not login" error.
+                    // The subscription auth (futures.orders with auth block)
+                    // only authenticates for RECEIVING order update notifications,
+                    // NOT for placing orders via the WS trading API.
+                    let login_msg = Self::build_login_message(&api_key, &api_secret);
+                    info!("[gateio-ws] Sending futures.login for WS trading API auth");
+                    if let Err(e) = ws_write.send(Message::Text(login_msg)).await {
+                        error!("[gateio-ws] Login send failed: {}", e);
+                        continue;
+                    }
+
+                    // Wait for login response before proceeding
+                    let login_deadline = Instant::now() + Duration::from_secs(5);
+                    let mut logged_in = false;
+                    while Instant::now() < login_deadline {
+                        tokio::select! {
+                            msg = ws_read.next() => {
+                                match msg {
+                                    Some(Ok(Message::Text(txt))) => {
+                                        debug!("[gateio-ws] Login phase received: {}", txt);
+                                        if txt.contains("futures.login") {
+                                            if txt.contains("\"error\":null") || txt.contains("\"status\":\"success\"") {
+                                                info!("[gateio-ws] futures.login successful — WS trading API authenticated");
+                                                logged_in = true;
+                                                break;
+                                            } else if txt.contains("INVALID_KEY") || txt.contains("\"error\":{") {
+                                                error!("[gateio-ws] futures.login rejected: {}", txt);
+                                                break;
+                                            }
+                                        }
+                                        if txt.contains("futures.pong") || txt.contains("futures.ping") {
+                                            continue;
+                                        }
+                                    }
+                                    Some(Ok(Message::Ping(data))) => {
+                                        let _ = ws_write.send(Message::Pong(data)).await;
+                                    }
+                                    Some(Err(e)) => {
+                                        error!("[gateio-ws] Read error during login: {}", e);
+                                        break;
+                                    }
+                                    None => break,
+                                    _ => {}
+                                }
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                        }
+                    }
+
+                    if !logged_in {
+                        error!("[gateio-ws] futures.login failed — WS order placement will not work");
+                        // Continue to subscription anyway; subscription auth may
+                        // still work for receiving order updates even if login failed.
+                        // But order placement will fail with "Not login".
+                    }
 
                     // ── Step 2: Subscribe to futures.orders with auth block ──
                     // After explicit login, subscribe to order updates for ALL contracts.
@@ -2369,8 +2423,8 @@ impl ExecutionGateway for GateIoGateway {
                             }
                         }
                         if !confirmed {
-                            warn!(
-                                "[gateio-ws] Leverage {}x not confirmed for {} after 500ms — proceeding anyway",
+                            info!(
+                                "[gateio-ws] Leverage {}x not confirmed for {} after 500ms — proceeding anyway (normal when no position exists yet)",
                                 target_leverage, symbol
                             );
                         }
