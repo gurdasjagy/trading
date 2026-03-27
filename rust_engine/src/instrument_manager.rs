@@ -509,8 +509,8 @@ impl InstrumentManager {
                 continue;
             }
 
-            // quanto_multiplier: how much base asset 1 contract represents
-            // For BTC_USDT: quanto_multiplier = "0.0001" means 1 contract = 0.0001 BTC
+            // quanto_multiplier: how much base asset 1 contract represents.
+            // Varies per contract (e.g. BTC_USDT=0.0001, ETH_USDT=0.01).
             let quanto_multiplier = contract.get("quanto_multiplier")
                 .and_then(|v| v.as_str())
                 .and_then(|s| s.parse::<f64>().ok())
