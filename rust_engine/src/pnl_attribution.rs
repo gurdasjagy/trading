@@ -10,7 +10,7 @@
 //! and dynamically allocate more capital to winners (Kelly integration).
 
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::info;
 
 /// PnL record for a single closed trade with attribution.
 #[derive(Debug, Clone)]

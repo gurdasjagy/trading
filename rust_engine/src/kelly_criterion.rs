@@ -26,7 +26,7 @@
 //! computed by the strategy engine, replacing the simple confidence threshold.
 
 use std::collections::VecDeque;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 /// Rolling window size for Kelly calculation (number of trades).
 const KELLY_WINDOW: usize = 100;

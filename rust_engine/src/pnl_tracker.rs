@@ -12,7 +12,7 @@
 //! - JSON serialization for dashboard WebSocket streaming
 
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::info;
 
 /// A single closed trade record for PnL calculation.
 #[derive(Debug, Clone)]

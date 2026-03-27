@@ -6,14 +6,12 @@
 //! Profit = maker spread captured - hedge taker fee + maker rebate earned
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::execution_gateway::{ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType};
+use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
 use crate::execution_state::PlacementType;
-use crate::multi_exchange::global_book::{ExchangeId, GlobalBookRegistry, SharedGlobalBook};
+use crate::multi_exchange::global_book::{ExchangeId, SharedGlobalBook};
 
 // ---------------------------------------------------------------------------
 // Maker Order Tracking

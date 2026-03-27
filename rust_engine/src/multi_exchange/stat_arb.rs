@@ -8,12 +8,10 @@
 //! Exit: |spread - mean| < exit_threshold_sigma * std_dev OR hard stops
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::execution_gateway::{ExecutionGateway, OrderIntent, OrderSide, OrderType};
+use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
 use crate::execution_state::PlacementType;
 use crate::multi_exchange::global_book::ExchangeId;
 

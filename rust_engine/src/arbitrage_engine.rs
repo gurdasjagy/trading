@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info};
 
 /// Minimum spread in basis points to consider an arbitrage opportunity.
 const ARB_THRESHOLD_BPS: i64 = 10; // 0.1% minimum spread

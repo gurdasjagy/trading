@@ -16,9 +16,7 @@
 //! 6. Completion/cancellation is reported to the strategy
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use parking_lot::Mutex;
 use tracing::{error, info, warn};
 
 use crate::execution_gateway::{

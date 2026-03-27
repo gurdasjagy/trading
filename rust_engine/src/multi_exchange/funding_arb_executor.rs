@@ -17,7 +17,7 @@ use crate::execution_gateway::{
 };
 use crate::execution_state::PlacementType;
 use crate::instrument_manager::{
-    self, ContractSpec, Exchange, FeeStrategy, InstrumentManager,
+    self, Exchange, InstrumentManager,
 };
 use crate::multi_exchange::global_book::ExchangeId;
 
@@ -444,7 +444,7 @@ impl DualLegExecutor {
             return gw.submit_order(intent).await;
         }
 
-        let mut current_intent = intent.clone();
+        let current_intent = intent.clone();
 
         for attempt in 0..POST_ONLY_MAX_ATTEMPTS {
             match gw.submit_order(current_intent.clone()).await {

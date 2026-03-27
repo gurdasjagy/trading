@@ -17,7 +17,7 @@
 //! Can be extended to support other exchanges.
 
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Fee tier definition.
 #[derive(Debug, Clone)]
