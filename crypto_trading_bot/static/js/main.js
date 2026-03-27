@@ -8,13 +8,19 @@
 
 // ── Constants ────────────────────────────────────────────────────────────
 const WS_PATH = '/ws/live';
-const WS_RECONNECT_DELAY_MS = 3000;
+// ISSUE 12 FIX: Exponential backoff constants (replaces fixed 3s delay)
+const WS_RECONNECT_BASE_MS = 1000;   // Initial reconnect delay: 1 second
+const WS_RECONNECT_MAX_MS  = 30000;  // Maximum reconnect delay: 30 seconds
 const POLL_INTERVAL_MS = 10000;  // Polling is now just a fallback; hub pushes at 1 s
 
 // ── Module state ─────────────────────────────────────────────────────────
 let _ws = null;
 let _reconnectTimer = null;
 let _pollTimer = null;
+// ISSUE 12 FIX: Backoff state
+let _reconnectAttempts = 0;
+let _pageUnloading = false;
+let _tabHidden = false;
 
 // Auth token for WebSocket (sha256 of username:password when auth is enabled).
 // Populated by the server via a template variable if authentication is configured.
@@ -49,6 +55,8 @@ function connectWebSocket() {
 
 function _onWsOpen() {
   _setConnectionIndicator(true);
+  // ISSUE 12 FIX: Reset backoff counter on successful connection
+  _reconnectAttempts = 0;
   if (_reconnectTimer) {
     clearTimeout(_reconnectTimer);
     _reconnectTimer = null;
@@ -89,7 +97,25 @@ function _onWsMessage(event) {
 function _onWsClose() {
   _setConnectionIndicator(false);
   _stopHeartbeat();
-  _reconnectTimer = setTimeout(connectWebSocket, WS_RECONNECT_DELAY_MS);
+  // ISSUE 12 FIX: Don't reconnect if the page is being unloaded or tab is hidden
+  if (_pageUnloading) return;
+  if (_tabHidden) return; // Will reconnect when tab becomes visible again
+  _scheduleReconnect();
+}
+
+/**
+ * ISSUE 12 FIX: Schedule a reconnect with exponential backoff.
+ * Delay sequence: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
+ */
+function _scheduleReconnect() {
+  if (_reconnectTimer) return; // Already scheduled
+  const delay = Math.min(
+    WS_RECONNECT_BASE_MS * Math.pow(2, _reconnectAttempts),
+    WS_RECONNECT_MAX_MS
+  );
+  _reconnectAttempts++;
+  console.log(`[ws] Reconnecting in ${delay}ms (attempt ${_reconnectAttempts})`);
+  _reconnectTimer = setTimeout(connectWebSocket, delay);
 }
 
 function _onWsError() {
@@ -1118,6 +1144,43 @@ document.addEventListener('DOMContentLoaded', () => {
   colourPnlValues();
   connectWebSocket();
   startPolling();
+
+  // ISSUE 12 FIX: Pause WebSocket when tab is hidden, resume when visible.
+  // Prevents unnecessary reconnect attempts and server load when the user
+  // isn't looking at the dashboard.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      _tabHidden = true;
+      // Close existing connection — server won't waste bandwidth sending
+      // updates to a tab nobody is watching.
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.close();
+      }
+      if (_reconnectTimer) {
+        clearTimeout(_reconnectTimer);
+        _reconnectTimer = null;
+      }
+    } else {
+      _tabHidden = false;
+      // Reset backoff and reconnect immediately when tab becomes visible
+      _reconnectAttempts = 0;
+      connectWebSocket();
+    }
+  });
+
+  // ISSUE 12 FIX: Don't attempt reconnect when the page is being unloaded
+  // (navigation away, tab close, browser close). Prevents console errors
+  // and wasted reconnect attempts during teardown.
+  window.addEventListener('beforeunload', () => {
+    _pageUnloading = true;
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
+    if (_ws) {
+      _ws.close();
+    }
+  });
 
   // Page-specific data loading
   const path = location.pathname;

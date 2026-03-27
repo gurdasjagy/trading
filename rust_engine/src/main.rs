@@ -3862,6 +3862,9 @@ fn execution_router_loop(
                             match gw.submit_order(intent).await {
                                 Ok(res) => {
                                     orders_submitted += 1;
+                                    // ISSUE 10 FIX: Wire metrics for TWAP slice orders
+                                    dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                                    dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
                                     info!(
                                         "[execution] TWAP slice filled: {} size={} @ {:.4}",
                                         slice.symbol, res.filled_size, res.avg_fill_price
@@ -3892,6 +3895,22 @@ fn execution_router_loop(
                     }
                 }
                 
+                // ISSUE 7 FIX: Drain ghost positions from the Gate.io reconciliation
+                // thread and remove them from the funding arb active positions map.
+                // This prevents the engine from holding stale position state after
+                // the reconciler detects positions that no longer exist on-exchange.
+                if let Some(ref gw) = gateway {
+                    let ghosts = gw.drain_ghost_positions();
+                    for sym in &ghosts {
+                        if funding_arb_positions.remove(sym).is_some() {
+                            warn!(
+                                "[execution] ISSUE 7: Removed ghost funding arb position for {} (reconciler detected no on-exchange position)",
+                                sym
+                            );
+                        }
+                    }
+                }
+
                 // TASK 2: Cross-Exchange Funding Rate Arbitrage (every 60s)
                 if multi_exchange_enabled && last_funding_arb_check.elapsed() > Duration::from_secs(60) {
                     last_funding_arb_check = std::time::Instant::now();
@@ -4116,6 +4135,8 @@ fn execution_router_loop(
                                 
                                 orders_submitted += 2;
                                 dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                                // ISSUE 10 FIX: Wire total_fills for funding arb orders
+                                dashboard_state.total_fills.fetch_add(2, Ordering::Relaxed);
                             }
                             (Err(e), Ok(_)) => {
                                 warn!("[execution] Funding arb SHORT failed: {} — unwinding LONG", e);
@@ -4342,6 +4363,9 @@ fn execution_router_loop(
                                                             }
                                                         }
                                                         orders_submitted += 1;
+                                                        // ISSUE 10 FIX: Wire metrics for cross-MM orders
+                                                        dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                                                        dashboard_state.total_fills.fetch_add(1, Ordering::Relaxed);
                                                     }
                                                     Err(e) => {
                                                         debug!("[cross-mm] Maker order failed: {}", e);
@@ -4655,6 +4679,9 @@ fn execution_router_loop(
                                         short_ex.name(), short_fill_price, matched_size
                                     );
                                     orders_submitted += 2;
+                                    // ISSUE 10 FIX: Wire metrics for stat arb orders
+                                    dashboard_state.orders_submitted.store(orders_submitted, Ordering::Relaxed);
+                                    dashboard_state.total_fills.fetch_add(2, Ordering::Relaxed);
                                 }
                                 (Err(e), Ok(_)) => {
                                     warn!("[stat-arb] Long leg failed: {} — unwinding short", e);
