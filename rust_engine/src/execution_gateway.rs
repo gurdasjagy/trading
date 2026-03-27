@@ -653,7 +653,7 @@ impl ExecutionContext {
     /// and repriced closer to market.
     pub fn check_resting_orders(&self) -> Vec<(usize, CancelReason)> {
         let mut cancels = Vec::new();
-        let now = now_ms();
+        let _now = now_ms();
 
         for (idx, lifecycle) in self.ws_order_mgr.lifecycles.iter().enumerate() {
             if !lifecycle.is_resting() {

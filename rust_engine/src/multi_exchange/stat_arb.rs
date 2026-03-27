@@ -708,8 +708,8 @@ impl Default for StatArbEngine {
 /// Build a pair of order intents for stat arb entry.
 pub fn build_stat_arb_entry_intents(
     symbol: &str,
-    long_exchange: ExchangeId,
-    short_exchange: ExchangeId,
+    _long_exchange: ExchangeId,
+    _short_exchange: ExchangeId,
     size: i64,
     long_ref_price: f64,
     short_ref_price: f64,

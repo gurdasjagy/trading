@@ -278,7 +278,7 @@ impl GammaExposure {
             // Check for sign change
             if prev_cum != 0.0 && prev_cum.signum() != cumulative.signum() && cumulative.signum() != 0.0 {
                 // Linear interpolation to find exact flip level
-                let weight = prev_cum.abs() / (prev_cum.abs() + gamma.abs());
+                let _weight = prev_cum.abs() / (prev_cum.abs() + gamma.abs());
                 flip_level = Some(*strike);
                 break;
             }

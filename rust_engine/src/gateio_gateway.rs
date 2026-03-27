@@ -1195,7 +1195,7 @@ impl GateIoGateway {
         }
 
         let price_str = new_price.map(|p| {
-            if let Some(ref mgr) = self.instrument_mgr {
+            if let Some(ref _mgr) = self.instrument_mgr {
                 // We don't know the symbol here, use default formatting
                 format!("{:.8}", p)
             } else {

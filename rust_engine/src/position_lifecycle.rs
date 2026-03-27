@@ -521,7 +521,7 @@ impl PositionLifecycleManager {
             return None;
         }
 
-        let prev_pnl = pos.unrealized_pnl;
+        let _prev_pnl = pos.unrealized_pnl;
         pos.update_tick(mid_price);
 
         // **NEW: Time-weighted return calculation**

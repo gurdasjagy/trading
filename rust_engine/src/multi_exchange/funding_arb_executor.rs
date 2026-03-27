@@ -172,7 +172,7 @@ impl DualLegExecutor {
             let short_ex = exchange_id_to_exchange(short_exchange);
             let long_ex = exchange_id_to_exchange(long_exchange);
             let short_spec = mgr.get_or_default(short_ex, symbol);
-            let long_spec = mgr.get_or_default(long_ex, symbol);
+            let _long_spec = mgr.get_or_default(long_ex, symbol);
 
             // Approximate price from spec (fallback to 1.0 if unavailable)
             let approx_price = if short_spec.min_notional > 0.0 {

@@ -882,7 +882,7 @@ impl FundingArbEngine {
         long_result: &OrderResult,
         size: i64,
         slippage_bps: f64,
-        basis_risk: f64,
+        _basis_risk: f64,
         breakeven_periods: f64,
     ) -> FundingArbPosition {
         let id = self.next_id;

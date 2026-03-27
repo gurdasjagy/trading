@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Standalone Rust trading engine binary — Gate.io Only Refactor.
 //!
 //! Architecture: Rust is the SOLE master executable. The entire hot-path lives in Rust:
@@ -1054,7 +1055,7 @@ fn orderbook_builder_loop(
                 }
                 
                 // Push snapshot to strategy
-                if let (Some((bid, bid_qty)), Some((ask, ask_qty))) = (book.best_bid(), book.best_ask()) {
+                if let (Some((bid, _bid_qty)), Some((ask, _ask_qty))) = (book.best_bid(), book.best_ask()) {
                     let snapshot = BookSnapshot {
                         symbol_id: update.symbol_id,
                         bid_levels: 10,
@@ -2407,7 +2408,7 @@ fn strategy_evaluator_loop(
                             }
 
                             // Step 1b: Correlation-based exposure check (FEATURE 6)
-                            let mut position_notional = FixedPrice(cmd.price).to_f64()
+                            let position_notional = FixedPrice(cmd.price).to_f64()
                                 * fixed_point::FixedQty(cmd.qty).to_f64();
                             let mut cmd = cmd; // Make cmd mutable for potential resizing
                             if let Err(reason) = correlation_limiter.check_position_limit(symbol_name, position_notional) {
@@ -2425,7 +2426,7 @@ fn strategy_evaluator_loop(
                                             fixed_point::FixedQty(cmd.qty).to_f64(), reduced_qty
                                         );
                                         cmd = cmd_resized;
-                                        position_notional = max_allowed; // Update for subsequent checks
+                                        let _ = max_allowed; // Value used for subsequent checks
                                     } else {
                                         continue;
                                     }
@@ -2756,7 +2757,7 @@ fn execution_router_loop(
     }
 
     // Initialize event-sourced order state machine
-    let order_state_machine = order_state_machine::OrderStateMachine::new();
+    let _order_state_machine = order_state_machine::OrderStateMachine::new();
 
     // Initialize PnL tracking for position entries
     let mut position_entries: HashMap<u16, (f64, i64, bool)> = HashMap::new();
@@ -3531,7 +3532,7 @@ fn execution_router_loop(
                                 let gw_clone = gw.clone();
                                 let order_id_clone = res.order_id.clone();
                                 let symbol_clone = symbol_name.to_string();
-                                let sym_id = cmd.symbol_id;
+                                let _sym_id = cmd.symbol_id;
                                 tokio::spawn(async move {
                                     // Wait 3 seconds for the order to rest on the book
                                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -4782,7 +4783,7 @@ fn execution_router_loop(
                                 &pos, long_exit_price, short_exit_price
                             );
 
-                            let symbol = pos.symbol.clone();
+                            let _symbol = pos.symbol.clone();
                             tokio::spawn(async move {
                                 let _ = tokio::join!(
                                     lg.submit_order(close_long),
