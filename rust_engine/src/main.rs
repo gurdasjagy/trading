@@ -2508,31 +2508,64 @@ fn strategy_evaluator_loop(
 /// BUG 3 FIX: Compute exchange-specific contract size using SizeNormalizer.
 ///
 /// Each exchange encodes position size differently:
-/// - Gate.io: integer contracts (quanto_multiplier ≈ 0.0001 BTC/contract)
+/// - Gate.io: integer contracts (quanto_multiplier varies per contract,
+///   e.g. 0.0001 for BTC_USDT, 0.01 for ETH_USDT — fetched dynamically)
 /// - Binance/Bybit: fractional base-asset quantity (e.g. 0.001 BTC)
 ///
 /// Falls back to `SizeNormalizer` with exchange-appropriate defaults when the
 /// gateway's own `usdt_to_contracts()` call fails or returns 0.
+///
+/// When an `InstrumentManager` is available, it looks up the actual
+/// quanto_multiplier and step_size for the symbol. Otherwise it falls back to
+/// conservative defaults (quanto_multiplier=0.0001, step=1, min=1 for Gate.io).
 fn normalize_notional_to_contracts(
     exchange: multi_exchange::ExchangeId,
     notional_usdt: f64,
     mid_price: f64,
+    symbol: &str,
+    inst_mgr: Option<&instrument_manager::InstrumentManager>,
 ) -> i64 {
     if mid_price <= 0.0 || notional_usdt <= 0.0 {
         return 1;
     }
     let qty = match exchange {
         multi_exchange::ExchangeId::GateIo => {
-            // Gate.io BTC: quanto_multiplier ≈ 0.0001, step=1 contract, min=1 contract
+            // Look up the actual contract spec from InstrumentManager.
+            // Each Gate.io USDT-settled contract has a different quanto_multiplier
+            // (e.g. BTC_USDT=0.0001, ETH_USDT=0.01). Using a hardcoded value
+            // would produce wildly wrong contract counts for non-BTC symbols.
+            let (quanto, step, min_q) = if let Some(mgr) = inst_mgr {
+                let spec = mgr.get_or_default(
+                    instrument_manager::Exchange::GateIo, symbol,
+                );
+                (spec.contract_multiplier, spec.step_size, spec.min_qty)
+            } else {
+                // Conservative fallback when InstrumentManager is unavailable.
+                // 0.0001 is the BTC_USDT multiplier — the most common contract.
+                warn!("[normalize] No InstrumentManager available, using BTC_USDT default quanto=0.0001 for {}", symbol);
+                (0.0001_f64, 1.0_f64, 1.0_f64)
+            };
             size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
-                exchange, notional_usdt, mid_price, 0.0001, 1.0, 1.0,
+                exchange, notional_usdt, mid_price, quanto, step, min_q,
             )
-            .unwrap_or_else(|_| (notional_usdt / (0.0001 * mid_price)).max(1.0))
+            .unwrap_or_else(|_| (notional_usdt / (quanto * mid_price)).max(1.0))
         }
         _ => {
-            // Binance/Bybit: fractional BTC, step=0.001, min=0.001
+            // Binance/Bybit: fractional base-asset qty.
+            // Look up step_size and min_qty from InstrumentManager if available.
+            let (step, min_q) = if let Some(mgr) = inst_mgr {
+                let im_exchange = match exchange {
+                    multi_exchange::ExchangeId::Binance => instrument_manager::Exchange::Binance,
+                    multi_exchange::ExchangeId::Bybit => instrument_manager::Exchange::Bybit,
+                    _ => instrument_manager::Exchange::Binance,
+                };
+                let spec = mgr.get_or_default(im_exchange, symbol);
+                (spec.step_size, spec.min_qty)
+            } else {
+                (0.001_f64, 0.001_f64)
+            };
             size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
-                exchange, notional_usdt, mid_price, 1.0, 0.001, 0.001,
+                exchange, notional_usdt, mid_price, 1.0, step, min_q,
             )
             .unwrap_or_else(|_| notional_usdt / mid_price)
         }
@@ -2585,6 +2618,8 @@ fn execution_router_loop(
     shared_margin_monitor: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>>,
     // FEAT 4: Shared WebSocket fill event sink for Binance/Bybit fill receivers.
     ws_fill_sink: ws_fill_receiver::FillUpdateSink,
+    // Gate.io USDT contract fix: InstrumentManager for dynamic quanto_multiplier lookup
+    instrument_mgr: Arc<instrument_manager::InstrumentManager>,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -3894,17 +3929,18 @@ fn execution_router_loop(
                         }
 
                         // BUG 3 FIX: Use SizeNormalizer to compute exchange-specific sizes for each leg.
-                        // Gate.io uses integer contracts (quanto_multiplier = 0.0001 BTC/contract)
-                        // while Binance/Bybit use fractional base-asset quantities.
+                        // Gate.io uses integer contracts (quanto_multiplier varies per contract,
+                        // e.g. 0.0001 for BTC_USDT, 0.01 for ETH_USDT — looked up dynamically).
+                        // Binance/Bybit use fractional base-asset quantities.
                         // Using the same size for both legs would mismatch Gate.io contract counts
                         // with Binance/Bybit fractional quantities.
                         let short_size = match short_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
                             Ok(size) if size > 0 => size,
-                            _ => normalize_notional_to_contracts(opp.short_exchange, position_notional, mid_price),
+                            _ => normalize_notional_to_contracts(opp.short_exchange, position_notional, mid_price, &opp.symbol, Some(&instrument_mgr)),
                         };
                         let long_size = match long_gw.usdt_to_contracts(&opp.symbol, position_notional).await {
                             Ok(size) if size > 0 => size,
-                            _ => normalize_notional_to_contracts(opp.long_exchange, position_notional, mid_price),
+                            _ => normalize_notional_to_contracts(opp.long_exchange, position_notional, mid_price, &opp.symbol, Some(&instrument_mgr)),
                         };
                         
                         // Set leverage on both exchanges before placing orders
@@ -5843,6 +5879,8 @@ fn main() {
         let shared_margin_monitor_exec = shared_margin_monitor_arc.clone();
         // FEAT 4: Clone the WS fill sink for the execution router to drain periodically.
         let exec_fill_sink = fill_update_sink.clone();
+        // Gate.io USDT contract fix: clone InstrumentManager for execution thread
+        let exec_instrument_mgr = instrument_mgr.clone();
         let handle = thread::Builder::new()
             .name("execution".into())
             .spawn(move || {
@@ -5855,6 +5893,7 @@ fn main() {
                     sl_tp_update_rx, state_store_exec, auto_protection_exec,
                     shared_margin_monitor_exec,
                     exec_fill_sink,
+                    exec_instrument_mgr,
                 );
             })
             .expect("Failed to spawn execution thread");

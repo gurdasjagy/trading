@@ -4,8 +4,10 @@
 //! Gate.io uses integer contracts with a quanto_multiplier, while Binance
 //! and Bybit use fractional base-asset quantities.
 //!
-//! Without this layer, `size=1` (1 Gate.io contract = 0.0001 BTC) would be
-//! interpreted as 1 whole BTC on Binance ($70,000+), causing "insufficient balance".
+//! Without this layer, `size=1` (e.g. 1 Gate.io BTC_USDT contract = 0.0001 BTC)
+//! would be interpreted as 1 whole BTC on Binance ($70,000+), causing
+//! "insufficient balance". The quanto_multiplier varies per contract
+//! (e.g. BTC_USDT=0.0001, ETH_USDT=0.01) and must be fetched dynamically.
 
 use tracing::{info, warn};
 
@@ -108,8 +110,9 @@ mod tests {
 
     #[test]
     fn test_gateio_btc_sizing() {
-        // Gate.io BTC_USDT: quanto_multiplier = 0.0001
+        // Gate.io BTC_USDT example: quanto_multiplier = 0.0001
         // $100 notional at $70,000 = 100 / (0.0001 * 70000) = 14.28 contracts
+        // NOTE: quanto_multiplier varies per contract (e.g. ETH_USDT=0.01)
         let qty = SizeNormalizer::usdt_to_exchange_qty(
             ExchangeId::GateIo, 100.0, 70000.0, 0.0001, 1.0, 1.0,
         ).unwrap();
@@ -160,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_gateio_contracts_to_base_qty() {
-        // 100 Gate.io BTC contracts * 0.0001 multiplier = 0.01 BTC
+        // Example: 100 Gate.io BTC_USDT contracts * 0.0001 multiplier = 0.01 BTC
         let qty = SizeNormalizer::gateio_contracts_to_base_qty(100, 0.0001, 0.001);
         assert!((qty - 0.01).abs() < 1e-10);
     }
