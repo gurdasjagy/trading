@@ -357,9 +357,10 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         for ex in cfg.exchanges.iter_mut() {
             if ex.name == "gateio" {
                 ex.testnet = true;
-                // Gate.io USDT futures testnet WebSocket endpoint.
-                // Per official docs: wss://fx-ws-testnet.gateio.ws/v4/ws/usdt
-                ex.ws_url = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt".to_string();
+                // Gate.io USDT futures testnet WebSocket endpoint (current URL per official docs).
+                // Old URL wss://fx-ws-testnet.gateio.ws/v4/ws/usdt still accepts TCP but uses
+                // a different key pool — authenticated subscriptions fail with INVALID_KEY.
+                ex.ws_url = "wss://ws-testnet.gate.com/v4/ws/futures/usdt".to_string();
                 // CRITICAL: The correct testnet REST URL is api-testnet.gateapi.io
                 // (same as CCXT's set_sandbox_mode). The old fx-api-testnet.gateio.ws
                 // is a DIFFERENT server with a DIFFERENT API key pool — keys created

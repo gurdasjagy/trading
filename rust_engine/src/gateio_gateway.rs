@@ -71,19 +71,18 @@ use crate::instrument_manager::{InstrumentManager, Exchange, check_order_exists_
 const GATEIO_WS_URL: &str = "wss://fx-ws.gateio.ws/v4/ws/usdt";
 /// Gate.io testnet WebSocket URL for USDT futures.
 ///
-/// CRITICAL FIX: The previous value `wss://ws-testnet.gateapi.io/v4/ws/usdt` used
-/// the `gateapi.io` domain which is for REST API only -- it has no DNS record for
-/// WebSocket subdomains. The correct testnet WS domain is `fx-ws-testnet.gateio.ws`,
-/// matching the market data ingestion URL configured in main.rs (line 362) which
-/// connects successfully.
+/// CRITICAL: Gate.io changed the USDT testnet WS URL. The old domain
+/// `fx-ws-testnet.gateio.ws` still accepts TCP connections but does NOT
+/// share the same API key database as the current testnet environment,
+/// causing every authenticated subscription to return INVALID_KEY even
+/// though the same key works on the REST testnet (api-testnet.gateapi.io).
 ///
-/// Gate.io domain naming convention:
-///   REST API:   api-testnet.gateapi.io  (testnet)  /  api.gateio.ws  (mainnet)
-///   WebSocket:  fx-ws-testnet.gateio.ws (testnet)  /  fx-ws.gateio.ws (mainnet)
+/// Gate.io domain naming convention (current):
+///   REST API:   api-testnet.gateapi.io       (testnet) / api.gateio.ws        (mainnet)
+///   WebSocket:  ws-testnet.gate.com/v4/ws/futures/usdt (testnet) / fx-ws.gateio.ws/v4/ws/usdt (mainnet)
 ///
-/// The DNS failure caused: gateway WS connect -> DNS NXDOMAIN -> reconnect loop ->
-/// circuit breaker trips ConnectivityLost -> all trading halted.
-const GATEIO_WS_TESTNET_URL: &str = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt";
+/// Source: https://www.gate.com/docs/developers/futures/ws/en/#server-url
+const GATEIO_WS_TESTNET_URL: &str = "wss://ws-testnet.gate.com/v4/ws/futures/usdt";
 const GATEIO_REST_URL: &str = "https://api.gateio.ws/api/v4";
 const MIN_CONTRACT_SIZE: i64 = 1;
 const RECONNECT_BASE_MS: u64 = 500;
