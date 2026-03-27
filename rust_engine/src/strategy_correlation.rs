@@ -18,7 +18,7 @@
 //! have recently fired similar signals and scale down accordingly.
 
 use std::collections::{HashMap, VecDeque};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Maximum number of strategies tracked.
 const MAX_STRATEGIES: usize = 32;

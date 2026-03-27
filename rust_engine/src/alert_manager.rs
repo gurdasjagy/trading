@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 
 /// Alert priority levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

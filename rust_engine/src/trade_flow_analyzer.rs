@@ -225,7 +225,7 @@ impl TradeFlowAnalyzer {
     /// * `vpin` — Current VPIN value [0.0, 1.0]
     /// * `cvd_divergence_score` — CVD divergence score [-1.0, 1.0]
     pub fn calculate_toxicity_score(&self, vpin: f64, cvd_divergence_score: f64) -> f64 {
-        let metrics = self.get_metrics();
+        let _metrics = self.get_metrics();
         
         // Calculate large trade ratio: volume from trades > 2x median / total volume
         let large_trade_ratio = if self.total_volume > 0.0 {

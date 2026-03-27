@@ -8,12 +8,10 @@
 //! Exit: |spread - mean| < exit_threshold_sigma * std_dev OR hard stops
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::execution_gateway::{ExecutionGateway, OrderIntent, OrderSide, OrderType};
+use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
 use crate::execution_state::PlacementType;
 use crate::multi_exchange::global_book::ExchangeId;
 
@@ -710,8 +708,8 @@ impl Default for StatArbEngine {
 /// Build a pair of order intents for stat arb entry.
 pub fn build_stat_arb_entry_intents(
     symbol: &str,
-    long_exchange: ExchangeId,
-    short_exchange: ExchangeId,
+    _long_exchange: ExchangeId,
+    _short_exchange: ExchangeId,
     size: i64,
     long_ref_price: f64,
     short_ref_price: f64,

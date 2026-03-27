@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::circuit_breaker::{CircuitBreaker, TripReason};
 

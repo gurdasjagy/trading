@@ -19,14 +19,13 @@ use tracing::{debug, error, info, warn};
 use crate::dashboard_server::DashboardState;
 
 use crate::execution_gateway::{
-    ExecutionGateway, OrderIntent, OrderResult, OrderSide, OrderType,
+    ExecutionGateway, OrderResult,
 };
-use crate::execution_state::PlacementType;
 use crate::instrument_manager::InstrumentManager;
 use crate::multi_exchange::global_book::{ExchangeId, GlobalBookRegistry};
 use crate::multi_exchange::funding_arb::{CrossExchangeFundingArb, FundingArbOpportunity};
 use crate::multi_exchange::margin_monitor::CrossVenueMarginMonitor;
-use crate::multi_exchange::funding_arb_executor::{DualLegExecutor, DualLegResult, LegStatus};
+use crate::multi_exchange::funding_arb_executor::{DualLegExecutor, DualLegResult};
 use crate::multi_exchange::funding_arb_risk::{PreTradeValidator, PreTradeResult, ExitReason};
 
 // ---------------------------------------------------------------------------
@@ -883,7 +882,7 @@ impl FundingArbEngine {
         long_result: &OrderResult,
         size: i64,
         slippage_bps: f64,
-        basis_risk: f64,
+        _basis_risk: f64,
         breakeven_periods: f64,
     ) -> FundingArbPosition {
         let id = self.next_id;

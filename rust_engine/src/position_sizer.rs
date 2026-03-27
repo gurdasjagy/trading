@@ -25,7 +25,6 @@
 use std::collections::HashMap;
 use tracing::{info, warn, error};
 
-use crate::realized_vol::VolatilityRegime;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Contract Specification

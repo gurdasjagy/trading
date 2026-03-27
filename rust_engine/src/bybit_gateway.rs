@@ -11,7 +11,7 @@ use reqwest::{
 };
 use serde_json::{json, Value};
 use sha2::Sha256;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::execution_gateway::{
     classify_bybit_error, now_ms, now_us, sign_bybit_request, AdaptiveRateLimiter,
@@ -361,23 +361,45 @@ impl ExecutionGateway for BybitGateway {
                 );
                 // The original order was accepted; look it up by client order ID
                 match self.check_order_by_client_id(&link_id, &symbol).await {
-                    Ok(Some(existing)) => {
+                    Ok(Some(existing_order_id)) => {
+                        // We found the exchange order ID; now query full order details
                         let end_us = now_us();
                         let latency_us = (end_us - start_us).max(0) as u64;
-                        info!(
-                            "Bybit duplicate resolved: order {} found via linkId {} | {}µs",
-                            existing.order_id, link_id, latency_us
-                        );
-                        return Ok(OrderResult {
-                            order_id: existing.order_id,
-                            status: existing.status,
-                            filled_size: existing.filled_size,
-                            avg_fill_price: existing.avg_fill_price,
-                            fee: existing.fee,
-                            latency_us,
-                            exchange_timestamp: existing.exchange_timestamp,
-                            rejection_reason: None,
-                        });
+                        match self.get_order_status(&existing_order_id, &symbol).await {
+                            Ok(Some(existing)) => {
+                                info!(
+                                    "Bybit duplicate resolved: order {} found via linkId {} | {}µs",
+                                    existing.order_id, link_id, latency_us
+                                );
+                                return Ok(OrderResult {
+                                    order_id: existing.order_id,
+                                    status: existing.status,
+                                    filled_size: existing.filled_size,
+                                    avg_fill_price: existing.avg_fill_price,
+                                    fee: existing.fee,
+                                    latency_us,
+                                    exchange_timestamp: existing.exchange_timestamp,
+                                    rejection_reason: None,
+                                });
+                            }
+                            _ => {
+                                // Found order ID but couldn't get status; return basic result
+                                info!(
+                                    "Bybit duplicate resolved (partial): order {} found via linkId {} | {}µs",
+                                    existing_order_id, link_id, latency_us
+                                );
+                                return Ok(OrderResult {
+                                    order_id: existing_order_id,
+                                    status: "New".to_string(),
+                                    filled_size: 0,
+                                    avg_fill_price: 0.0,
+                                    fee: 0.0,
+                                    latency_us,
+                                    exchange_timestamp: now_ms(),
+                                    rejection_reason: None,
+                                });
+                            }
+                        }
                     }
                     _ => {
                         // Lookup failed — return the original duplicate error

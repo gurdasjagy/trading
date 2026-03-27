@@ -16,7 +16,6 @@
 //!    Low intensity = range-bound/quiet regime.
 
 use std::collections::VecDeque;
-use tracing::debug;
 
 /// Window size for spread autocorrelation calculation.
 const SPREAD_WINDOW: usize = 500;
@@ -119,7 +118,7 @@ impl SpreadAnalytics {
         for i in 1..spreads.len() {
             covar += (spreads[i] - mean) * (spreads[i - 1] - mean);
         }
-        covar /= (n - 1.0);
+        covar /= n - 1.0;
 
         self.cached_autocorrelation = (covar / variance).clamp(-1.0, 1.0);
     }

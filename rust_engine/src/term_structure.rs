@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 pub struct TermStructureTracker {
     pub perpetual_price: f64,

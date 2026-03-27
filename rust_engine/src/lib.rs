@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! ``rust_trading_engine`` — PyO3 extension module.
 //!
 //! Exposes five sub-modules (PyO3 cdylib for Python backward compatibility):

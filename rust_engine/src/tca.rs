@@ -16,7 +16,7 @@
 //! - **Spread Cost**: Half-spread paid on each trade
 
 use std::collections::{HashMap, VecDeque};
-use tracing::{debug, info};
+use tracing::info;
 
 /// Maximum TCA records to keep per symbol.
 const MAX_TCA_RECORDS: usize = 1000;

@@ -11,7 +11,7 @@
 //! they are triggered by discrete events, not ongoing price/depth analysis.
 
 use std::collections::VecDeque;
-use tracing::{info, warn, debug};
+use tracing::info;
 
 /// Types of events that can trigger signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

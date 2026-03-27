@@ -330,6 +330,7 @@ impl GateIoGateway {
                         rate_limit_second_ns: Arc::new(AtomicU64::new(0)),
                         circuit_breaker: None,
                         instrument_mgr: None,
+                        ghost_positions: Arc::new(RwLock::new(Vec::new())),
                     };
 
                     if let Err(e) = temp_gw.monitor_liquidation_prices().await {
@@ -1194,7 +1195,7 @@ impl GateIoGateway {
         }
 
         let price_str = new_price.map(|p| {
-            if let Some(ref mgr) = self.instrument_mgr {
+            if let Some(ref _mgr) = self.instrument_mgr {
                 // We don't know the symbol here, use default formatting
                 format!("{:.8}", p)
             } else {
@@ -2635,8 +2636,10 @@ impl ExecutionGateway for GateIoGateway {
                     "[gateio-ws] Order {} ACK has filled=0 — polling REST for fill confirmation",
                     ack.order_id
                 );
-                let mut poll_result = None;
                 // Poll up to 25 times (200ms intervals = 5 seconds max)
+                // We track whether the poll resolved the fill so we can update ack
+                // without moving it into poll_result (which would trigger E0382).
+                let mut poll_resolved = false;
                 for attempt in 1..=25 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     match self.get_order_status(&ack.order_id, &symbol).await {
@@ -2648,7 +2651,7 @@ impl ExecutionGateway for GateIoGateway {
                             ack.filled_size = status.filled_size;
                             ack.avg_fill_price = status.avg_fill_price;
                             ack.status = status.status;
-                            poll_result = Some(Ok(ack));
+                            poll_resolved = true;
                             break;
                         }
                         Ok(Some(status)) if status.status == "finished" => {
@@ -2658,7 +2661,7 @@ impl ExecutionGateway for GateIoGateway {
                                 ack.order_id
                             );
                             ack.status = status.status;
-                            poll_result = Some(Ok(ack));
+                            poll_resolved = true;
                             break;
                         }
                         Ok(_) => {
@@ -2675,13 +2678,13 @@ impl ExecutionGateway for GateIoGateway {
                         }
                     }
                 }
-                poll_result.unwrap_or_else(|| {
+                if !poll_resolved {
                     warn!(
                         "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
                         ack.order_id
                     );
-                    Ok(ack)
-                })
+                }
+                Ok(ack)
             }
             other => other,
         };

@@ -17,7 +17,7 @@ use crate::execution_gateway::{
 };
 use crate::execution_state::PlacementType;
 use crate::instrument_manager::{
-    self, ContractSpec, Exchange, FeeStrategy, InstrumentManager,
+    self, Exchange, InstrumentManager,
 };
 use crate::multi_exchange::global_book::ExchangeId;
 
@@ -172,7 +172,7 @@ impl DualLegExecutor {
             let short_ex = exchange_id_to_exchange(short_exchange);
             let long_ex = exchange_id_to_exchange(long_exchange);
             let short_spec = mgr.get_or_default(short_ex, symbol);
-            let long_spec = mgr.get_or_default(long_ex, symbol);
+            let _long_spec = mgr.get_or_default(long_ex, symbol);
 
             // Approximate price from spec (fallback to 1.0 if unavailable)
             let approx_price = if short_spec.min_notional > 0.0 {
@@ -444,7 +444,7 @@ impl DualLegExecutor {
             return gw.submit_order(intent).await;
         }
 
-        let mut current_intent = intent.clone();
+        let current_intent = intent.clone();
 
         for attempt in 0..POST_ONLY_MAX_ATTEMPTS {
             match gw.submit_order(current_intent.clone()).await {
