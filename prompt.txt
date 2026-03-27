@@ -2,7 +2,7 @@ Note : You must write proper working code for all the fixes ( no fake , psuedo o
 
 Strict note : You must push the pr and commit the changes to the pr after completion of every fix ( or the task that you designed by yourself). No need to check for cargo tests. I will handle them manually or will ask you to check for that in later session.
 ---
-
+Update : Some of the work is already done . Check pr #45 for the details. Proceed with the remaining ones.
 ## Comprehensive Coding Agent Prompt: Full Bug Fix & Feature Implementation
 
 You are working on a crypto trading bot with a **Rust hot-path engine** (`rust_engine/src/`) and a **Python cold-path** (`crypto_trading_bot/`). The Rust engine handles real-time trading, WebSocket market data, multi-exchange execution, and serves an HTTP dashboard on port 8080. After thorough analysis of the production logs and full codebase, here are **ALL** issues that must be fixed. Every fix must be complete, production-ready, and tested.
