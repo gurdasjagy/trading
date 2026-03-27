@@ -763,6 +763,10 @@ pub fn classify_bybit_error(body: &serde_json::Value) -> ExchangeError {
         110018 => ExchangeError::PositionNotFound,
         110043 => ExchangeError::Unknown { code: "POST_ONLY_REJECTED".to_string(), message: ret_msg.to_string() },
         110044 => ExchangeError::MinimumOrderSize { min_size: 1 },
+        // ISSUE 1 FIX: Duplicate orderLinkId — treat as idempotent success, not error.
+        // This happens when a REST call times out, we retry, but the original order
+        // was already accepted. The order exists and should be looked up by client ID.
+        110072 => ExchangeError::Unknown { code: "DUPLICATE_ORDER_LINK_ID".to_string(), message: ret_msg.to_string() },
         _ => ExchangeError::Unknown { code: ret_code.to_string(), message: ret_msg.to_string() },
     }
 }
