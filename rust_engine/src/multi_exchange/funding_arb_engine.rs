@@ -333,6 +333,9 @@ pub struct FundingArbEngine {
     /// ISSUE 9 FIX: Engine readiness flag — starts false, set to true after
     /// the margin monitor completes its first balance fetch for all exchanges.
     ready: bool,
+    /// ISSUE 11 FIX: Margin cooldown tracker — prevents retrying symbols
+    /// that were rejected due to insufficient margin for 10 minutes.
+    margin_cooldown: super::funding_arb_risk::MarginCooldownTracker,
 }
 
 impl FundingArbEngine {
@@ -361,6 +364,7 @@ impl FundingArbEngine {
             instrument_mgr: None,
             failed_symbols: HashMap::new(),
             ready: false,
+            margin_cooldown: super::funding_arb_risk::MarginCooldownTracker::new(),
         }
     }
 
@@ -504,13 +508,19 @@ impl FundingArbEngine {
                             }
                         }
 
+                        // ISSUE 11 FIX: Periodically clean up expired cooldowns
+                        self.margin_cooldown.cleanup_expired();
+
                         // Pre-trade validation (uses InstrumentManager for proper sizing)
+                        // ISSUE 11 FIX: Pass margin cooldown tracker to skip symbols
+                        // that were recently rejected due to insufficient margin.
                         let validation = PreTradeValidator::validate_with_instruments(
                             opp,
                             &global_book_registry,
                             &margin_monitor.read(),
                             &self.config,
                             self.instrument_mgr.as_deref(),
+                            Some(&mut self.margin_cooldown),
                         );
 
                         match validation {

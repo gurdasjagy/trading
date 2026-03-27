@@ -6,6 +6,9 @@
 //! 3. Basis Risk Calculation
 //! 4. Capital & Margin Sufficiency Check
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use tracing::{warn, debug, info};
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +19,77 @@ use crate::instrument_manager::{InstrumentManager, Exchange, simulate_margin};
 
 // Forward reference: FundingArbEngineConfig is defined in funding_arb_engine.rs
 use crate::multi_exchange::funding_arb_engine::FundingArbEngineConfig;
+
+/// ISSUE 11 FIX: Cooldown tracker for symbols that have been rejected due to
+/// insufficient margin. Prevents the engine from retrying the same symbol every
+/// 30 seconds when the balance is clearly insufficient (e.g., ETH_USDT requiring
+/// $997 margin but only $941 available).
+///
+/// Symbols are placed on a 10-minute cooldown after a margin rejection.
+/// The cooldown is cleared early if the balance increases by >10%.
+const MARGIN_COOLDOWN_SECS: u64 = 600; // 10 minutes
+const BALANCE_INCREASE_THRESHOLD: f64 = 0.10; // 10% increase clears cooldown
+
+pub struct MarginCooldownTracker {
+    /// symbol -> (rejection time, balance at rejection)
+    cooldowns: HashMap<String, (Instant, f64)>,
+}
+
+impl MarginCooldownTracker {
+    pub fn new() -> Self {
+        Self {
+            cooldowns: HashMap::new(),
+        }
+    }
+
+    /// Record a margin rejection for a symbol with the current min balance.
+    pub fn record_rejection(&mut self, symbol: &str, balance_at_rejection: f64) {
+        self.cooldowns.insert(
+            symbol.to_string(),
+            (Instant::now(), balance_at_rejection),
+        );
+        warn!(
+            "[margin-cooldown] ISSUE 11: {} added to margin cooldown for {}s (balance: ${:.2})",
+            symbol, MARGIN_COOLDOWN_SECS, balance_at_rejection
+        );
+    }
+
+    /// Check if a symbol is currently on margin cooldown.
+    /// Returns true if the symbol should be skipped.
+    pub fn is_on_cooldown(&self, symbol: &str, current_balance: f64) -> bool {
+        if let Some((rejection_time, balance_at_rejection)) = self.cooldowns.get(symbol) {
+            // Check if cooldown has expired
+            if rejection_time.elapsed().as_secs() >= MARGIN_COOLDOWN_SECS {
+                return false; // Cooldown expired
+            }
+            // Check if balance increased significantly (>10%)
+            if *balance_at_rejection > 0.0 {
+                let increase_pct = (current_balance - balance_at_rejection) / balance_at_rejection;
+                if increase_pct > BALANCE_INCREASE_THRESHOLD {
+                    info!(
+                        "[margin-cooldown] {} cooldown cleared early: balance increased {:.1}% (${:.2} -> ${:.2})",
+                        symbol, increase_pct * 100.0, balance_at_rejection, current_balance
+                    );
+                    return false; // Balance increased enough
+                }
+            }
+            true // Still on cooldown
+        } else {
+            false // Not on cooldown
+        }
+    }
+
+    /// Remove expired entries to prevent unbounded growth.
+    pub fn cleanup_expired(&mut self) {
+        self.cooldowns.retain(|symbol, (rejection_time, _)| {
+            let keep = rejection_time.elapsed().as_secs() < MARGIN_COOLDOWN_SECS;
+            if !keep {
+                debug!("[margin-cooldown] {} cooldown expired, removed", symbol);
+            }
+            keep
+        });
+    }
+}
 
 /// Result of pre-trade validation.
 #[derive(Debug)]
@@ -64,17 +138,43 @@ impl PreTradeValidator {
         margin_monitor: &CrossVenueMarginMonitor,
         config: &FundingArbEngineConfig,
     ) -> PreTradeResult {
-        Self::validate_with_instruments(opp, global_book_registry, margin_monitor, config, None)
+        Self::validate_with_instruments(opp, global_book_registry, margin_monitor, config, None, None)
     }
 
     /// Run all pre-trade checks with InstrumentManager for proper sizing.
+    /// ISSUE 11 FIX: Now accepts an optional MarginCooldownTracker to skip
+    /// symbols that have been recently rejected due to insufficient margin.
     pub fn validate_with_instruments(
         opp: &FundingArbOpportunity,
         global_book_registry: &GlobalBookRegistry,
         margin_monitor: &CrossVenueMarginMonitor,
         config: &FundingArbEngineConfig,
         instrument_mgr: Option<&InstrumentManager>,
+        margin_cooldown: Option<&mut MarginCooldownTracker>,
     ) -> PreTradeResult {
+        // ISSUE 11 FIX: Check margin cooldown before any other validation.
+        // If the symbol was recently rejected due to insufficient margin,
+        // skip it until the cooldown expires or balance increases >10%.
+        if let Some(ref cooldown) = margin_cooldown {
+            let current_balance = {
+                let short_bal = margin_monitor.get_health(opp.short_exchange)
+                    .map(|h| h.available_balance)
+                    .unwrap_or(0.0);
+                let long_bal = margin_monitor.get_health(opp.long_exchange)
+                    .map(|h| h.available_balance)
+                    .unwrap_or(0.0);
+                short_bal.min(long_bal)
+            };
+            if cooldown.is_on_cooldown(&opp.symbol, current_balance) {
+                let reason = format!(
+                    "ISSUE 11: {} is on margin cooldown — skipping until cooldown expires or balance increases >10%",
+                    opp.symbol
+                );
+                debug!("[pre-trade] {}", reason);
+                return PreTradeResult::Rejected { reason };
+            }
+        }
+
         // 1. PROFITABILITY GATE: Is the funding spread enough to cover fees?
         let short_fee_bps = opp.short_exchange.taker_fee_bps() as f64;
         let long_fee_bps = opp.long_exchange.taker_fee_bps() as f64;
@@ -155,6 +255,11 @@ impl PreTradeValidator {
                 config.min_entry_margin_ratio * 100.0
             );
             warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+            // ISSUE 11 FIX: Record margin rejection for cooldown
+            if let Some(cooldown) = margin_cooldown {
+                let min_bal = short_balance.min(long_balance);
+                cooldown.record_rejection(&opp.symbol, min_bal);
+            }
             return PreTradeResult::Rejected { reason };
         }
 
@@ -227,6 +332,10 @@ impl PreTradeValidator {
                         one_contract_qty, one_contract_notional, one_contract_margin, min_balance
                     );
                     warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    // ISSUE 11 FIX: Record margin rejection for cooldown
+                    if let Some(cooldown) = margin_cooldown {
+                        cooldown.record_rejection(&opp.symbol, min_balance);
+                    }
                     return PreTradeResult::Rejected { reason };
                 }
                 1
@@ -255,6 +364,10 @@ impl PreTradeValidator {
                 if reduced < 1 {
                     let reason = "Short leg margin insufficient even for minimum position size".to_string();
                     warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    // ISSUE 11 FIX: Record margin rejection for cooldown
+                    if let Some(cooldown) = margin_cooldown {
+                        cooldown.record_rejection(&opp.symbol, short_balance);
+                    }
                     return PreTradeResult::Rejected { reason };
                 }
                 reduced
@@ -270,6 +383,10 @@ impl PreTradeValidator {
                 if reduced < 1 {
                     let reason = "Long leg margin insufficient even for minimum position size".to_string();
                     warn!("[pre-trade] REJECTED {}: {}", opp.symbol, reason);
+                    // ISSUE 11 FIX: Record margin rejection for cooldown
+                    if let Some(cooldown) = margin_cooldown {
+                        cooldown.record_rejection(&opp.symbol, long_balance);
+                    }
                     return PreTradeResult::Rejected { reason };
                 }
                 reduced
