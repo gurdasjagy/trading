@@ -1187,7 +1187,7 @@ fn strategy_evaluator_loop(
     // let exec_analytics = exec_analytics.lock();
     info!("[strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)");
     // Phase 2 Feature 5: Multi-Timeframe Trend Strength Index initialization
-    let mut tsi_calculator = TrendStrengthIndex::new();
+    let tsi_calculator = TrendStrengthIndex::new();
     info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
     // Task 17: Phase 2 Feature 9 - Realized Volatility Calculator initialization
     let mut realized_vol_calc = RealizedVolatilityCalculator::new(300); // 5-minute window (300 seconds)
@@ -2756,7 +2756,7 @@ fn execution_router_loop(
     }
 
     // Initialize event-sourced order state machine
-    let mut order_state_machine = order_state_machine::OrderStateMachine::new();
+    let order_state_machine = order_state_machine::OrderStateMachine::new();
 
     // Initialize PnL tracking for position entries
     let mut position_entries: HashMap<u16, (f64, i64, bool)> = HashMap::new();
@@ -5428,7 +5428,7 @@ fn main() {
         event_buses.control.capacity());
 
     // Bridge health monitor: tracks IPC health metrics and exposes /health endpoint
-    let mut health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
+    let health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
     // BridgeHealthMonitor is ready after new() — no separate init needed
     info!("📡 Bridge: Health monitor initialized");
     let health_monitor: &'static parking_lot::Mutex<bridge_ipc::health_monitor::BridgeHealthMonitor> =
@@ -6086,7 +6086,7 @@ fn main() {
 
                     // Every 120 heartbeats (~60s), log bridge health metrics
                     if report_counter % 120 == 0 {
-                        let mut hm = health_mon.lock();
+                        let hm = health_mon.lock();
                         hm.update_rates();
                         let health = hm.get_status();
                         let metrics_json = hm.get_metrics_json();
