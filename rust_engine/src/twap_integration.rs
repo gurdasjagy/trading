@@ -690,6 +690,8 @@ mod tests {
             take_profit: None,
             confidence: 0.8,
             signal_tag: "test".to_string(),
+            min_fill_size: None,
+            strategy_name: "test".to_string(),
         };
 
         // 1 contract * $60000 = $60000 notional -> should use TWAP
@@ -785,6 +787,8 @@ mod tests {
             take_profit: None,
             confidence: 0.8,
             signal_tag: "test".to_string(),
+            min_fill_size: None,
+            strategy_name: "test".to_string(),
         };
 
         let result = runner.submit_large_order(&intent, 60000.0);
