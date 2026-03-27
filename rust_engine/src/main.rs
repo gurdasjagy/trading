@@ -3892,6 +3892,22 @@ fn execution_router_loop(
                     }
                 }
                 
+                // ISSUE 7 FIX: Drain ghost positions from the Gate.io reconciliation
+                // thread and remove them from the funding arb active positions map.
+                // This prevents the engine from holding stale position state after
+                // the reconciler detects positions that no longer exist on-exchange.
+                if let Some(ref gw) = gateway {
+                    let ghosts = gw.drain_ghost_positions();
+                    for sym in &ghosts {
+                        if funding_arb_positions.remove(sym).is_some() {
+                            warn!(
+                                "[execution] ISSUE 7: Removed ghost funding arb position for {} (reconciler detected no on-exchange position)",
+                                sym
+                            );
+                        }
+                    }
+                }
+
                 // TASK 2: Cross-Exchange Funding Rate Arbitrage (every 60s)
                 if multi_exchange_enabled && last_funding_arb_check.elapsed() > Duration::from_secs(60) {
                     last_funding_arb_check = std::time::Instant::now();

@@ -495,6 +495,15 @@ pub trait ExecutionGateway: Send + Sync {
         Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "get_ticker not supported".into() })
     }
 
+    /// ISSUE 7 FIX: Drain ghost position symbols detected by the reconciliation
+    /// thread. Returns a list of symbols that were found to be ghost positions
+    /// (locally tracked but no longer exist on the exchange). The caller should
+    /// remove these from its active positions map.
+    /// Default: returns empty vec (gateways without reconciliation).
+    fn drain_ghost_positions(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Convert a USDT amount to integer contracts for a given futures contract.
     /// Each gateway implements this based on the exchange's contract specifications.
     /// Default implementation uses get_ticker to do a simple price-based conversion.

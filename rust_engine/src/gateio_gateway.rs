@@ -190,6 +190,10 @@ pub struct GateIoGateway {
     /// When set, price is formatted using Gate.io's order_price_round (tick size)
     /// instead of hardcoded "{:.8}".
     instrument_mgr: Option<Arc<InstrumentManager>>,
+    /// ISSUE 7 FIX: Shared list of ghost position symbols detected by the
+    /// reconciliation thread. The execution thread / funding arb engine drains
+    /// this list periodically to remove stale positions from its active set.
+    ghost_positions: Arc<RwLock<Vec<String>>>,
 }
 
 impl GateIoGateway {
@@ -206,6 +210,15 @@ impl GateIoGateway {
     /// Set the instrument manager after construction for dynamic price formatting.
     pub fn set_instrument_manager(&mut self, mgr: Arc<InstrumentManager>) {
         self.instrument_mgr = Some(mgr);
+    }
+
+    /// ISSUE 7 FIX: Drain all ghost position symbols detected by the reconciliation
+    /// thread. The caller (execution thread / funding arb engine) should remove these
+    /// symbols from its active positions list to prevent stale state.
+    /// Returns the list of ghost symbols and clears the internal queue.
+    pub fn drain_ghost_positions(&self) -> Vec<String> {
+        let mut ghosts = self.ghost_positions.write();
+        std::mem::take(&mut *ghosts)
     }
 
     /// Create a new WebSocket-based Gate.io gateway with circuit breaker integration.
@@ -245,6 +258,8 @@ impl GateIoGateway {
             .build()
             .expect("Failed to build REST fallback client");
 
+        let ghost_positions: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+
         let gateway = Self {
             api_key: api_key.clone(),
             api_secret: secret_bytes.clone(),
@@ -261,6 +276,7 @@ impl GateIoGateway {
             rate_limit_second_ns: rate_limit_second.clone(),
             circuit_breaker: circuit_breaker.clone(),
             instrument_mgr: None,
+            ghost_positions: ghost_positions.clone(),
         };
 
         // Spawn the WS connection manager task
@@ -336,6 +352,7 @@ impl GateIoGateway {
             let reconcile_testnet = testnet;
             let reconcile_rl_tokens = rate_limit_tokens;
             let reconcile_rl_second = rate_limit_second;
+            let reconcile_ghosts = ghost_positions;
             tokio::spawn(async move {
                 // Wait for initial WS connection before starting reconciliation
                 tokio::time::sleep(Duration::from_secs(10)).await;
@@ -473,6 +490,28 @@ impl GateIoGateway {
                                             // BUG 10 FIX: Actually remove ghost tracking entries
                                             // now that the read lock is released.
                                             if !ghost_keys_to_remove.is_empty() {
+                                                // ISSUE 7 FIX: Collect the ghost symbols BEFORE
+                                                // removing entries so the funding arb engine can
+                                                // clean up its active_positions list.
+                                                let ghost_symbols: Vec<String> = {
+                                                    let state_r = reconcile_state.read();
+                                                    ghost_keys_to_remove.iter()
+                                                        .filter_map(|key| state_r.get(key).map(|t| t.symbol.clone()))
+                                                        .collect()
+                                                };
+                                                if !ghost_symbols.is_empty() {
+                                                    let mut ghosts = reconcile_ghosts.write();
+                                                    for sym in &ghost_symbols {
+                                                        if !ghosts.contains(sym) {
+                                                            ghosts.push(sym.clone());
+                                                            warn!(
+                                                                "[gateio-reconcile] ISSUE 7: Ghost position {} queued for funding arb cleanup",
+                                                                sym
+                                                            );
+                                                        }
+                                                    }
+                                                }
+
                                                 let mut state_w = reconcile_state.write();
                                                 for key in &ghost_keys_to_remove {
                                                     state_w.remove(key);
