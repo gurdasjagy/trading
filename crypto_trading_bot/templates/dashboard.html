@@ -393,10 +393,10 @@
                     </span>
                   </td>
                   <td class="small">${{ pos.notional_size | default(value=0) | round(precision=2) }}</td>
-                  <td>${{ pos.entry_price  | round(precision=4) }}</td>
-                  <td>{% if pos.mark_price %}${{ pos.mark_price | round(precision=4) }}{% else %}${{ pos.current_price | default(value=0) | round(precision=4) }}{% endif %}</td>
-                  <td class="pnl-value {% if pos.pnl  >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    {{ pos.pnl  | round(precision=2) }}
+                  <td>{% if pos.entry_price and pos.entry_price > 0 %}${{ pos.entry_price | round(precision=4) }}{% else %}—{% endif %}</td>
+                  <td>{% if pos.mark_price and pos.mark_price > 0 %}${{ pos.mark_price | round(precision=4) }}{% elif pos.current_price and pos.current_price > 0 %}${{ pos.current_price | round(precision=4) }}{% else %}—{% endif %}</td>
+                  <td class="pnl-value {% if pos.pnl | default(value=0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ pos.pnl | default(value=0) | round(precision=2) }}
                   </td>
                   <td class="{% if pos.roe_pct | default(value=0) >= 0 %}text-success{% else %}text-danger{% endif %} small">
                     {{ pos.roe_pct | default(value=0) | round(precision=2) }}%

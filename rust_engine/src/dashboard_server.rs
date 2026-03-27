@@ -406,9 +406,50 @@ impl DashboardState {
         ctx.insert("realized_pnl", &self.realized_pnl());
 
         // Positions array (parse JSON to Value for template rendering)
+        // ISSUE 2 FIX: Filter out ghost positions with entry_price=0 or size=0
+        // and ensure every position has all required fields with safe defaults.
         let positions_raw = self.positions_str();
-        if let Ok(positions) = serde_json::from_str::<Value>(&positions_raw) {
-            ctx.insert("positions", &positions);
+        if let Ok(Value::Array(raw_positions)) = serde_json::from_str::<Value>(&positions_raw) {
+            let sanitized: Vec<Value> = raw_positions.into_iter()
+                .filter(|pos| {
+                    // Filter out ghost positions from unfilled ACKs
+                    let entry_price = pos.get("entry_price")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let size = pos.get("size")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    entry_price > 0.0 && size != 0
+                })
+                .map(|mut pos| {
+                    // Ensure all required fields exist with safe defaults
+                    if let Value::Object(ref mut map) = pos {
+                        let defaults = [
+                            ("unrealized_pnl", json!(0.0)),
+                            ("pnl", json!(0.0)),
+                            ("roe_pct", json!(0.0)),
+                            ("liquidation_price", json!(0.0)),
+                            ("stop_loss", json!(null)),
+                            ("take_profit", json!(null)),
+                            ("mark_price", json!(0.0)),
+                            ("current_price", json!(0.0)),
+                            ("margin", json!(0.0)),
+                            ("notional_size", json!(0.0)),
+                            ("leverage", json!(1)),
+                            ("direction", json!("LONG")),
+                            ("strategy", json!("")),
+                            ("duration", json!("—")),
+                        ];
+                        for (key, default_val) in defaults {
+                            if !map.contains_key(key) {
+                                map.insert(key.to_string(), default_val);
+                            }
+                        }
+                    }
+                    pos
+                })
+                .collect();
+            ctx.insert("positions", &Value::Array(sanitized));
         } else {
             ctx.insert("positions", &Value::Array(vec![]));
         }
