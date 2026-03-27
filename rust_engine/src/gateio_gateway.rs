@@ -2637,6 +2637,9 @@ impl ExecutionGateway for GateIoGateway {
                     ack.order_id
                 );
                 // Poll up to 25 times (200ms intervals = 5 seconds max)
+                // We track whether the poll resolved the fill so we can update ack
+                // without moving it into poll_result (which would trigger E0382).
+                let mut poll_resolved = false;
                 for attempt in 1..=25 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     match self.get_order_status(&ack.order_id, &symbol).await {
@@ -2648,7 +2651,8 @@ impl ExecutionGateway for GateIoGateway {
                             ack.filled_size = status.filled_size;
                             ack.avg_fill_price = status.avg_fill_price;
                             ack.status = status.status;
-                            return Ok(ack);
+                            poll_resolved = true;
+                            break;
                         }
                         Ok(Some(status)) if status.status == "finished" => {
                             // Order finished but filled_size still 0 = cancelled or expired
@@ -2657,7 +2661,8 @@ impl ExecutionGateway for GateIoGateway {
                                 ack.order_id
                             );
                             ack.status = status.status;
-                            return Ok(ack);
+                            poll_resolved = true;
+                            break;
                         }
                         Ok(_) => {
                             debug!(
@@ -2673,10 +2678,12 @@ impl ExecutionGateway for GateIoGateway {
                         }
                     }
                 }
-                warn!(
-                    "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
-                    ack.order_id
-                );
+                if !poll_resolved {
+                    warn!(
+                        "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
+                        ack.order_id
+                    );
+                }
                 Ok(ack)
             }
             other => other,
