@@ -534,7 +534,517 @@ BUY SOLUSDT 1827880090 qty=20.000000 avg_price=83.35 status=FILLED latency=49110
 2026-03-27T13:31:36.629153Z  INFO trading_engine: [stat-arb] Position sizing: long_bal=$6866.73 short_bal=$3565.43 notional=$213.93 mid_price=83.15 size=2500 lev=3x
 2026-03-27T13:31:36.737594Z  INFO trading_engine::bybit_gateway: Bybit leverage set to
 3× for SOLUSDT
-2026-03-27T13:31:36.817308Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+2026-03-27T13:31:36.817308Z  INFO trading_engine::binance_gateway: Binance 
+leverage set to 3x for SOLUSDT
 2026-03-27T13:31:37.097817Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown
 error 110072: OrderLinkedID is duplicate / Insufficient balance
 root@ubuntu-s-4vcpu-8gb-sgp1-01:~/tradings/crypto_trading_bot#
+hing_arb_engine: [funding-arb-engine] PRE-TRADE APPROVED: SOL_USDT short@Binance long@Bybit net_rate=0.4966% apr=543.8% slippage=0.0bps basis=0.0014 breakeven=0.4 periods size=20
+rust-engine-1  | 2026-03-27T13:31:27.103172Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 2× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:31:27.195083Z  INFO trading_engine::binance_gateway: Binance leverage set to 2x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:27.203892Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.73
+rust-engine-1  | 2026-03-27T13:31:27.277500Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Pre-flight margin OK: short=$50.60/3566.36 long=$50.60/6866.73
+rust-engine-1  | 2026-03-27T13:31:27.277535Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Fee strategy: short@Binance=Market (tif=ioc, fee=0.00040)
+long@Bybit=Market (tif=ioc, fee=0.00055)
+rust-engine-1  | 2026-03-27T13:31:27.472163Z  INFO trading_engine::binance_gateway: Binance order 1827880064 submitted (client_oid=rte0000000000000007): SELL 20.00 SOLUSDT @
+None | 194605us
+rust-engine-1  | 2026-03-27T13:31:27.472196Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Short filled but long failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" } — attempting retry
+rust-engine-1  | 2026-03-27T13:31:27.472340Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: SELL SOLUSDT 1827880064 qty=0.000000 avg_price=0.00 status=NEW latency=38295µs
+rust-engine-1  | 2026-03-27T13:31:27.472393Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: SELL SOLUSDT 1827880064 qty=20.000000 avg_price=83.33 status=FILLED latency=38370µs
+rust-engine-1  | 2026-03-27T13:31:27.973929Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 1/3 for Buy leg (delay=500ms)
+rust-engine-1  | 2026-03-27T13:31:27.982210Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 1 failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" }
+rust-engine-1  | 2026-03-27T13:31:28.983501Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 2/3 for Buy leg (delay=1000ms)
+rust-engine-1  | 2026-03-27T13:31:29.093140Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 2 failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" }
+rust-engine-1  | 2026-03-27T13:31:29.311999Z  INFO trading_engine: [execution] Health:
+submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=0/5
+rust-engine-1  | 2026-03-27T13:31:29.494758Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:31:29.594848Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $2733.49 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:31:29.603639Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.73
+rust-engine-1  | 2026-03-27T13:31:29.603687Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $6866.73 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:31:30.007449Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.73
+rust-engine-1  | 2026-03-27T13:31:30.228933Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$10541.36, exchanges=3, positions=1
+rust-engine-1  | 2026-03-27T13:31:30.310320Z  INFO trading_engine: [ws-fill] binance SOLUSDT BUY NEW qty=0.0000 price=0.0000 fee=0.000000 USDT latency=35862µs
+rust-engine-1  | 2026-03-27T13:31:30.310359Z  INFO trading_engine: [ws-fill] binance SOLUSDT BUY FILLED qty=18.0000 price=83.3700 fee=0.600264 USDT latency=39080µs
+rust-engine-1  | 2026-03-27T13:31:30.310370Z  INFO trading_engine: [ws-fill] binance SOLUSDT SELL NEW qty=0.0000 price=0.0000 fee=0.000000 USDT latency=38295µs
+rust-engine-1  | 2026-03-27T13:31:30.310411Z  INFO trading_engine: [ws-fill] binance SOLUSDT SELL FILLED qty=20.0000 price=83.3300 fee=0.666640 USDT latency=38370µs
+rust-engine-1  | 2026-03-27T13:31:31.094512Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 3/3 for Buy leg (delay=2000ms)
+rust-engine-1  | 2026-03-27T13:31:31.103642Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 3 failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" }
+rust-engine-1  | 2026-03-27T13:31:31.103819Z ERROR trading_engine::multi_exchange::funding_arb_executor: [dual-leg] All 3 retry attempts exhausted for Buy leg
+rust-engine-1  | 2026-03-27T13:31:31.103902Z ERROR trading_engine::multi_exchange::funding_arb_executor: [dual-leg] LEGGING RISK: Retry failed for long leg. Initiating emergency close.
+rust-engine-1  | 2026-03-27T13:31:31.104097Z  WARN trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] LEGGING RISK: SOL_USDT filled on Binance but failed on Bybit. Emergency closing filled leg.
+rust-engine-1  | 2026-03-27T13:31:31.104173Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Emergency closing SHORT leg on Binance: size=20
+rust-engine-1  | 2026-03-27T13:31:31.180804Z  INFO trading_engine::binance_gateway: Binance order 1827880090 submitted (client_oid=rte0000000000000008): BUY 20.00 SOLUSDT @ None | 76546us
+rust-engine-1  | 2026-03-27T13:31:31.181502Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Legging risk resolved: closed filled leg (attempt
+1)
+rust-engine-1  | 2026-03-27T13:31:31.187131Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: BUY SOLUSDT 1827880090 qty=0.000000 avg_price=0.00 status=NEW latency=45080µs
+rust-engine-1  | 2026-03-27T13:31:31.191148Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: BUY SOLUSDT 1827880090 qty=20.000000 avg_price=83.35 status=FILLED latency=49110µs
+rust-engine-1  | 2026-03-27T13:31:36.315095Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.69 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:31:36.424962Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.73
+rust-engine-1  | 2026-03-27T13:31:36.629153Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6866.73 short_bal=$3565.43 notional=$213.93 mid_price=83.15 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:31:36.737594Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 3× for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:36.817308Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:37.097817Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:31:49.321404Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.43 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:31:49.331677Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.88
+rust-engine-1  | 2026-03-27T13:31:49.521889Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6866.88 short_bal=$4039.60 notional=$242.38 mid_price=1985.69 size=120 lev=3x
+rust-engine-1  | 2026-03-27T13:31:49.532856Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 3× for ETHUSDT
+rust-engine-1  | 2026-03-27T13:31:49.706456Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:31:49.994652Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:31:56.326539Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.82 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:31:56.429986Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430016Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430024Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430031Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430038Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430050Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:31:56.430056Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:31:56.440903Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6866.93
+rust-engine-1  | 2026-03-27T13:31:56.632442Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6866.93 short_bal=$4040.17 notional=$242.41 mid_price=83.03 size=2900 lev=3x
+rust-engine-1  | 2026-03-27T13:31:56.743740Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:31:56.817437Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:56.956182Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:31:56.956237Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED ETH_USDT: Minimum 1 contract = 1.0000 units = $1984.55 notional requires $992.27 margin, but only $941.14 available
+rust-engine-1  | 2026-03-27T13:31:56.956250Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Minimum 1 contract = 1.0000 units = $66405.85 notional requires $33202.93 margin, but only $941.14 available
+rust-engine-1  | 2026-03-27T13:31:56.956264Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] PRE-TRADE APPROVED: SOL_USDT short@Binance long@Bybit net_rate=0.4966% apr=543.8% slippage=0.0bps basis=0.0034 breakeven=0.4 periods size=19
+rust-engine-1  | 2026-03-27T13:31:57.067834Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 2× for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:57.094696Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:31:57.140379Z  INFO trading_engine::binance_gateway: Binance leverage set to 2x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:31:57.149800Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6867.66
+rust-engine-1  | 2026-03-27T13:31:57.218734Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Pre-flight margin OK: short=$48.07/3570.49 long=$48.07/6867.66
+rust-engine-1  | 2026-03-27T13:31:57.218769Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Fee strategy: short@Binance=Market (tif=ioc, fee=0.00040)
+long@Bybit=Market (tif=ioc, fee=0.00055)
+rust-engine-1  | 2026-03-27T13:31:57.394928Z  INFO trading_engine::binance_gateway: Binance order 1827880387 submitted (client_oid=rte0000000000000009): SELL 19.00 SOLUSDT @
+None | 176136us
+rust-engine-1  | 2026-03-27T13:31:57.394961Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Short filled but long failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" } — attempting retry
+rust-engine-1  | 2026-03-27T13:31:57.395149Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: SELL SOLUSDT 1827880387 qty=0.000000 avg_price=0.00 status=NEW latency=37111µs
+rust-engine-1  | 2026-03-27T13:31:57.395198Z  INFO trading_engine::ws_fill_receiver: [binance-ws] Fill: SELL SOLUSDT 1827880387 qty=19.000000 avg_price=83.25 status=FILLED latency=37182µs
+rust-engine-1  | 2026-03-27T13:31:57.896679Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 1/3 for Buy leg (delay=500ms)
+rust-engine-1  | 2026-03-27T13:31:57.905113Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 1 failed: Unknown { code: "110072", message: "OrderLinkedID is duplicate" }
+rust-engine-1  | 2026-03-27T13:31:58.906428Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 2/3 for Buy leg (delay=1000ms)
+rust-engine-1  | 2026-03-27T13:31:59.016298Z  INFO trading_engine::bybit_gateway: Bybit order 43976849-c2c2-43ef-815c-f0da21e5fe99 submitted (link_id=rte0000000000000013): Buy 19.0 SOLUSDT @ None | 109806µs
+rust-engine-1  | 2026-03-27T13:31:59.016334Z  WARN trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 2 returned 0 fill: "New"
+rust-engine-1  | 2026-03-27T13:31:59.017571Z  INFO trading_engine::ws_fill_receiver: [bybit-ws] Fill: Buy SOLUSDT 43976849-c2c2-43ef-815c-f0da21e5fe99 qty=19.000000 avg_price=82.99 status=Filled latency=3508µs
+rust-engine-1  | 2026-03-27T13:32:00.310855Z  INFO trading_engine: [execution] Health:
+submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=0/5
+rust-engine-1  | 2026-03-27T13:32:00.494666Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:00.594830Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $2781.98 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:00.604929Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6077.62
+rust-engine-1  | 2026-03-27T13:32:00.604972Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $6077.62 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:01.014153Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6077.62
+rust-engine-1  | 2026-03-27T13:32:01.017503Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry attempt 3/3 for Buy leg (delay=2000ms)
+rust-engine-1  | 2026-03-27T13:32:01.028042Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Idempotency check: previous order 43976849-c2c2-43ef-815c-f0da21e5fe99 already filled (19000 contracts) — skipping retry
+rust-engine-1  | 2026-03-27T13:32:01.028072Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Retry succeeded: both legs now filled
+rust-engine-1  | 2026-03-27T13:32:01.028081Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] POSITION OPENED: id=1 SOL_USDT short@Binance (0.0000) long@Bybit (82.9900) size=19 basis=-82.9900
+rust-engine-1  | 2026-03-27T13:32:01.294861Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$9800.74, exchanges=3, positions=2
+rust-engine-1  | 2026-03-27T13:32:01.398258Z  INFO trading_engine: [ws-fill] binance SOLUSDT BUY NEW qty=0.0000 price=0.0000 fee=0.000000 USDT latency=45080µs
+rust-engine-1  | 2026-03-27T13:32:01.398299Z  INFO trading_engine: [ws-fill] binance SOLUSDT BUY FILLED qty=20.0000 price=83.3500 fee=0.666800 USDT latency=49110µs
+rust-engine-1  | 2026-03-27T13:32:01.398316Z  INFO trading_engine: [ws-fill] binance SOLUSDT SELL NEW qty=0.0000 price=0.0000 fee=0.000000 USDT latency=37111µs
+rust-engine-1  | 2026-03-27T13:32:01.398326Z  INFO trading_engine: [ws-fill] binance SOLUSDT SELL FILLED qty=19.0000 price=83.2500 fee=0.632700 USDT latency=37182µs
+rust-engine-1  | 2026-03-27T13:32:01.398339Z  INFO trading_engine: [ws-fill] bybit SOLUSDT Buy Filled qty=19.0000 price=82.9900 fee=0.867246 USDT latency=3508µs
+rust-engine-1  | 2026-03-27T13:32:26.456394Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456436Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456442Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456446Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456450Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456456Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:26.456461Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:32:26.456470Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":179,"channels":[]}
+rust-engine-1  | 2026-03-27T13:32:26.963795Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:32:26.963850Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED ETH_USDT: Minimum 1 contract = 1.0000 units = $1986.01 notional requires $993.00 margin, but only $941.14 available
+rust-engine-1  | 2026-03-27T13:32:26.963865Z  WARN trading_engine::multi_exchange::funding_arb_risk: [pre-trade] REJECTED BTC_USDT: Minimum 1 contract = 1.0000 units = $66422.75 notional requires $33211.38 margin, but only $941.14 available
+rust-engine-1  | 2026-03-27T13:32:31.398947Z  INFO trading_engine: [execution] Health:
+submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=0/5
+rust-engine-1  | 2026-03-27T13:32:31.594742Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $941.14 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:31.794962Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $2788.58 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:31.905493Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6078.20
+rust-engine-1  | 2026-03-27T13:32:31.905532Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $6078.20 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:32:32.108897Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6077.22
+rust-engine-1  | 2026-03-27T13:32:32.631080Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$9807.91, exchanges=3, positions=2
+rust-engine-1  | 2026-03-27T13:32:37.718558Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.12 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:32:37.731922Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6076.99
+rust-engine-1  | 2026-03-27T13:32:37.926037Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6076.99 short_bal=$2792.63 notional=$167.56 mid_price=82.95 size=2000 lev=3x
+rust-engine-1  | 2026-03-27T13:32:37.933402Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 3× for SOLUSDT
+rust-engine-1  | 2026-03-27T13:32:38.120861Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:32:38.394714Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:32:43.003928Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+rust-engine-1  | 2026-03-27T13:32:44.722078Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.87 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:32:44.831978Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6339.46
+rust-engine-1  | 2026-03-27T13:32:45.017483Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6339.46 short_bal=$3527.31 notional=$211.64 mid_price=1986.30 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:32:45.127667Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:32:45.202861Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:32:45.494732Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:32:46.723986Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.07 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:32:46.733347Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6339.46
+rust-engine-1  | 2026-03-27T13:32:46.925628Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6339.46 short_bal=$3527.49 notional=$211.65 mid_price=83.01 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:32:46.935662Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:32:47.111176Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:32:47.394732Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:32:47.662317Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+rust-engine-1  | 2026-03-27T13:32:47.972096Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+rust-engine-1  | 2026-03-27T13:32:48.209774Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+rust-engine-1  | 2026-03-27T13:32:51.847821Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.62 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:32:52.004914Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6340.43
+rust-engine-1  | 2026-03-27T13:32:52.203941Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$6340.43 short_bal=$3528.02 notional=$211.68 mid_price=1986.81 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:32:52.333477Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:32:52.410883Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:32:52.694831Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:32:53.901093Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+rust-engine-1  | 2026-03-27T13:32:53.901225Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+rust-engine-1  | 2026-03-27T13:32:54.461832Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+rust-engine-1  | 2026-03-27T13:32:56.526982Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527034Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527044Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527052Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527060Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527069Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:32:56.527078Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:32:56.740117Z  INFO trading_engine::dashboard_server: [dashboard] Manual trade submitted: buy BTC_USDT 50.00 USDT SL=None TP=None
+rust-engine-1  | 2026-03-27T13:32:56.740784Z  INFO trading_engine: [execution] Manual trade received: buy BTC_USDT 50.00 USDT lev=10x SL=None TP=None
+rust-engine-1  | 2026-03-27T13:32:56.900985Z  INFO trading_engine::gateio_gateway: [gateio] USDT→contracts: 500.00 USDT → 75 contracts (price=66472.6000, quanto=0.00010000)
+rust-engine-1  | 2026-03-27T13:32:56.901021Z  INFO trading_engine: [execution] Manual trade: 50.00 USDT × 10x leverage = 500.00 notional → 75 contracts for BTC_USDT
+rust-engine-1  | 2026-03-27T13:32:56.960940Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:32:56.961079Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] PRE-TRADE APPROVED: ETH_USDT short@Bybit long@Gate.io net_rate=0.5084% apr=556.7% slippage=8.5bps basis=0.0000 breakeven=0.4 periods size=1
+rust-engine-1  | 2026-03-27T13:32:56.994655Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 10x for BTC_USDT (isolated margin)
+rust-engine-1  | 2026-03-27T13:32:57.072449Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 2× for ETHUSDT
+rust-engine-1  | 2026-03-27T13:32:57.075488Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 2x for ETH_USDT (isolated margin)
+rust-engine-1  | 2026-03-27T13:32:57.085159Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $6339.80
+rust-engine-1  | 2026-03-27T13:32:57.155158Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Pre-flight margin OK: short=$2.53/6339.80 long=$2.53/941.14
+rust-engine-1  | 2026-03-27T13:32:57.155197Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Contract multiplier normalization: short=1 (mult=1) long=100 (mult=0.01)
+rust-engine-1  | 2026-03-27T13:32:57.155208Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Fee strategy: short@Bybit=Market (tif=ioc, fee=0.00055) long@Gate.io=Market (tif=ioc, fee=0.00075)
+rust-engine-1  | 2026-03-27T13:32:57.235814Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage set to 2x for ETH_USDT (isolated margin)
+rust-engine-1  | 2026-03-27T13:32:57.263833Z  INFO trading_engine::bybit_gateway: Bybit order 2abf61b8-cfff-4784-9d89-6adcc0994268 submitted (link_id=rte0000000000000014): Sell 1.00 ETHUSDT @ None | 108602µs
+rust-engine-1  | 2026-03-27T13:32:57.264977Z  INFO trading_engine::ws_fill_receiver: [bybit-ws] Fill: Sell ETHUSDT 2abf61b8-cfff-4784-9d89-6adcc0994268 qty=1.000000 avg_price=1986.93 status=Filled latency=3906µs
+rust-engine-1  | 2026-03-27T13:32:57.994746Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage 10x not confirmed for BTC_USDT after 500ms — proceeding anyway (normal when no position exists yet)
+rust-engine-1  | 2026-03-27T13:32:58.071914Z  INFO trading_engine::gateio_gateway: [gateio-ws] Order ACK: id=, status=open, filled=0/0, latency=1170808us
+rust-engine-1  | 2026-03-27T13:32:58.094605Z  INFO trading_engine: [execution] Manual trade filled: buy BTC_USDT 0 contracts @ 0.0000 (order_id=)
+rust-engine-1  | 2026-03-27T13:32:58.094663Z  INFO trading_engine: [execution] Manual position tracking sent to strategy thread for BTC_USDT
+rust-engine-1  | 2026-03-27T13:32:58.094850Z  INFO trading_engine::exit_evaluator: [exit-eval] Tracking LONG position for sym 1 @ 0.0000 SL=0.0000 TP=0.0000
+rust-engine-1  | 2026-03-27T13:32:58.094864Z  INFO trading_engine::position_lifecycle:
+[lifecycle] Position netting: sym=1 added=0 net=0
+rust-engine-1  | 2026-03-27T13:32:58.094870Z  INFO trading_engine::position_lifecycle:
+[lifecycle] Tracking LONG 1 @ 0.0000 size=0 lev=10x notional=$0
+rust-engine-1  | 2026-03-27T13:32:58.094879Z  INFO trading_engine: [strategy] Manual position tracked: sym_id=1 is_long=true entry=0.0000 SL=None TP=None
+rust-engine-1  | 2026-03-27T13:32:58.194924Z  INFO trading_engine::gateio_gateway: [gateio-ws] Leverage 2x not confirmed for ETH_USDT after 500ms — proceeding anyway (normal
+when no position exists yet)
+rust-engine-1  | 2026-03-27T13:32:58.273123Z  INFO trading_engine::gateio_gateway: [gateio-ws] Order ACK: id=, status=open, filled=0/0, latency=1117802us
+rust-engine-1  | 2026-03-27T13:32:58.273330Z  INFO trading_engine::multi_exchange::funding_arb_executor: [dual-leg] Both legs filled: short=2abf61b8-cfff-4784-9d89-6adcc0994268 (fee=0.000000) long= (fee=0.000000)
+rust-engine-1  | 2026-03-27T13:32:58.273384Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] POSITION OPENED: id=2 ETH_USDT short@Bybit (0.0000) long@Gate.io (0.0000) size=1 basis=0.0000
+rust-engine-1  | 2026-03-27T13:32:59.095764Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.41 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:32:59.106143Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5343.99
+rust-engine-1  | 2026-03-27T13:32:59.303993Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5343.99 short_bal=$3528.47 notional=$211.71 mid_price=1986.98 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:32:59.312544Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 3× for ETHUSDT
+rust-engine-1  | 2026-03-27T13:32:59.494749Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:32:59.794819Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:01.097155Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.07 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:01.207993Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.23
+rust-engine-1  | 2026-03-27T13:33:01.411459Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.23 short_bal=$3529.15 notional=$211.75 mid_price=82.93 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:01.521910Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:01.603262Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:01.894672Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:02.714202Z  INFO trading_engine: [execution] Health:
+submitted=1, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=1/5
+rust-engine-1  | 2026-03-27T13:33:02.894927Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $890.66 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:02.995026Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $3529.39 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:03.004012Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.68
+rust-engine-1  | 2026-03-27T13:33:03.004495Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $5675.68 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:03.404915Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.68
+rust-engine-1  | 2026-03-27T13:33:03.605071Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$10095.73, exchanges=3, positions=3
+rust-engine-1  | 2026-03-27T13:33:03.694910Z  INFO trading_engine: [ws-fill] bybit ETHUSDT Sell Filled qty=1.0000 price=1986.9300 fee=1.092812 USDT latency=3906µs
+rust-engine-1  | 2026-03-27T13:33:03.696075Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=5.65 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:03.805924Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.68
+rust-engine-1  | 2026-03-27T13:33:04.004999Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.68 short_bal=$3529.60 notional=$211.78 mid_price=66449.90 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:04.115879Z  INFO trading_engine::bybit_gateway: Bybit leverage set to 3× for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:04.200910Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:04.494721Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:06.496856Z  WARN trading_engine::gateio_gateway: [gateio-reconcile] GHOST: Local tracking for ETH_USDT but REST shows no position — cleaning up
+rust-engine-1  | 2026-03-27T13:33:06.497164Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] Removed ghost tracking entry: r2
+rust-engine-1  | 2026-03-27T13:33:06.497217Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] Cycle 14: 1 discrepancies found and self-healed
+rust-engine-1  | 2026-03-27T13:33:07.700109Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=5.21 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:07.710959Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.56
+rust-engine-1  | 2026-03-27T13:33:07.907922Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.56 short_bal=$3529.78 notional=$211.79 mid_price=66453.00 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:07.916911Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:08.094741Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:08.394790Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:13.703321Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.31 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:13.815147Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.28
+rust-engine-1  | 2026-03-27T13:33:14.006166Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.28 short_bal=$3529.79 notional=$211.79 mid_price=1987.00 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:33:14.115875Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:14.194780Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:33:14.494839Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:25.744228Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.09 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:25.794750Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5674.83
+rust-engine-1  | 2026-03-27T13:33:26.002484Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5674.83 short_bal=$3528.37 notional=$211.70 mid_price=82.99 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:26.011670Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:26.194790Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:26.494844Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:26.597342Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597378Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597387Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597396Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597404Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597412Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:26.597421Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:33:26.597433Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":239,"channels":[]}
+rust-engine-1  | 2026-03-27T13:33:26.957055Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:33:32.297924Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.05 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:32.410934Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5674.92
+rust-engine-1  | 2026-03-27T13:33:32.610922Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5674.92 short_bal=$3529.96 notional=$211.80 mid_price=82.97 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:32.719943Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:32.796904Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:33.094778Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:33.299015Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=5.02 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:33.309007Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.75
+rust-engine-1  | 2026-03-27T13:33:33.501928Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.75 short_bal=$3529.96 notional=$211.80 mid_price=66448.50 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:33.509217Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:33.736740Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:33.994758Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:33.994862Z  INFO trading_engine: [execution] Health:
+submitted=1, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=1/5
+rust-engine-1  | 2026-03-27T13:33:34.194700Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $890.66 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:34.394858Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $3530.49 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:34.505474Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.75
+rust-engine-1  | 2026-03-27T13:33:34.505511Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $5675.75 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:33:35.294747Z ERROR trading_engine::telegram_alert: [telegram] Send failed: HTTP 404 Not Found — {"ok":false,"error_code":404,"description":"Not Found"}
+rust-engine-1  | 2026-03-27T13:33:35.304361Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.75
+rust-engine-1  | 2026-03-27T13:33:35.894964Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$10096.90, exchanges=3, positions=4
+rust-engine-1  | 2026-03-27T13:33:36.996766Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=4.71 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:37.006982Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.75
+rust-engine-1  | 2026-03-27T13:33:37.204421Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.75 short_bal=$3530.49 notional=$211.83 mid_price=66443.30 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:37.213007Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:37.394682Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:37.694888Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:37.996820Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=3.00 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:38.109749Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5676.27
+rust-engine-1  | 2026-03-27T13:33:38.301909Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5676.27 short_bal=$3530.49 notional=$211.83 mid_price=82.97 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:38.413976Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:38.497418Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:38.794759Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:38.996890Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.93 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:39.006633Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5676.27
+rust-engine-1  | 2026-03-27T13:33:39.202673Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5676.27 short_bal=$3530.49 notional=$211.83 mid_price=82.97 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:39.210945Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:39.394734Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:39.694753Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:39.997401Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.93 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:40.112929Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5676.27
+rust-engine-1  | 2026-03-27T13:33:40.313087Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5676.27 short_bal=$3530.67 notional=$211.84 mid_price=82.98 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:40.421588Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:40.496853Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:40.794754Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:42.998987Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=4.49 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:43.007966Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5676.27
+rust-engine-1  | 2026-03-27T13:33:43.202951Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5676.27 short_bal=$3529.08 notional=$211.74 mid_price=66432.30 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:43.210883Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:43.394748Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:43.694755Z  WARN trading_engine: [stat-arb] Both legs failed: Unknown error 110072: OrderLinkedID is duplicate / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:43.999980Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=4.49 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:44.109731Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.73
+rust-engine-1  | 2026-03-27T13:33:44.301976Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.73 short_bal=$3530.49 notional=$211.83 mid_price=66437.60 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:44.411483Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:44.494757Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:44.586812Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+rust-engine-1  | 2026-03-27T13:33:44.794732Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:44.892185Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+rust-engine-1  | 2026-03-27T13:33:46.000864Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.37 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:46.010127Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.73
+rust-engine-1  | 2026-03-27T13:33:46.202941Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.73 short_bal=$3529.78 notional=$211.79 mid_price=1986.96 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:33:46.213121Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:46.394740Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:33:46.694766Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:47.001246Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.37 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:47.112389Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.73
+rust-engine-1  | 2026-03-27T13:33:47.304993Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.73 short_bal=$3530.49 notional=$211.83 mid_price=1986.78 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:33:47.413751Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:47.505871Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:33:47.794772Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:51.004254Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.96 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:51.014743Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5675.68
+rust-engine-1  | 2026-03-27T13:33:51.336645Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5675.68 short_bal=$3531.02 notional=$211.86 mid_price=82.95 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:51.345955Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:51.701399Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:52.101225Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:54.104220Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=4.24 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:54.214888Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.90
+rust-engine-1  | 2026-03-27T13:33:54.404431Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.90 short_bal=$3532.43 notional=$211.95 mid_price=1985.30 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:33:54.513516Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:54.594732Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:33:54.894696Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:55.104235Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=4.17 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:55.114368Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.90
+rust-engine-1  | 2026-03-27T13:33:55.303950Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.90 short_bal=$3532.58 notional=$211.95 mid_price=66402.40 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:55.312136Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:55.494695Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:55.532392Z ERROR trading_engine::dashboard_server: [dashboard] Template render error for dashboard.html: Failed to render 'dashboard.html'
+rust-engine-1  | 2026-03-27T13:33:55.754792Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+rust-engine-1  | 2026-03-27T13:33:55.794852Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:56.104312Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.92 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:56.215115Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.90
+rust-engine-1  | 2026-03-27T13:33:56.416925Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.90 short_bal=$3532.43 notional=$211.95 mid_price=1985.28 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:33:56.525896Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:56.601190Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:33:56.624871Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624898Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624905Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624912Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624919Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624926Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:33:56.624934Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:33:56.894829Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:56.973695Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:33:57.104358Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=4.00 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:57.113844Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.90
+rust-engine-1  | 2026-03-27T13:33:57.302984Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.90 short_bal=$3532.43 notional=$211.95 mid_price=66400.50 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:33:57.310356Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:57.494960Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:33:57.794772Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:58.105439Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.85 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:33:58.216951Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.90
+rust-engine-1  | 2026-03-27T13:33:58.407044Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.90 short_bal=$3532.43 notional=$211.95 mid_price=82.90 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:33:58.516917Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:33:58.594699Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:33:58.894791Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:33:59.061475Z ERROR trading_engine::dashboard_server: [dashboard] Template render error for dashboard.html: Failed to render 'dashboard.html'
+rust-engine-1  | 2026-03-27T13:34:00.392567Z ERROR trading_engine::dashboard_server: [dashboard] Template render error for dashboard.html: Failed to render 'dashboard.html'
+rust-engine-1  | 2026-03-27T13:34:06.038799Z  INFO trading_engine: [execution] Health:
+submitted=1, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=1/5
+rust-engine-1  | 2026-03-27T13:34:06.200271Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $890.66 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:06.295000Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $3533.49 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:06.305901Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5678.58
+rust-engine-1  | 2026-03-27T13:34:06.305942Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $5678.58 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:06.717047Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5678.58
+rust-engine-1  | 2026-03-27T13:34:07.117122Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$10102.73, exchanges=3, positions=4
+rust-engine-1  | 2026-03-27T13:34:08.198956Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=3.93 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:08.309914Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5678.58
+rust-engine-1  | 2026-03-27T13:34:08.501893Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5678.58 short_bal=$3535.00 notional=$212.10 mid_price=66360.10 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:34:08.611096Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:08.695928Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:34:08.994775Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:15.204759Z  INFO trading_engine: [stat-arb] Entry opportunity: SOL_USDT z=2.89 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:15.214053Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.79
+rust-engine-1  | 2026-03-27T13:34:15.406413Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.79 short_bal=$3536.14 notional=$212.17 mid_price=82.80 size=2500 lev=3x
+rust-engine-1  | 2026-03-27T13:34:15.414920Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for SOLUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:15.594917Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for SOLUSDT
+rust-engine-1  | 2026-03-27T13:34:15.898405Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:16.205905Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.92 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:16.318006Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.79
+rust-engine-1  | 2026-03-27T13:34:16.516525Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.79 short_bal=$3536.56 notional=$212.19 mid_price=1983.57 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:16.634508Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:16.710169Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:16.994798Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:17.206613Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.92 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:17.216961Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.79
+rust-engine-1  | 2026-03-27T13:34:17.422336Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.79 short_bal=$3536.61 notional=$212.20 mid_price=1983.88 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:17.436149Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:17.796550Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:18.095641Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:20.208786Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.81 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:20.320004Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.30
+rust-engine-1  | 2026-03-27T13:34:20.509442Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.30 short_bal=$3537.42 notional=$212.24 mid_price=1983.30 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:20.621779Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:20.699888Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:20.995206Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:22.226981Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=3.91 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:22.237028Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.30
+rust-engine-1  | 2026-03-27T13:34:22.438133Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.30 short_bal=$3537.60 notional=$212.26 mid_price=66344.00 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:34:22.494784Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:22.696308Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:34:22.994747Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:23.227018Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=3.78 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:23.336519Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.30
+rust-engine-1  | 2026-03-27T13:34:23.525912Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.30 short_bal=$3537.07 notional=$212.22 mid_price=66344.00 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:34:23.634986Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:23.712248Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:34:23.994812Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:26.229496Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=3.67 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:26.239849Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.97
+rust-engine-1  | 2026-03-27T13:34:26.429971Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.97 short_bal=$3537.58 notional=$212.25 mid_price=66340.40 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:34:26.437955Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:26.615995Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:34:26.722202Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722236Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722242Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722247Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722252Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722256Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-27T13:34:26.722262Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+rust-engine-1  | 2026-03-27T13:34:26.722271Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":300,"channels":[]}
+rust-engine-1  | 2026-03-27T13:34:26.894840Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:26.959922Z  INFO trading_engine::multi_exchange::funding_arb_engine: [funding-arb-engine] Found 3 actionable opportunities
+rust-engine-1  | 2026-03-27T13:34:27.495291Z  INFO trading_engine: [stat-arb] Entry opportunity: BTC_USDT z=3.67 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:27.604910Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.97
+rust-engine-1  | 2026-03-27T13:34:27.809997Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.97 short_bal=$3538.09 notional=$212.29 mid_price=66353.40 size=3 lev=3x
+rust-engine-1  | 2026-03-27T13:34:27.920123Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for BTCUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:27.994814Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for BTCUSDT
+rust-engine-1  | 2026-03-27T13:34:28.294974Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:31.496872Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.77 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:31.506944Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5678.15
+rust-engine-1  | 2026-03-27T13:34:31.710346Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5678.15 short_bal=$3538.10 notional=$212.29 mid_price=1983.71 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:31.720737Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:31.895104Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:32.194781Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:32.497456Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.66 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:32.607863Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5678.15
+rust-engine-1  | 2026-03-27T13:34:32.801917Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5678.15 short_bal=$3537.99 notional=$212.28 mid_price=1983.68 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:32.910539Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:32.994719Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:33.294737Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:35.498944Z  INFO trading_engine: [stat-arb] Entry opportunity: ETH_USDT z=3.58 (long=Bybit, short=Binance)
+rust-engine-1  | 2026-03-27T13:34:35.507511Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.96
+rust-engine-1  | 2026-03-27T13:34:35.701466Z  INFO trading_engine: [stat-arb] Position
+sizing: long_bal=$5677.96 short_bal=$3538.44 notional=$212.31 mid_price=1983.49 size=100 lev=3x
+rust-engine-1  | 2026-03-27T13:34:35.709108Z  INFO trading_engine::bybit_gateway: Bybit leverage already at 3× for ETHUSDT (no change needed)
+rust-engine-1  | 2026-03-27T13:34:35.894769Z  INFO trading_engine::binance_gateway: Binance leverage set to 3x for ETHUSDT
+rust-engine-1  | 2026-03-27T13:34:36.294774Z  WARN trading_engine: [stat-arb] Both legs failed: Invalid price / Insufficient balance
+rust-engine-1  | 2026-03-27T13:34:37.197938Z  INFO trading_engine: [execution] Health:
+submitted=1, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0, slots=1/5
+rust-engine-1  | 2026-03-27T13:34:37.394959Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Gate.io balance: $890.66 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:37.595211Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Binance balance: $3538.50 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:37.705204Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.96
+rust-engine-1  | 2026-03-27T13:34:37.706865Z  INFO trading_engine::multi_exchange::margin_monitor: [margin] Bybit balance: $5677.96 (margin: 100.0%)
+rust-engine-1  | 2026-03-27T13:34:37.903807Z  INFO trading_engine::bybit_gateway: Bybit balance (totalAvailableBalance): $5677.96
+rust-engine-1  | 2026-03-27T13:34:38.530162Z  INFO trading_engine: [execution] Multi-exchange health: total_balance=$10107.12, exchanges=3, positions=4
+^C
+root@ubuntu-s-4vcpu-8gb-sgp1-01:~/tradings/crypto_trading_bot# docker compose down
+WARN[0000] /root/tradings/crypto_trading_bot/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion
+ [+] Running 4/4
+ ✔ Container crypto_trading_bot-python-services-1  Removed                        2.4s  ✔ Container crypto_trading_bot-rust-engine-1      Removed                       10.3s  ✔ Container crypto_trading_bot-redis-1            Removed                        0.5s  ✔ Container crypto_trading_bot-postgres-1         Removed                        0.5s
