@@ -1015,13 +1015,14 @@ impl GateIoGateway {
     ///   - signature: HMAC_SHA512(secret, "api\nfutures.login\n\n{timestamp}")
     fn build_login_message(api_key: &str, secret: &[u8]) -> String {
         let time = now_ms() / 1000;
+        let req_id = format!("login-{}", time);
         // Login uses API-style signature: "api\n{channel}\n{req_param}\n{timestamp}"
         // For login, req_param is empty string.
         let sign = Self::ws_api_sign(secret, "futures.login", "", time);
 
         format!(
-            r#"{{"time":{},"channel":"futures.login","event":"api","payload":{{"api_key":"{}","signature":"{}","timestamp":"{}"}}}}"#,
-            time, api_key, sign, time
+            r#"{{"time":{},"channel":"futures.login","event":"api","payload":{{"api_key":"{}","signature":"{}","timestamp":"{}","req_id":"{}"}}}}"#,
+            time, api_key, sign, time, req_id
         )
     }
 
@@ -1205,6 +1206,8 @@ impl GateIoGateway {
         const MAX_AUTH_FAILURES: u32 = 3;
         /// Backoff interval (ms) after exhausting auth retries.
         const AUTH_FAILURE_BACKOFF_MS: u64 = 60_000;
+        /// Maximum length of login response text to include in logs.
+        const LOGIN_LOG_MAX_LEN: usize = 300;
         let mut consecutive_auth_failures: u32 = 0;
 
         loop {
@@ -1289,7 +1292,7 @@ impl GateIoGateway {
                     }
 
                     // Wait for login response before proceeding
-                    let login_deadline = Instant::now() + Duration::from_secs(5);
+                    let login_deadline = Instant::now() + Duration::from_secs(15);
                     let mut logged_in = false;
                     while Instant::now() < login_deadline {
                         tokio::select! {
@@ -1298,12 +1301,12 @@ impl GateIoGateway {
                                     Some(Ok(Message::Text(txt))) => {
                                         debug!("[gateio-ws] Login phase received: {}", txt);
                                         if txt.contains("futures.login") {
-                                            // Gate.io login success indicators:
-                                            // - {"error":null, "result":{"uid":"..."}}
-                                            // - {"error": null, ...} (with space after colon)
-                                            // - {"result":{"status":"success"}}
-                                            // We check for error being null (with or without
-                                            // space) OR a result object containing uid/status.
+                                            // Gate.io futures.login API response on success uses header.status="200",
+                                            // NOT "error":null or "status":"success".
+                                            // Official response format:
+                                            // {"request_id":"...","ack":false,"header":{"status":"200","channel":"futures.login","event":"api",...},"data":{"result":{"api_key":"..."}}}
+                                            let header_status_200 = txt.contains("\"status\":\"200\"")
+                                                || txt.contains("\"status\": \"200\"");
                                             let has_null_error = txt.contains("\"error\":null")
                                                 || txt.contains("\"error\": null")
                                                 || txt.contains("\"error\" : null");
@@ -1311,8 +1314,12 @@ impl GateIoGateway {
                                             let has_status_success = txt.contains("\"status\":\"success\"")
                                                 || txt.contains("\"status\": \"success\"");
                                             let has_uid = txt.contains("\"uid\"");
+                                            // Also detect the actual success pattern: result containing api_key
+                                            let has_api_key_in_result = has_result && txt.contains("\"api_key\"");
 
-                                            if has_null_error || has_status_success || (has_result && has_uid) {
+                                            if header_status_200 || has_null_error || has_status_success
+                                                || (has_result && has_uid) || has_api_key_in_result
+                                            {
                                                 info!("[gateio-ws] futures.login successful — WS trading API authenticated");
                                                 logged_in = true;
                                                 break;
@@ -1328,6 +1335,8 @@ impl GateIoGateway {
                                                 error!("[gateio-ws] futures.login rejected: {}", txt);
                                                 break;
                                             }
+                                            // If none of the above match, log the full message so we can debug further
+                                            warn!("[gateio-ws] futures.login response not recognized, continuing wait: {}", &txt[..txt.len().min(LOGIN_LOG_MAX_LEN)]);
                                         }
                                         if txt.contains("futures.pong") || txt.contains("futures.ping") {
                                             continue;
@@ -1428,6 +1437,28 @@ impl GateIoGateway {
                             backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
                         }
                         continue;
+                    }
+
+                    // CRITICAL: Only mark ready for order placement if futures.login ALSO succeeded.
+                    // futures.orders subscription auth only enables receiving fill notifications —
+                    // it does NOT authenticate WS order placement (futures.order_place channel).
+                    if !logged_in {
+                        consecutive_auth_failures += 1;
+                        error!(
+                            "[gateio-ws] futures.login did NOT succeed (attempt {}/{}) — cannot place WS orders. \
+                             Forcing reconnect to retry login.",
+                            consecutive_auth_failures, MAX_AUTH_FAILURES
+                        );
+                        if consecutive_auth_failures >= MAX_AUTH_FAILURES {
+                            if let Some(ref cb) = circuit_breaker {
+                                cb.trip(TripReason::AuthFailure);
+                            }
+                            tokio::time::sleep(Duration::from_millis(AUTH_FAILURE_BACKOFF_MS)).await;
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                            backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
+                        }
+                        continue; // Force reconnect and retry login
                     }
 
                     // Both login and subscription succeeded — reset auth failure counter
