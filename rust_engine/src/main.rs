@@ -3108,6 +3108,75 @@ fn execution_router_loop(
                                 }
                             });
                             
+                            // ISSUE 3 FIX: Update DashboardState with the new position so the
+                            // WebSocket broadcast pushes it to the frontend immediately.
+                            {
+                                let direction = if is_buy { "LONG" } else { "SHORT" };
+                                let notional = res.avg_fill_price * res.filled_size as f64;
+                                let margin_val = notional / (manual_req.leverage.max(1) as f64);
+                                let pos_json = serde_json::json!({
+                                    "symbol": sym_upper,
+                                    "direction": direction,
+                                    "side": manual_req.side,
+                                    "entry_price": res.avg_fill_price,
+                                    "size": res.filled_size,
+                                    "notional_size": notional,
+                                    "leverage": manual_req.leverage,
+                                    "unrealized_pnl": 0.0,
+                                    "pnl": 0.0,
+                                    "roe_pct": 0.0,
+                                    "mark_price": res.avg_fill_price,
+                                    "current_price": res.avg_fill_price,
+                                    "liquidation_price": 0.0,
+                                    "stop_loss": manual_req.stop_loss,
+                                    "take_profit": manual_req.take_profit,
+                                    "margin": margin_val,
+                                    "strategy": "manual",
+                                    "duration": "0s",
+                                    "order_id": res.order_id,
+                                });
+                                // Merge with existing positions
+                                let existing = dashboard_state.positions_str();
+                                let mut positions: Vec<serde_json::Value> =
+                                    serde_json::from_str(&existing).unwrap_or_default();
+                                positions.push(pos_json);
+                                dashboard_state.set_positions_json(
+                                    serde_json::to_string(&positions).unwrap_or_else(|_| "[]".to_string())
+                                );
+
+                                // Also add trade to recent trades list
+                                let trade_json = serde_json::json!({
+                                    "id": res.order_id,
+                                    "symbol": sym_upper,
+                                    "side": manual_req.side,
+                                    "size": res.filled_size,
+                                    "price": res.avg_fill_price,
+                                    "fee": res.fee,
+                                    "pnl": 0.0,
+                                    "strategy": "manual",
+                                    "timestamp": format!("{}",
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs()
+                                    ),
+                                });
+                                let existing_trades = dashboard_state.trades_str();
+                                let mut trades: Vec<serde_json::Value> =
+                                    serde_json::from_str(&existing_trades).unwrap_or_default();
+                                trades.push(trade_json);
+                                // Keep only last 100 trades
+                                if trades.len() > 100 {
+                                    trades = trades.split_off(trades.len() - 100);
+                                }
+                                dashboard_state.set_trades_json(
+                                    serde_json::to_string(&trades).unwrap_or_else(|_| "[]".to_string())
+                                );
+                                // Update active positions count
+                                dashboard_state.active_positions.store(positions.len() as u64, Ordering::Relaxed);
+                                info!("[execution] ISSUE 3: Dashboard state updated with manual trade position for {}", sym_upper);
+                            }
+
                             // Send position tracking info to strategy thread
                             let track = dashboard_server::ManualPositionTrack {
                                 symbol_id: sym_id,

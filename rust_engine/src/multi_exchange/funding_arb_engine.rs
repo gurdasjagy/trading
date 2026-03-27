@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use reqwest::Client;
@@ -326,6 +326,13 @@ pub struct FundingArbEngine {
     /// When set, enables proper position sizing (Bug #2 fix) and
     /// pre-flight margin simulation (Feature #3).
     instrument_mgr: Option<Arc<InstrumentManager>>,
+    /// ISSUE 4 FIX: Track symbols that recently failed with cooldown.
+    /// Maps symbol -> (last_failure_time, failure_count).
+    /// Prevents infinite retry loops on symbols that keep failing.
+    failed_symbols: HashMap<String, (Instant, u32)>,
+    /// ISSUE 9 FIX: Engine readiness flag — starts false, set to true after
+    /// the margin monitor completes its first balance fetch for all exchanges.
+    ready: bool,
 }
 
 impl FundingArbEngine {
@@ -352,6 +359,8 @@ impl FundingArbEngine {
             total_funding_collected: 0.0,
             shutdown,
             instrument_mgr: None,
+            failed_symbols: HashMap::new(),
+            ready: false,
         }
     }
 
@@ -430,6 +439,35 @@ impl FundingArbEngine {
                         info!("[funding-arb-engine] Found {} actionable opportunities", actionable.len());
                     }
 
+                    // ISSUE 9 FIX: Skip opportunity scanning until margin monitor is ready
+                    if !self.ready {
+                        // Check if margin monitor has data for all exchanges now
+                        let mm = margin_monitor.read();
+                        let has_all = symbols.iter().all(|_| {
+                            mm.has_exchange_data(ExchangeId::GateIo)
+                                && mm.has_exchange_data(ExchangeId::Binance)
+                                && mm.has_exchange_data(ExchangeId::Bybit)
+                        });
+                        drop(mm);
+                        if has_all {
+                            self.ready = true;
+                            info!("[funding-arb-engine] Margin monitor ready — enabling opportunity scanning");
+                        } else {
+                            debug!("[funding-arb-engine] Waiting for margin monitor initialization...");
+                            continue;
+                        }
+                    }
+
+                    // ISSUE 4 FIX: Clean up expired cooldowns (> 30 minutes)
+                    self.failed_symbols.retain(|sym, (last_fail, count)| {
+                        let elapsed = last_fail.elapsed().as_secs();
+                        let still_cooling = elapsed < 1800; // 30 minute max cooldown
+                        if !still_cooling {
+                            info!("[funding-arb-engine] Cooldown expired for {} (was {} failures)", sym, count);
+                        }
+                        still_cooling
+                    });
+
                     // 3. Check if we can open new positions
                     if self.positions.len() >= self.config.max_concurrent_positions {
                         debug!("[funding-arb-engine] Max concurrent positions reached ({})",
@@ -442,6 +480,28 @@ impl FundingArbEngine {
                         // Skip if we already have a position for this symbol
                         if self.positions.iter().any(|p| p.symbol == opp.symbol && p.state == FundingArbState::Active) {
                             continue;
+                        }
+
+                        // ISSUE 4 FIX: Skip if symbol is in failure cooldown
+                        if let Some((last_fail, fail_count)) = self.failed_symbols.get(&opp.symbol) {
+                            // Exponential backoff: 300s * failure_count
+                            let cooldown_secs = 300u64.saturating_mul(*fail_count as u64);
+                            if last_fail.elapsed().as_secs() < cooldown_secs {
+                                debug!(
+                                    "[funding-arb-engine] {} in failure cooldown ({} failures, {}s remaining)",
+                                    opp.symbol, fail_count,
+                                    cooldown_secs.saturating_sub(last_fail.elapsed().as_secs())
+                                );
+                                continue;
+                            }
+                            // ISSUE 4 FIX: Max 3 failures = blacklisted for session
+                            if *fail_count >= 3 {
+                                debug!(
+                                    "[funding-arb-engine] {} blacklisted for session ({} failures)",
+                                    opp.symbol, fail_count
+                                );
+                                continue;
+                            }
                         }
 
                         // Pre-trade validation (uses InstrumentManager for proper sizing)
@@ -496,6 +556,13 @@ impl FundingArbEngine {
                                         warn!("[funding-arb-engine] LEGGING RISK: {} filled on {} but failed on {}. Emergency closing filled leg.",
                                             opp.symbol, filled_leg.exchange().name(), unfilled_exchange.name());
 
+                                        // ISSUE 4 FIX: Record failure with cooldown
+                                        let entry = self.failed_symbols.entry(opp.symbol.clone()).or_insert((Instant::now(), 0));
+                                        entry.0 = Instant::now();
+                                        entry.1 += 1;
+                                        warn!("[funding-arb-engine] {} failure count: {} — cooldown {}s",
+                                            opp.symbol, entry.1, 300 * entry.1);
+
                                         let mut closed = false;
                                         for attempt in 1..=3u32 {
                                             match DualLegExecutor::emergency_close_leg(
@@ -525,6 +592,13 @@ impl FundingArbEngine {
                                     DualLegResult::BothFailed { short_error, long_error } => {
                                         warn!("[funding-arb-engine] Entry failed on both legs: short={:?} long={:?}",
                                             short_error, long_error);
+
+                                        // ISSUE 4 FIX: Record failure with cooldown
+                                        let entry = self.failed_symbols.entry(opp.symbol.clone()).or_insert((Instant::now(), 0));
+                                        entry.0 = Instant::now();
+                                        entry.1 += 1;
+                                        warn!("[funding-arb-engine] {} failure count: {} — cooldown {}s",
+                                            opp.symbol, entry.1, 300 * entry.1);
                                     }
                                 }
 

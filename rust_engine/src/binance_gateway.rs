@@ -101,7 +101,12 @@ impl BinanceGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
-            next_client_id: AtomicU64::new(1),
+            next_client_id: AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            ),
             instrument_mgr: None,
         }
     }

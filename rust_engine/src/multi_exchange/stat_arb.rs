@@ -609,6 +609,21 @@ impl StatArbEngine {
         exits
     }
 
+    /// ISSUE 5 FIX: Record an entry failure so the cooldown mechanism prevents
+    /// immediate re-entry. This is called from the execution thread when
+    /// DualLegExecutor::execute_entry returns BothFailed.
+    pub fn record_entry_failure(&mut self, symbol: &str, timestamp_ns: u64) {
+        // Insert into exit_cooldowns so the existing cooldown check in
+        // check_entry_opportunity blocks re-entry for entry_cooldown_seconds.
+        self.exit_cooldowns.insert(symbol.to_string(), timestamp_ns);
+        // Reset signal persistence so re-entry requires fresh signal buildup
+        self.signal_persistence.remove(symbol);
+        warn!(
+            "[stat-arb] Entry failure recorded for {} — cooldown {:.0}s",
+            symbol, self.config.entry_cooldown_seconds
+        );
+    }
+
     /// Remove a closed position from tracking.
     pub fn remove_position(&mut self, symbol: &str) {
         self.active_positions.retain(|p| p.symbol != symbol);

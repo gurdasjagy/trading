@@ -57,7 +57,12 @@ impl BybitGateway {
             api_secret: api_secret.into_bytes(),
             rate_limiter: Arc::new(AdaptiveRateLimiter::new(10)),
             testnet,
-            next_client_id: AtomicU64::new(1),
+            next_client_id: AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            ),
             instrument_mgr: None,
         }
     }
@@ -343,7 +348,49 @@ impl ExecutionGateway for BybitGateway {
             .map_err(|e| match e {
                 ExchangeError::Timeout => ExchangeError::TimedOut { client_order_id: link_id.clone() },
                 other => other,
-            })?;
+            });
+
+        // ISSUE 1 FIX: Handle 110072 (duplicate orderLinkId) by looking up the
+        // existing order instead of treating it as an error. This happens when a
+        // REST call times out, we retry, but the original was already accepted.
+        let response = match response {
+            Err(ExchangeError::Unknown { ref code, .. }) if code == "DUPLICATE_ORDER_LINK_ID" => {
+                warn!(
+                    "Bybit 110072: orderLinkId {} already exists — looking up existing order",
+                    link_id
+                );
+                // The original order was accepted; look it up by client order ID
+                match self.check_order_by_client_id(&link_id, &symbol).await {
+                    Ok(Some(existing)) => {
+                        let end_us = now_us();
+                        let latency_us = (end_us - start_us).max(0) as u64;
+                        info!(
+                            "Bybit duplicate resolved: order {} found via linkId {} | {}µs",
+                            existing.order_id, link_id, latency_us
+                        );
+                        return Ok(OrderResult {
+                            order_id: existing.order_id,
+                            status: existing.status,
+                            filled_size: existing.filled_size,
+                            avg_fill_price: existing.avg_fill_price,
+                            fee: existing.fee,
+                            latency_us,
+                            exchange_timestamp: existing.exchange_timestamp,
+                            rejection_reason: None,
+                        });
+                    }
+                    _ => {
+                        // Lookup failed — return the original duplicate error
+                        return Err(ExchangeError::Unknown {
+                            code: "DUPLICATE_ORDER_LINK_ID".to_string(),
+                            message: format!("orderLinkId {} exists but lookup failed", link_id),
+                        });
+                    }
+                }
+            }
+            other => other?,
+        };
+
         let end_us = now_us();
         let latency_us = (end_us - start_us).max(0) as u64;
 

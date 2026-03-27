@@ -2586,6 +2586,67 @@ impl ExecutionGateway for GateIoGateway {
             }
         };
 
+        // ISSUE 8 FIX: If the WS ACK returned filled_size=0 and we have an order_id,
+        // poll REST for the actual fill data instead of recording a ghost position.
+        // Gate.io WS returns an initial ACK with status=open, filled=0/0 before the
+        // matching engine processes the order. We must wait for the fill.
+        let result = match result {
+            Ok(mut ack) if ack.filled_size == 0 && !ack.order_id.is_empty() && ack.status == "open" => {
+                info!(
+                    "[gateio-ws] Order {} ACK has filled=0 — polling REST for fill confirmation",
+                    ack.order_id
+                );
+                let mut poll_result = None;
+                // Poll up to 25 times (200ms intervals = 5 seconds max)
+                for attempt in 1..=25 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    match self.get_order_status(&ack.order_id, &symbol).await {
+                        Ok(Some(status)) if status.filled_size > 0 => {
+                            info!(
+                                "[gateio-ws] Fill confirmed after {}ms: id={} filled={} @ {:.4}",
+                                attempt * 200, ack.order_id, status.filled_size, status.avg_fill_price
+                            );
+                            ack.filled_size = status.filled_size;
+                            ack.avg_fill_price = status.avg_fill_price;
+                            ack.status = status.status;
+                            poll_result = Some(Ok(ack));
+                            break;
+                        }
+                        Ok(Some(status)) if status.status == "finished" => {
+                            // Order finished but filled_size still 0 = cancelled or expired
+                            warn!(
+                                "[gateio-ws] Order {} finished with 0 fill (cancelled/expired)",
+                                ack.order_id
+                            );
+                            ack.status = status.status;
+                            poll_result = Some(Ok(ack));
+                            break;
+                        }
+                        Ok(_) => {
+                            debug!(
+                                "[gateio-ws] Fill poll {}/25: order {} still unfilled",
+                                attempt, ack.order_id
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[gateio-ws] Fill poll {}/25 failed for order {}: {:?}",
+                                attempt, ack.order_id, e
+                            );
+                        }
+                    }
+                }
+                poll_result.unwrap_or_else(|| {
+                    warn!(
+                        "[gateio-ws] Order {} still unfilled after 5s polling — returning partial ACK",
+                        ack.order_id
+                    );
+                    Ok(ack)
+                })
+            }
+            other => other,
+        };
+
         // ── SL/TP CONDITIONAL ORDER SUBMISSION ──
         // After the main order is confirmed, submit linked Stop Loss and Take Profit
         // as conditional trigger orders on Gate.io. These fire automatically if the
