@@ -341,10 +341,15 @@ impl PreTradeValidator {
         // 4. Calculate VWAP for the target notional on each exchange
         // 5. Compare VWAP to mid price to get slippage in bps
 
-        // Attempt to walk real book data from the registry
+        // Attempt to walk real book data from the registry.
+        // BUG FIX: Filter by symbol_name to avoid using wrong symbol's book.
         for sym_id in registry.all_symbol_ids() {
             if let Some(book_lock) = registry.get(sym_id) {
                 let book = book_lock.read();
+                // Only use the book that matches this opportunity's symbol
+                if !book.symbol_name.is_empty() && book.symbol_name != opp.symbol {
+                    continue;
+                }
                 // Check if this book has data from the relevant exchanges
                 let has_short = book.get_exchange_snapshot(opp.short_exchange).is_some();
                 let has_long = book.get_exchange_snapshot(opp.long_exchange).is_some();
@@ -446,6 +451,13 @@ impl PreTradeValidator {
 
     /// Get an approximate price for the symbol from the global book.
     /// Used for notional → quantity conversion in position sizing.
+    ///
+    /// BUG FIX: Previously iterated ALL symbol_ids and returned the FIRST
+    /// price found, regardless of symbol. This caused cross-contamination
+    /// where BTC's price (~$60k) was returned for SOL (~$20) or ETH (~$3k),
+    /// leading to wildly wrong position sizing and InvalidPrice rejections.
+    /// Now filters by `book.symbol_name == opp.symbol` to return the
+    /// correct symbol's price.
     fn get_approximate_price(
         opp: &FundingArbOpportunity,
         registry: &GlobalBookRegistry,
@@ -453,6 +465,10 @@ impl PreTradeValidator {
         for sym_id in registry.all_symbol_ids() {
             if let Some(book_lock) = registry.get(sym_id) {
                 let book = book_lock.read();
+                // Only use the book that matches this opportunity's symbol
+                if !book.symbol_name.is_empty() && book.symbol_name != opp.symbol {
+                    continue;
+                }
                 // Try the short exchange first, then the long exchange
                 for exchange in &[opp.short_exchange, opp.long_exchange] {
                     if let Some(snap) = book.get_exchange_snapshot(*exchange) {
@@ -468,6 +484,8 @@ impl PreTradeValidator {
     }
 
     /// Estimate basis risk (price gap between exchanges) as a fraction of mid price.
+    ///
+    /// BUG FIX: Filter by symbol_name to avoid using wrong symbol's book.
     fn estimate_basis_risk(
         opp: &FundingArbOpportunity,
         registry: &GlobalBookRegistry,
@@ -476,6 +494,10 @@ impl PreTradeValidator {
         for sym_id in registry.all_symbol_ids() {
             if let Some(book_lock) = registry.get(sym_id) {
                 let book = book_lock.read();
+                // Only use the book that matches this opportunity's symbol
+                if !book.symbol_name.is_empty() && book.symbol_name != opp.symbol {
+                    continue;
+                }
                 let short_snap = book.get_exchange_snapshot(opp.short_exchange);
                 let long_snap = book.get_exchange_snapshot(opp.long_exchange);
 
