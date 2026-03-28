@@ -596,12 +596,6 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
                 cfg.multi_exchange.spot_futures.take_profit_pct = v;
             }
         }
-        // Binance Spot testnet keys (separate from Futures testnet)
-        cfg.multi_exchange.spot_futures.binance_spot_testnet_api_key =
-            std::env::var("BINANCE_SPOT_TESTNET_API_KEY").ok().map(|s| s.trim().to_string());
-        cfg.multi_exchange.spot_futures.binance_spot_testnet_secret_key =
-            std::env::var("BINANCE_SPOT_TESTNET_SECRET_KEY").ok().map(|s| s.trim().to_string());
-
         if cfg.multi_exchange.spot_futures.enabled {
             eprintln!("[config] SPOT_FUTURES_ENABLED=true: leverage={}x, min_apr={}%, max_hold={}h",
                 cfg.multi_exchange.spot_futures.short_leverage,

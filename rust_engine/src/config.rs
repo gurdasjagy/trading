@@ -896,10 +896,6 @@ pub struct SpotFuturesConfig {
     /// Number of consecutive negative funding periods before exit. Default: 2.
     #[serde(default = "default_sf_negative_funding_exit_periods")]
     pub negative_funding_exit_periods: u32,
-    /// Binance Spot testnet API key (separate from Futures testnet).
-    pub binance_spot_testnet_api_key: Option<String>,
-    /// Binance Spot testnet API secret.
-    pub binance_spot_testnet_secret_key: Option<String>,
 }
 
 fn default_sf_max_positions() -> u32 { 1 }
@@ -933,8 +929,6 @@ impl Default for SpotFuturesConfig {
             take_profit_pct: default_sf_take_profit_pct(),
             max_position_pct: default_sf_max_position_pct(),
             negative_funding_exit_periods: default_sf_negative_funding_exit_periods(),
-            binance_spot_testnet_api_key: None,
-            binance_spot_testnet_secret_key: None,
         }
     }
 }
