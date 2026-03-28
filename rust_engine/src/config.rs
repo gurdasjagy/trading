@@ -841,6 +841,104 @@ impl Default for MarginMonitorConfigToml {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Spot-Futures Arbitrage Configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for the Spot-Futures (Cash and Carry) funding rate arbitrage engine.
+///
+/// Controls all parameters for the institutional-grade spot-futures arb system:
+/// - Position limits, leverage, hold times
+/// - Minimum APR thresholds, take-profit targets
+/// - Margin rebalancing parameters
+/// - Hedge ratio tolerances
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotFuturesConfig {
+    /// Master toggle for the spot-futures engine.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum number of simultaneous spot-futures positions (default: 1).
+    #[serde(default = "default_sf_max_positions")]
+    pub max_positions: u32,
+    /// Leverage for the futures short leg (1, 2, or 3). Default: 1.
+    #[serde(default = "default_sf_short_leverage")]
+    pub short_leverage: i32,
+    /// Minimum projected APR (%) to enter a position. Default: 10.
+    #[serde(default = "default_sf_min_apr")]
+    pub min_apr_pct: f64,
+    /// Maximum hold time in hours. Default: 72.
+    #[serde(default = "default_sf_max_hold_hours")]
+    pub max_hold_hours: f64,
+    /// Margin ratio threshold to trigger rebalancing. Default: 0.30 (30%).
+    #[serde(default = "default_sf_margin_rebalance_threshold")]
+    pub margin_rebalance_threshold: f64,
+    /// V1: same exchange only (spot + futures on same exchange). Default: true.
+    #[serde(default = "default_sf_same_exchange_only")]
+    pub same_exchange_only: bool,
+    /// Spot order type for entry: "limit" or "market". Default: "limit".
+    #[serde(default = "default_sf_spot_order_type")]
+    pub spot_order_type: String,
+    /// Number of historical funding rate observations to store per symbol. Default: 24.
+    #[serde(default = "default_sf_funding_history_depth")]
+    pub funding_history_depth: usize,
+    /// Enable margin rebalancing (transfers between spot/futures wallets). Default: true.
+    #[serde(default = "default_sf_rebalance_enabled")]
+    pub rebalance_enabled: bool,
+    /// Maximum hedge ratio deviation from 1.0 before corrective action. Default: 0.05.
+    #[serde(default = "default_sf_hedge_ratio_tolerance")]
+    pub hedge_ratio_tolerance: f64,
+    /// Take profit when accumulated funding exceeds this % of deployed capital. Default: 0.5.
+    #[serde(default = "default_sf_take_profit_pct")]
+    pub take_profit_pct: f64,
+    /// Maximum percentage of total capital to allocate per position. Default: 0.90 (90%).
+    #[serde(default = "default_sf_max_position_pct")]
+    pub max_position_pct: f64,
+    /// Number of consecutive negative funding periods before exit. Default: 2.
+    #[serde(default = "default_sf_negative_funding_exit_periods")]
+    pub negative_funding_exit_periods: u32,
+    /// Binance Spot testnet API key (separate from Futures testnet).
+    pub binance_spot_testnet_api_key: Option<String>,
+    /// Binance Spot testnet API secret.
+    pub binance_spot_testnet_secret_key: Option<String>,
+}
+
+fn default_sf_max_positions() -> u32 { 1 }
+fn default_sf_short_leverage() -> i32 { 1 }
+fn default_sf_min_apr() -> f64 { 10.0 }
+fn default_sf_max_hold_hours() -> f64 { 72.0 }
+fn default_sf_margin_rebalance_threshold() -> f64 { 0.30 }
+fn default_sf_same_exchange_only() -> bool { true }
+fn default_sf_spot_order_type() -> String { "limit".to_string() }
+fn default_sf_funding_history_depth() -> usize { 24 }
+fn default_sf_rebalance_enabled() -> bool { true }
+fn default_sf_hedge_ratio_tolerance() -> f64 { 0.05 }
+fn default_sf_take_profit_pct() -> f64 { 0.5 }
+fn default_sf_max_position_pct() -> f64 { 0.90 }
+fn default_sf_negative_funding_exit_periods() -> u32 { 2 }
+
+impl Default for SpotFuturesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_positions: default_sf_max_positions(),
+            short_leverage: default_sf_short_leverage(),
+            min_apr_pct: default_sf_min_apr(),
+            max_hold_hours: default_sf_max_hold_hours(),
+            margin_rebalance_threshold: default_sf_margin_rebalance_threshold(),
+            same_exchange_only: default_sf_same_exchange_only(),
+            spot_order_type: default_sf_spot_order_type(),
+            funding_history_depth: default_sf_funding_history_depth(),
+            rebalance_enabled: default_sf_rebalance_enabled(),
+            hedge_ratio_tolerance: default_sf_hedge_ratio_tolerance(),
+            take_profit_pct: default_sf_take_profit_pct(),
+            max_position_pct: default_sf_max_position_pct(),
+            negative_funding_exit_periods: default_sf_negative_funding_exit_periods(),
+            binance_spot_testnet_api_key: None,
+            binance_spot_testnet_secret_key: None,
+        }
+    }
+}
+
 /// Multi-Exchange Feature configuration.
 ///
 /// When `USE_MULTI_EXCHANGE=on`, this configuration controls:
@@ -880,6 +978,9 @@ pub struct MultiExchangeConfig {
     /// Maximum open positions when multi-exchange is enabled (default: 5).
     #[serde(default = "default_multi_max_positions")]
     pub max_open_positions: u32,
+    /// Spot-Futures (Cash and Carry) arbitrage configuration.
+    #[serde(default)]
+    pub spot_futures: SpotFuturesConfig,
 }
 
 fn default_multi_max_positions() -> u32 { 5 }
@@ -898,6 +999,7 @@ impl Default for MultiExchangeConfig {
             funding_arb: FundingArbConfigToml::default(),
             margin_monitor: MarginMonitorConfigToml::default(),
             max_open_positions: default_multi_max_positions(),
+            spot_futures: SpotFuturesConfig::default(),
         }
     }
 }

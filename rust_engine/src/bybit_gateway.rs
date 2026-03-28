@@ -774,4 +774,253 @@ impl ExecutionGateway for BybitGateway {
 
         Ok(positions)
     }
+
+    // -----------------------------------------------------------------------
+    // Spot-Futures Arbitrage: Spot wallet & order methods
+    // -----------------------------------------------------------------------
+
+    /// Get available balance of an asset in the Bybit Spot wallet.
+    /// Bybit Unified Account shares margin between Spot and Futures.
+    /// Endpoint: GET /v5/account/wallet-balance?accountType=UNIFIED&coin=<asset>
+    async fn get_spot_asset_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
+        let base_url = self.base_url();
+        let ts = now_ms();
+        let query = format!("accountType=UNIFIED&coin={}", asset.to_uppercase());
+        let signature = sign_bybit_request(ts, &self.api_key, BYBIT_RECV_WINDOW, &query, &self.api_secret);
+
+        let url = format!("{}/v5/account/wallet-balance?{}", base_url, query);
+
+        self.rate_limiter.acquire().await;
+
+        let resp = self.client.get(&url)
+            .header("X-BAPI-API-KEY", &self.api_key)
+            .header("X-BAPI-TIMESTAMP", ts.to_string())
+            .header("X-BAPI-SIGN", &signature)
+            .header("X-BAPI-RECV-WINDOW", "5000")
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let body: Value = resp.json().await.map_err(|_| ExchangeError::Timeout)?;
+
+        let ret_code = body.get("retCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if ret_code != 0 {
+            return Err(classify_bybit_error(&body));
+        }
+
+        // Parse wallet balance
+        if let Some(list) = body.get("result")
+            .and_then(|r| r.get("list"))
+            .and_then(|l| l.as_array())
+        {
+            for account in list {
+                if let Some(coins) = account.get("coin").and_then(|c| c.as_array()) {
+                    for coin in coins {
+                        let coin_name = coin.get("coin").and_then(|v| v.as_str()).unwrap_or("");
+                        if coin_name.eq_ignore_ascii_case(asset) {
+                            let available = coin.get("availableToWithdraw")
+                                .or_else(|| coin.get("free"))
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+                            return Ok(available);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(0.0)
+    }
+
+    /// Transfer between Bybit Spot and Futures wallets.
+    /// Bybit Unified Account: NO transfer needed (shared margin pool).
+    /// Standard Account: POST /v5/asset/transfer/inter-transfer
+    async fn transfer_between_wallets(
+        &self,
+        from: &str,
+        to: &str,
+        amount: f64,
+        asset: &str,
+    ) -> Result<(), ExchangeError> {
+        let mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+        if mode != "live" {
+            tracing::info!("Transfer skipped: not in live mode (TRADING_MODE={})", mode);
+            return Ok(());
+        }
+
+        // Bybit Unified Account: Spot and Futures share the same margin pool.
+        // No transfer is necessary. Log and return success.
+        tracing::info!(
+            "[bybit-spot] Transfer {:.4} {} from {} to {}: Unified Account, no transfer needed",
+            amount, asset, from, to
+        );
+        Ok(())
+    }
+
+    /// Submit a Spot order on Bybit.
+    /// Endpoint: POST /v5/order/create with category="spot"
+    /// Same endpoint as Futures, different category. Same signing, same keys.
+    async fn submit_spot_order(
+        &self,
+        intent: crate::execution_gateway::SpotOrderIntent,
+    ) -> Result<crate::execution_gateway::SpotOrderResult, ExchangeError> {
+        let base_url = self.base_url();
+        let start_us = now_us();
+        let normalized = Self::normalize_symbol(&intent.symbol);
+        let order_link_id = self.next_order_link_id();
+
+        let side_str = match intent.side {
+            OrderSide::Buy => "Buy",
+            OrderSide::Sell => "Sell",
+        };
+
+        let type_str = match intent.order_type {
+            OrderType::Market => "Market",
+            OrderType::Limit => "Limit",
+            OrderType::PostOnly => "Limit",
+        };
+
+        let mut order_body = json!({
+            "category": "spot",
+            "symbol": normalized,
+            "side": side_str,
+            "orderType": type_str,
+            "orderLinkId": order_link_id,
+        });
+
+        // For market buys on Bybit, use qty in quote currency if available
+        if matches!(intent.order_type, OrderType::Market) && intent.side == OrderSide::Buy {
+            if let Some(quote_qty) = intent.quote_order_qty {
+                order_body["qty"] = json!(format!("{:.8}", quote_qty));
+                order_body["marketUnit"] = json!("quoteCoin");
+            } else {
+                order_body["qty"] = json!(format!("{:.8}", intent.qty));
+                order_body["marketUnit"] = json!("baseCoin");
+            }
+        } else {
+            order_body["qty"] = json!(format!("{:.8}", intent.qty));
+        }
+
+        if let Some(price) = intent.price {
+            order_body["price"] = json!(format!("{:.8}", price));
+        }
+
+        if matches!(intent.order_type, OrderType::Limit) || matches!(intent.order_type, OrderType::PostOnly) {
+            let tif = if matches!(intent.order_type, OrderType::PostOnly) {
+                "PostOnly"
+            } else {
+                &intent.time_in_force
+            };
+            order_body["timeInForce"] = json!(tif);
+        }
+
+        let body_str = order_body.to_string();
+        let ts = now_ms();
+        let signature = sign_bybit_request(ts, &self.api_key, BYBIT_RECV_WINDOW, &body_str, &self.api_secret);
+
+        let url = format!("{}/v5/order/create", base_url);
+
+        self.rate_limiter.acquire().await;
+
+        let resp = self.client.post(&url)
+            .header("X-BAPI-API-KEY", &self.api_key)
+            .header("X-BAPI-TIMESTAMP", ts.to_string())
+            .header("X-BAPI-SIGN", &signature)
+            .header("X-BAPI-RECV-WINDOW", BYBIT_RECV_WINDOW.to_string())
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let end_us = now_us();
+        let body: Value = resp.json().await.map_err(|_| ExchangeError::Timeout)?;
+
+        let ret_code = body.get("retCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if ret_code != 0 {
+            return Err(classify_bybit_error(&body));
+        }
+
+        let order_id = body.get("result")
+            .and_then(|r| r.get("orderId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Bybit returns orderId but fill info comes async.
+        // For market orders, we query the order to get fill details.
+        if matches!(intent.order_type, OrderType::Market) {
+            // Brief delay then query
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let query = format!(
+                "category=spot&orderId={}&symbol={}",
+                order_id, normalized
+            );
+            let ts2 = now_ms();
+            let sig2 = sign_bybit_request(ts2, &self.api_key, 5000, &query, &self.api_secret);
+
+            if let Ok(resp2) = self.client
+                .get(format!("{}/v5/order/realtime?{}", base_url, query))
+                .header("X-BAPI-API-KEY", &self.api_key)
+                .header("X-BAPI-TIMESTAMP", ts2.to_string())
+                .header("X-BAPI-SIGN", &sig2)
+                .header("X-BAPI-RECV-WINDOW", "5000")
+                .send()
+                .await
+            {
+                if let Ok(order_body) = resp2.json::<Value>().await {
+                    if let Some(list) = order_body.get("result")
+                        .and_then(|r| r.get("list"))
+                        .and_then(|l| l.as_array())
+                    {
+                        if let Some(order) = list.first() {
+                            let filled_qty = order.get("cumExecQty")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+                            let cum_value = order.get("cumExecValue")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+                            let fee = order.get("cumExecFee")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+                            let status = order.get("orderStatus")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown");
+                            let avg_price = if filled_qty > 0.0 { cum_value / filled_qty } else { 0.0 };
+
+                            tracing::info!(
+                                "[bybit-spot] Order {}: status={}, filled={}, avg_price={}, fee={}",
+                                order_id, status, filled_qty, avg_price, fee
+                            );
+
+                            return Ok(crate::execution_gateway::SpotOrderResult {
+                                order_id,
+                                status: status.to_lowercase(),
+                                filled_qty,
+                                avg_fill_price: avg_price,
+                                fee,
+                                latency_us: (end_us - start_us) as u64,
+                                rejection_reason: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we couldn't get fill details, return what we have
+        Ok(crate::execution_gateway::SpotOrderResult {
+            order_id,
+            status: "submitted".to_string(),
+            filled_qty: 0.0,
+            avg_fill_price: 0.0,
+            fee: 0.0,
+            latency_us: (end_us - start_us) as u64,
+            rejection_reason: None,
+        })
+    }
 }

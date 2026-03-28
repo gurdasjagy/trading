@@ -556,6 +556,246 @@ impl ExecutionGateway for BinanceGateway {
         ).await;
         Ok(result)
     }
+
+    // -----------------------------------------------------------------------
+    // Spot-Futures Arbitrage: Spot wallet & order methods
+    // -----------------------------------------------------------------------
+
+    /// Get available balance of an asset in the Binance Spot wallet.
+    /// Endpoint: GET /api/v3/account (signed)
+    /// Mainnet: https://api.binance.com, Testnet: https://testnet.binance.vision
+    async fn get_spot_asset_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
+        let spot_base = if self.testnet {
+            "https://testnet.binance.vision"
+        } else {
+            "https://api.binance.com"
+        };
+
+        let ts = now_ms();
+        let query = format!("timestamp={}&recvWindow={}", ts, RECV_WINDOW);
+        let signature = sign_binance_request(&query, &self.api_secret);
+        let url = format!("{}/api/v3/account?{}&signature={}", spot_base, query, signature);
+
+        self.rate_limiter.acquire().await;
+
+        let resp = self.client.get(&url)
+            .header("X-MBX-APIKEY", &self.api_key)
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let body: Value = resp.json().await.map_err(|_| ExchangeError::Timeout)?;
+
+        if body.get("code").is_some() {
+            return Err(classify_binance_error(&body));
+        }
+
+        if let Some(balances) = body.get("balances").and_then(|v| v.as_array()) {
+            for bal in balances {
+                let a = bal.get("asset").and_then(|v| v.as_str()).unwrap_or("");
+                if a.eq_ignore_ascii_case(asset) {
+                    let free = bal.get("free").and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    return Ok(free);
+                }
+            }
+        }
+
+        Ok(0.0) // Asset not found = zero balance
+    }
+
+    /// Transfer between Binance Spot and Futures wallets.
+    /// Endpoint: POST /sapi/v1/asset/transfer
+    /// NOT available on testnet (/sapi/ endpoints don't exist on testnet).
+    async fn transfer_between_wallets(
+        &self,
+        from: &str,
+        to: &str,
+        amount: f64,
+        asset: &str,
+    ) -> Result<(), ExchangeError> {
+        // Check trading mode -- only live allows transfers
+        let mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+        if mode != "live" {
+            info!("Transfer skipped: not in live mode (TRADING_MODE={})", mode);
+            return Ok(());
+        }
+
+        if self.testnet {
+            info!("Transfer skipped: /sapi/ endpoints not available on Binance testnet");
+            return Ok(());
+        }
+
+        let transfer_type = match (from, to) {
+            ("spot", "futures") => "MAIN_UMFUTURE",
+            ("futures", "spot") => "UMFUTURE_MAIN",
+            _ => {
+                return Err(ExchangeError::Unknown {
+                    code: "INVALID_TRANSFER".into(),
+                    message: format!("Invalid transfer direction: {} -> {}", from, to),
+                });
+            }
+        };
+
+        let ts = now_ms();
+        let query = format!(
+            "type={}&asset={}&amount={}&timestamp={}&recvWindow={}",
+            transfer_type, asset, amount, ts, RECV_WINDOW
+        );
+        let signature = sign_binance_request(&query, &self.api_secret);
+        let url = format!(
+            "https://api.binance.com/sapi/v1/asset/transfer?{}&signature={}",
+            query, signature
+        );
+
+        self.rate_limiter.acquire().await;
+
+        let resp = self.client.post(&url)
+            .header("X-MBX-APIKEY", &self.api_key)
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let body: Value = resp.json().await.map_err(|_| ExchangeError::Timeout)?;
+
+        if let Some(tran_id) = body.get("tranId") {
+            info!(
+                "[binance-spot] Transfer {} {} from {} to {}: tranId={}",
+                amount, asset, from, to, tran_id
+            );
+            Ok(())
+        } else {
+            Err(classify_binance_error(&body))
+        }
+    }
+
+    /// Submit a Spot order on Binance.
+    /// Endpoint: POST /api/v3/order (signed)
+    /// Mainnet: https://api.binance.com, Testnet: https://testnet.binance.vision
+    async fn submit_spot_order(
+        &self,
+        intent: crate::execution_gateway::SpotOrderIntent,
+    ) -> Result<crate::execution_gateway::SpotOrderResult, ExchangeError> {
+        let spot_base = if self.testnet {
+            "https://testnet.binance.vision"
+        } else {
+            "https://api.binance.com"
+        };
+
+        let start_us = now_us();
+        let normalized = Self::normalize_symbol(&intent.symbol);
+
+        let side_str = match intent.side {
+            OrderSide::Buy => "BUY",
+            OrderSide::Sell => "SELL",
+        };
+
+        let type_str = match intent.order_type {
+            OrderType::Market => "MARKET",
+            OrderType::Limit => "LIMIT",
+            OrderType::PostOnly => "LIMIT", // Binance PostOnly = LIMIT + timeInForce=GTX
+        };
+
+        let tif = if matches!(intent.order_type, OrderType::PostOnly) {
+            "GTX" // Binance Post-Only
+        } else {
+            &intent.time_in_force
+        };
+
+        let ts = now_ms();
+        let client_oid = self.next_client_id();
+
+        // Build query parameters
+        let mut params = format!(
+            "symbol={}&side={}&type={}&newClientOrderId={}&timestamp={}&recvWindow={}",
+            normalized, side_str, type_str, client_oid, ts, RECV_WINDOW
+        );
+
+        // For market buys, prefer quoteOrderQty (spend X USDT)
+        if matches!(intent.order_type, OrderType::Market) && intent.side == OrderSide::Buy {
+            if let Some(quote_qty) = intent.quote_order_qty {
+                params.push_str(&format!("&quoteOrderQty={:.8}", quote_qty));
+            } else if intent.qty > 0.0 {
+                params.push_str(&format!("&quantity={:.8}", intent.qty));
+            }
+        } else {
+            if intent.qty > 0.0 {
+                params.push_str(&format!("&quantity={:.8}", intent.qty));
+            }
+        }
+
+        // Price for limit orders
+        if let Some(price) = intent.price {
+            params.push_str(&format!("&price={:.8}", price));
+            params.push_str(&format!("&timeInForce={}", tif));
+        }
+
+        let signature = sign_binance_request(&params, &self.api_secret);
+        let url = format!("{}/api/v3/order?{}&signature={}", spot_base, params, signature);
+
+        self.rate_limiter.acquire().await;
+
+        let resp = self.client.post(&url)
+            .header("X-MBX-APIKEY", &self.api_key)
+            .send()
+            .await
+            .map_err(|_| ExchangeError::Timeout)?;
+
+        let end_us = now_us();
+        let body: Value = resp.json().await.map_err(|_| ExchangeError::Timeout)?;
+
+        if body.get("code").is_some() && body.get("orderId").is_none() {
+            return Err(classify_binance_error(&body));
+        }
+
+        let order_id = body.get("orderId").and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let status = body.get("status").and_then(|v| v.as_str()).unwrap_or("UNKNOWN").to_string();
+
+        // Parse fills
+        let mut filled_qty = 0.0f64;
+        let mut total_cost = 0.0f64;
+        let mut total_fee = 0.0f64;
+
+        if let Some(fills) = body.get("fills").and_then(|v| v.as_array()) {
+            for fill in fills {
+                let qty: f64 = fill.get("qty").and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                let price: f64 = fill.get("price").and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                let fee: f64 = fill.get("commission").and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                filled_qty += qty;
+                total_cost += qty * price;
+                total_fee += fee;
+            }
+        } else {
+            // Fallback: use executedQty and cummulativeQuoteQty
+            filled_qty = body.get("executedQty").and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            total_cost = body.get("cummulativeQuoteQty").and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        }
+
+        let avg_price = if filled_qty > 0.0 { total_cost / filled_qty } else { 0.0 };
+
+        info!(
+            "[binance-spot] Order {}: status={}, filled={}, avg_price={}, fee={}, latency={}us",
+            order_id, status, filled_qty, avg_price, total_fee, (end_us - start_us)
+        );
+
+        Ok(crate::execution_gateway::SpotOrderResult {
+            order_id,
+            status: status.to_lowercase(),
+            filled_qty,
+            avg_fill_price: avg_price,
+            fee: total_fee,
+            latency_us: (end_us - start_us) as u64,
+            rejection_reason: None,
+        })
+    }
 }
 
 #[cfg(test)]

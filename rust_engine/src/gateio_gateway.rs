@@ -3061,6 +3061,189 @@ impl ExecutionGateway for GateIoGateway {
             }
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Spot-Futures Arbitrage: Spot wallet & order methods
+    // -----------------------------------------------------------------------
+
+    /// Get available balance of an asset in the Gate.io Spot wallet.
+    /// Endpoint: GET /api/v4/spot/accounts (signed)
+    async fn get_spot_asset_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
+        let response = self.spot_rest_get("/spot/accounts", "").await?;
+
+        if let Some(accounts) = response.as_array() {
+            for account in accounts {
+                let currency = account.get("currency").and_then(|v| v.as_str()).unwrap_or("");
+                if currency.eq_ignore_ascii_case(asset) {
+                    let available = account.get("available")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    return Ok(available);
+                }
+            }
+        }
+
+        Ok(0.0) // Currency not found = zero balance
+    }
+
+    /// Transfer funds between Gate.io Spot and Futures wallets.
+    /// Endpoint: POST /api/v4/wallet/transfers
+    /// Gate.io testnet DOES support this endpoint.
+    async fn transfer_between_wallets(
+        &self,
+        from: &str,
+        to: &str,
+        amount: f64,
+        asset: &str,
+    ) -> Result<(), ExchangeError> {
+        let mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+        if mode != "live" {
+            info!("Transfer skipped: not in live mode (TRADING_MODE={})", mode);
+            return Ok(());
+        }
+
+        let body = serde_json::json!({
+            "currency": asset.to_uppercase(),
+            "from": from,
+            "to": to,
+            "amount": format!("{:.8}", amount),
+        });
+
+        let body_str = body.to_string();
+        match self.rest_post("/wallet/transfers", &body_str).await {
+            Ok(_) => {
+                info!(
+                    "[gateio-spot] Transfer {:.4} {} from {} to {}: OK",
+                    amount, asset, from, to
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!("[gateio-spot] Transfer failed: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Submit a Spot order on Gate.io.
+    /// Endpoint: POST /api/v4/spot/orders (REST only, Gate.io has no WS Spot trading API)
+    ///
+    /// Key differences from Futures:
+    /// - `amount` is BASE asset quantity (e.g., 0.001 BTC), NOT integer contracts
+    /// - No `size` field (that's Futures-only)
+    /// - No `leverage` or `reduce_only`
+    /// - `currency_pair` uses underscore format: "BTC_USDT"
+    async fn submit_spot_order(
+        &self,
+        intent: crate::execution_gateway::SpotOrderIntent,
+    ) -> Result<crate::execution_gateway::SpotOrderResult, ExchangeError> {
+        let start_us = now_us();
+
+        // Gate.io Spot uses underscore-separated pairs: BTC_USDT
+        let pair = if intent.symbol.contains('_') {
+            intent.symbol.clone()
+        } else {
+            // Convert BTCUSDT -> BTC_USDT
+            let s = intent.symbol.to_uppercase();
+            if s.ends_with("USDT") {
+                format!("{}_USDT", &s[..s.len() - 4])
+            } else {
+                s
+            }
+        };
+
+        let side = match intent.side {
+            crate::execution_gateway::OrderSide::Buy => "buy",
+            crate::execution_gateway::OrderSide::Sell => "sell",
+        };
+
+        let type_str = match intent.order_type {
+            crate::execution_gateway::OrderType::Market => "market",
+            crate::execution_gateway::OrderType::Limit => "limit",
+            crate::execution_gateway::OrderType::PostOnly => "limit",
+        };
+
+        let tif = match intent.order_type {
+            crate::execution_gateway::OrderType::PostOnly => "poc", // Gate.io post-only = poc
+            _ => match intent.time_in_force.to_lowercase().as_str() {
+                "ioc" => "ioc",
+                "fok" => "fok",
+                _ => "gtc",
+            },
+        };
+
+        let mut body = serde_json::json!({
+            "currency_pair": pair,
+            "type": type_str,
+            "account": "spot",
+            "side": side,
+            "time_in_force": tif,
+        });
+
+        // For market buys on Gate.io, use 'amount' in quote currency (USDT)
+        if matches!(intent.order_type, crate::execution_gateway::OrderType::Market)
+            && intent.side == crate::execution_gateway::OrderSide::Buy
+        {
+            if let Some(quote_qty) = intent.quote_order_qty {
+                body["amount"] = serde_json::json!(format!("{:.8}", quote_qty));
+            } else {
+                body["amount"] = serde_json::json!(format!("{:.8}", intent.qty));
+            }
+        } else {
+            body["amount"] = serde_json::json!(format!("{:.8}", intent.qty));
+        }
+
+        // Price for limit orders
+        if let Some(price) = intent.price {
+            body["price"] = serde_json::json!(format!("{:.8}", price));
+        }
+
+        let body_str = body.to_string();
+        info!("[gateio-spot] Submitting Spot order: {}", body_str);
+
+        let response = self.rest_post("/spot/orders", &body_str).await?;
+        let end_us = now_us();
+
+        let order_id = response.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let status = response.get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let filled_qty = response.get("filled_total")
+            .or_else(|| response.get("amount"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let avg_price = response.get("avg_deal_price")
+            .or_else(|| response.get("price"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let fee = response.get("fee")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            .abs(); // Gate.io fees can be negative (charged)
+
+        info!(
+            "[gateio-spot] Order {}: status={}, filled={}, avg_price={}, fee={}, latency={}us",
+            order_id, status, filled_qty, avg_price, fee, (end_us - start_us)
+        );
+
+        Ok(crate::execution_gateway::SpotOrderResult {
+            order_id,
+            status,
+            filled_qty,
+            avg_fill_price: avg_price,
+            fee,
+            latency_us: (end_us - start_us) as u64,
+            rejection_reason: None,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3068,6 +3251,90 @@ impl ExecutionGateway for GateIoGateway {
 // ---------------------------------------------------------------------------
 
 impl GateIoGateway {
+    /// REST POST with auth for Spot API operations.
+    ///
+    /// Gate.io Spot orders MUST use REST, not WebSocket.
+    /// Gate.io does NOT have a WebSocket trading API for Spot.
+    ///
+    /// `path` should be the endpoint path WITHOUT the `/api/v4` prefix,
+    /// e.g. `/spot/orders`. The prefix is added automatically.
+    pub async fn rest_post(&self, path: &str, body: &str) -> Result<serde_json::Value, ExchangeError> {
+        let timestamp = now_ms() / 1000;
+        let full_path = format!("/api/v4{}", path);
+        let signature = Self::rest_sign("POST", &full_path, "", body, timestamp, &self.api_secret);
+
+        let url = format!("{}{}", self.base_url(), path);
+
+        debug!("[gateio-rest] POST {} body_len={}", url, body.len());
+
+        let response = self.rest_client
+            .post(&url)
+            .header("KEY", &self.api_key)
+            .header("SIGN", &signature)
+            .header("Timestamp", timestamp.to_string())
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| {
+                error!("[gateio-rest] POST request failed: {} — URL: {}", e, url);
+                ExchangeError::Timeout
+            })?;
+
+        let status = response.status().as_u16();
+        let resp_body: serde_json::Value = response.json().await.map_err(|e| ExchangeError::Unknown {
+            code: "JSON_PARSE".to_string(),
+            message: e.to_string(),
+        })?;
+
+        if status >= 400 {
+            return Err(crate::execution_gateway::classify_gateio_error(status, &resp_body));
+        }
+
+        Ok(resp_body)
+    }
+
+    /// REST GET for Spot endpoints (different base URL from Futures).
+    /// Uses the same signing but with Spot API paths.
+    pub async fn spot_rest_get(&self, path: &str, query: &str) -> Result<serde_json::Value, ExchangeError> {
+        let timestamp = now_ms() / 1000;
+        let full_path = format!("/api/v4{}", path);
+        let signature = Self::rest_sign("GET", &full_path, query, "", timestamp, &self.api_secret);
+
+        let url = if query.is_empty() {
+            format!("{}{}", self.base_url(), path)
+        } else {
+            format!("{}{}?{}", self.base_url(), path, query)
+        };
+
+        let response = self.rest_client
+            .get(&url)
+            .header("KEY", &self.api_key)
+            .header("SIGN", &signature)
+            .header("Timestamp", timestamp.to_string())
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| {
+                error!("[gateio-rest] Spot GET request failed: {} — URL: {}", e, url);
+                ExchangeError::Timeout
+            })?;
+
+        let status = response.status().as_u16();
+        let resp_body: serde_json::Value = response.json().await.map_err(|e| ExchangeError::Unknown {
+            code: "JSON_PARSE".to_string(),
+            message: e.to_string(),
+        })?;
+
+        if status >= 400 {
+            return Err(crate::execution_gateway::classify_gateio_error(status, &resp_body));
+        }
+
+        Ok(resp_body)
+    }
+
     /// Monitor liquidation prices for all open positions.
     ///
     /// Queries `/futures/usdt/positions` REST endpoint, extracts `liq_price`,

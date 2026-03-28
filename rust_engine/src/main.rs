@@ -540,6 +540,75 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             }
         }
 
+        // ── Spot-Futures Arbitrage Configuration ──
+        if let Ok(val) = std::env::var("SPOT_FUTURES_ENABLED") {
+            cfg.multi_exchange.spot_futures.enabled =
+                matches!(val.to_lowercase().as_str(), "true" | "1" | "yes" | "on");
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_MAX_POSITIONS") {
+            if let Ok(v) = val.parse::<u32>() {
+                cfg.multi_exchange.spot_futures.max_positions = v.max(1);
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_SHORT_LEVERAGE") {
+            if let Ok(v) = val.parse::<i32>() {
+                cfg.multi_exchange.spot_futures.short_leverage = v.clamp(1, 3);
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_MIN_APR") {
+            if let Ok(v) = val.parse::<f64>() {
+                cfg.multi_exchange.spot_futures.min_apr_pct = v;
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_MAX_HOLD_HOURS") {
+            if let Ok(v) = val.parse::<f64>() {
+                cfg.multi_exchange.spot_futures.max_hold_hours = v;
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_MARGIN_REBALANCE_THRESHOLD") {
+            if let Ok(v) = val.parse::<f64>() {
+                cfg.multi_exchange.spot_futures.margin_rebalance_threshold = v;
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_SAME_EXCHANGE_ONLY") {
+            cfg.multi_exchange.spot_futures.same_exchange_only =
+                matches!(val.to_lowercase().as_str(), "true" | "1" | "yes" | "on");
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_SPOT_ORDER_TYPE") {
+            cfg.multi_exchange.spot_futures.spot_order_type = val.to_lowercase();
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_FUNDING_HISTORY_DEPTH") {
+            if let Ok(v) = val.parse::<usize>() {
+                cfg.multi_exchange.spot_futures.funding_history_depth = v;
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_REBALANCE_ENABLED") {
+            cfg.multi_exchange.spot_futures.rebalance_enabled =
+                matches!(val.to_lowercase().as_str(), "true" | "1" | "yes" | "on");
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_HEDGE_RATIO_TOLERANCE") {
+            if let Ok(v) = val.parse::<f64>() {
+                cfg.multi_exchange.spot_futures.hedge_ratio_tolerance = v;
+            }
+        }
+        if let Ok(val) = std::env::var("SPOT_FUTURES_TAKE_PROFIT_PCT") {
+            if let Ok(v) = val.parse::<f64>() {
+                cfg.multi_exchange.spot_futures.take_profit_pct = v;
+            }
+        }
+        // Binance Spot testnet keys (separate from Futures testnet)
+        cfg.multi_exchange.spot_futures.binance_spot_testnet_api_key =
+            std::env::var("BINANCE_SPOT_TESTNET_API_KEY").ok().map(|s| s.trim().to_string());
+        cfg.multi_exchange.spot_futures.binance_spot_testnet_secret_key =
+            std::env::var("BINANCE_SPOT_TESTNET_SECRET_KEY").ok().map(|s| s.trim().to_string());
+
+        if cfg.multi_exchange.spot_futures.enabled {
+            eprintln!("[config] SPOT_FUTURES_ENABLED=true: leverage={}x, min_apr={}%, max_hold={}h",
+                cfg.multi_exchange.spot_futures.short_leverage,
+                cfg.multi_exchange.spot_futures.min_apr_pct,
+                cfg.multi_exchange.spot_futures.max_hold_hours);
+        }
+
         eprintln!("[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}", cfg.risk.max_open_positions);
 
         // BUG 3 FIX: Validate Binance API keys and warn clearly if missing/invalid.
