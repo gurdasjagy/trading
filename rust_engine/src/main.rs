@@ -5691,18 +5691,68 @@ fn main() {
             thread_handles.push(handle);
         }
         
-        // ── Spawn Funding Rate Arbitrage Engine ──────────────────────────────
-        // Runs as a tokio task inside the gateway runtime. Monitors funding rates
-        // across exchanges, validates opportunities, and executes delta-neutral
-        // arb positions with full lifecycle management.
-        //
-        // FIX: Reuse the shared multi_gateways map (Arc clones) instead of
-        // creating duplicate BinanceGateway/BybitGateway instances that would
-        // open separate WebSocket connections and risk exchange rate limiting.
-        //
-        // FIX: Share a single CrossVenueMarginMonitor instance so the engine
-        // sees the same margin health data as the rest of the system.
-        {
+        // ── Determine which arbitrage engine to spawn ─────────────────────────
+        // When SPOT_FUTURES_ENABLED=true, spawn the new Spot-Futures (Cash and
+        // Carry) engine that buys Spot + shorts Futures on the SAME exchange.
+        // Otherwise, fall back to the legacy Futures-Futures arb engine.
+        let spot_futures_enabled = config.multi_exchange.spot_futures.enabled;
+
+        if spot_futures_enabled {
+            // ── Spawn Spot-Futures (Cash and Carry) Arbitrage Engine ─────────
+            // Buys actual asset on Spot (cannot be liquidated) and shorts the
+            // same asset on Perpetual Futures. Profit from funding rate payments.
+            // Same-exchange V1: both legs on the same exchange.
+            let sf_symbols = config.symbols.clone();
+            let sf_gateio_testnet = config.exchanges.iter()
+                .find(|e| e.name == "gateio")
+                .map(|e| e.testnet)
+                .unwrap_or(false);
+            let sf_binance_testnet = config.multi_exchange.binance_testnet;
+            let sf_bybit_testnet = config.multi_exchange.bybit_testnet;
+            let sf_gateways = multi_gateways.clone();
+            let sf_config = config.multi_exchange.spot_futures.clone();
+            let sf_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let sf_shutdown_clone = sf_shutdown.clone();
+
+            info!(
+                "[spot-futures] Spawning Spot-Futures engine: {} gateways, {} symbols, leverage={}x, min_apr={}%",
+                sf_gateways.len(), sf_symbols.len(),
+                sf_config.short_leverage, sf_config.min_apr_pct
+            );
+
+            let handle = thread::Builder::new()
+                .name("spot-futures-arb".into())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to build tokio runtime for spot-futures-arb");
+
+                    rt.block_on(async {
+                        let mut engine = multi_exchange::SpotFuturesEngine::new(
+                            sf_config,
+                            sf_shutdown_clone,
+                        );
+
+                        engine.run(
+                            sf_gateways,
+                            sf_symbols,
+                            sf_binance_testnet,
+                            sf_bybit_testnet,
+                            sf_gateio_testnet,
+                        ).await;
+                    });
+                })
+                .expect("Failed to spawn spot-futures arb engine thread");
+            thread_handles.push(handle);
+
+            info!("[spot-futures] Spot-Futures engine spawned (old Futures-Futures engine DISABLED)");
+        } else {
+            // ── Spawn Legacy Funding Rate Arbitrage Engine (Futures-Futures) ──
+            // DEPRECATED: Opens Long on one exchange Futures and Short on another.
+            // Only runs when SPOT_FUTURES_ENABLED is NOT true.
+            info!("[funding-arb] SPOT_FUTURES_ENABLED=false, using legacy Futures-Futures engine");
+
             let fab_gbr = registry_me.clone();
             let fab_symbols = config.symbols.clone();
             let fab_gateio_testnet = config.exchanges.iter()
@@ -5713,20 +5763,15 @@ fn main() {
             let fab_bybit_testnet = config.multi_exchange.bybit_testnet;
 
             // Share the existing gateway instances instead of creating duplicates.
-            // multi_gateways was built above at initialization — clone the Arc
-            // references so all subsystems share the same connections.
             let fab_gateways = multi_gateways.clone();
 
-            // FIX 1: Use the shared margin monitor created above in main().
-            // Previously this created a NEW CrossVenueMarginMonitor instance that
-            // was never refreshed, causing all funding arb opportunities to be
-            // rejected with "Margin monitor not yet initialized".
+            // Use the shared margin monitor.
             let fab_margin_monitor = shared_margin_monitor_arc.clone();
 
             // Dashboard state for operator visibility
             let fab_dashboard = dashboard_state.clone();
 
-            // Shutdown signal — set by Ctrl+C handler to gracefully stop the engine
+            // Shutdown signal
             let fab_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let fab_shutdown_clone = fab_shutdown.clone();
 
@@ -5745,9 +5790,6 @@ fn main() {
                         .expect("Failed to build tokio runtime for funding-arb");
 
                     rt.block_on(async {
-                        // BUG 9 FIX: Use testnet-relaxed thresholds when any exchange
-                        // is in testnet mode. Mainnet defaults reject every opportunity
-                        // on testnet due to thin books and random funding rates.
                         let config = if fab_gateio_testnet || fab_binance_testnet || fab_bybit_testnet {
                             info!("[funding-arb] Using TESTNET config with relaxed thresholds");
                             multi_exchange::FundingArbEngineConfig::testnet()
