@@ -1,0 +1,642 @@
+Strict Note : You must read the below instructions than understand the repository completey and make a proper plan before implementing the changes. No fake , pseudo or partial code implementation. Search the web for full features and latest api. The below instructions just represent the hints and may have incorrect data ( as compared to latest ) so check evrything furstly on the web and double confiem evrything before implementing the changes.
+Again i am telling no lazyness , fake or partial code implementation should be there. I want every perfect.
+
+## COMPLETE INSTITUTIONAL-GRADE SPOT-FUTURES FUNDING RATE ARBITRAGE ENGINE
+
+### CONTEXT FOR THE CODING AGENT
+
+You are modifying a Rust-based crypto trading engine located in `rust_engine/src/`. The engine currently has a **fundamentally wrong** funding rate arbitrage system in `rust_engine/src/multi_exchange/`. The current system opens a **Long on one exchange's Futures** and a **Short on another exchange's Futures** (Futures-Futures). This exposes the bot to **basis risk** and **double liquidation risk**. Both legs can be liquidated during high volatility.
+
+You must replace this with **Spot-Futures (Cash and Carry) Arbitrage**: buy the actual asset on the **Spot market** (cannot be liquidated, you own the asset) and **Short the same asset on the Perpetual Futures market**. Profit comes purely from collecting the **funding rate** that shorts receive when perps trade at a premium to spot.
+
+**DO NOT delete the existing Futures-Futures code.** Mark it with `#[deprecated(note = "Replaced by Spot-Futures engine")]` and keep it for rollback safety. Build the new Spot-Futures system as separate modules.
+
+**This is real money.** Every calculation must be exact. Every edge case must be handled. Every failure must be recoverable.
+
+---
+
+### CRITICAL RULES (READ BEFORE WRITING ANY CODE)
+
+1. **ZERO hardcoded values**: All fees, step sizes, tick sizes, contract multipliers, funding intervals must be fetched from exchange APIs at runtime. The existing `ExchangeId::taker_fee_bps()` in `global_book.rs` returns hardcoded values (5, 4, 6 bps). The new system must fetch real fee tiers dynamically.
+
+2. **Balance-aware sizing**: All position sizing must work with whatever balance the user has ($50 or $50,000). No minimum balance thresholds. If the user's allocation is below an exchange's minimum order size, skip that opportunity with a log message. Do not error out.
+
+3. **No fake/simulated data**: All prices, rates, and balances must come from real exchange APIs. No synthetic VPIN, no estimated funding rates.
+
+4. **Use `rust_decimal::Decimal`** for all financial calculations in the new modules (prices, quantities, fees, PnL, funding accumulation). The crate is already in `Cargo.toml` but unused. Convert to `f64` only at the API boundary when sending to exchanges.
+
+5. **Asset transfers ONLY in live mode**: Check `TRADING_MODE` env var before any wallet transfer. Testnet and paper modes must log "Transfer skipped: not in live mode" and return `Ok(())`.
+
+6. **One position at a time by default**: Do not open new positions while one is active. Focus on the open trade until it's closed and profit is realized. Controlled by `SPOT_FUTURES_MAX_POSITIONS` env var (default: 1).
+
+7. **Same-exchange Spot-Futures for V1**: Buy Spot and Short Futures on the SAME exchange. Cross-exchange requires blockchain withdrawals (slow, costly, risky). The bot picks the exchange with the highest funding rate and executes both legs there. Set `SPOT_FUTURES_SAME_EXCHANGE_ONLY=true` as default.
+
+8. **All API endpoints must be verified**: The endpoints listed below are from official exchange documentation. Double-check against the existing gateway implementations in `binance_gateway.rs`, `bybit_gateway.rs`, and `gateio_gateway.rs` before using them.
+
+9. **Gate.io Spot orders MUST use REST, not WebSocket**: The Gate.io gateway (`gateio_gateway.rs`) is WebSocket-based for Futures. Gate.io does NOT have a WebSocket trading API for Spot. Create a `rest_post` helper method for Spot orders using the existing `rest_get` pattern.
+
+10. **Persist position state to SQLite**: The codebase has `state_store.rs` (SQLite). All open Spot-Futures positions must be persisted so the bot can recover after a crash/restart without opening duplicate positions.
+
+11. **Integrate with the kill switch**: `kill_switch.rs` already exists. If triggered, the Spot-Futures engine must immediately market-sell all Spot holdings, market-close all Futures shorts, cancel all pending orders, log total PnL, and halt.
+
+---
+
+### TOP 20 CURRENCIES TO TRACK
+
+The bot must dynamically determine which symbols are available in BOTH Spot and Futures on ALL three exchanges (Gate.io, Binance, Bybit). Expected set:
+
+`BTC, ETH, BNB, SOL, XRP, DOGE, ADA, AVAX, DOT, LINK, MATIC, UNI, LTC, BCH, NEAR, APT, FIL, ARB, OP, ATOM`
+
+At startup, query each exchange's instrument info endpoints to confirm availability. Only symbols available on all three exchanges in both Spot and Futures proceed.
+
+---
+
+### UNDERSTANDING THE EXISTING CODEBASE
+
+#### Key Files You Must Understand Before Coding:
+
+- **`execution_gateway.rs`**: Defines the `ExecutionGateway` trait with methods like `submit_order()`, `get_balance()`, `get_position()`, `set_leverage()`. All gateways implement this trait. Currently Futures-only. You must extend it.
+
+- **`binance_gateway.rs`**: Binance Futures REST gateway. Uses `POST /fapi/v1/order` for orders, `GET /fapi/v2/balance` for balance. Has `InstrumentManager` integration for precision. Uses `HMAC-SHA256` signing. Testnet: `https://testnet.binancefuture.com`.
+
+- **`bybit_gateway.rs`**: Bybit v5 REST gateway. Uses `POST /v5/order/create` with `category=linear` for Futures. Testnet uses `https://api-demo.bybit.com` (Demo Trading, NOT the old testnet). Bybit Unified Account shares margin between Spot and Futures.
+
+- **`gateio_gateway.rs`**: Gate.io WebSocket-based Futures gateway with REST fallback. Uses `futures.order_place` WS channel for orders, `GET /api/v4/futures/usdt/accounts` for balance. Has `rest_get()` helper but NO `rest_post()` helper. Testnet: `https://api-testnet.gateapi.io/api/v4`.
+
+- **`instrument_manager.rs`**: Fetches contract specs (tick_size, step_size, min_qty, contract_multiplier) from all three exchanges at startup. Currently **Futures-only**. Has `ContractSpec` struct with `format_price()`, `format_qty()`, `notional_to_qty()`, `qty_to_contracts()` methods. You must add Spot market spec fetching.
+
+- **`multi_exchange/mod.rs`**: Module registry. Currently exports `funding_arb`, `funding_arb_engine`, `funding_arb_executor`, `funding_arb_risk`, `margin_monitor`, `delta_monitor`, etc.
+
+- **`multi_exchange/margin_monitor.rs`**: `CrossVenueMarginMonitor` that tracks `ExchangeMarginHealth` per exchange. Has `refresh_all()` that calls `gateway.get_balance()`. Currently only tracks Futures balance.
+
+- **`config.rs`**: `EngineConfig` with `MultiExchangeConfig`. Environment overrides in `main.rs` `apply_env_overrides()`.
+
+- **`main.rs`**: Entry point. `apply_env_overrides()` reads `TRADING_MODE` (live/testnet/paper), `USE_MULTI_EXCHANGE`, exchange API keys, etc. The `FundingArbEngine` is spawned as a tokio task when `USE_MULTI_EXCHANGE=on`.
+
+- **`state_store.rs`**: SQLite-based persistent state storage. Use this for position persistence.
+
+- **`kill_switch.rs`**: Kill switch API endpoint. Integrate with this.
+
+#### Trading Modes (from `main.rs` `apply_env_overrides()`):
+- `TRADING_MODE=live` -> Real money, real API keys (`GATEIO_API_KEY`), real transfers allowed
+- `TRADING_MODE=testnet` -> Testnet APIs (`GATEIO_TESTNET_API_KEY`), NO wallet transfers
+- `TRADING_MODE=paper` -> Simulated, NO real orders, NO transfers
+
+---
+
+### PHASE 1: EXCHANGE SPECIFICATION BOOTSTRAPPING
+
+#### New File: `rust_engine/src/multi_exchange/spot_futures_specs.rs`
+
+**Purpose**: Dynamically fetch all Spot AND Futures market specifications at startup. No hardcoded values.
+
+**Structs to create:**
+
+```rust
+pub struct SpotMarketSpec {
+    pub symbol: String,           // e.g., "BTCUSDT" or "BTC_USDT"
+    pub base_asset: String,       // e.g., "BTC"
+    pub quote_asset: String,      // e.g., "USDT"
+    pub tick_size: Decimal,       // Min price increment
+    pub step_size: Decimal,       // Min qty increment
+    pub min_qty: Decimal,         // Min order quantity (in base asset)
+    pub min_notional: Decimal,    // Min order value in USDT
+    pub maker_fee_rate: Decimal,  // e.g., 0.001 = 0.1%
+    pub taker_fee_rate: Decimal,  // e.g., 0.001 = 0.1%
+    pub price_precision: u32,     // Derived from tick_size
+    pub qty_precision: u32,       // Derived from step_size
+}
+
+pub struct FuturesContractSpec {
+    // Extend the existing ContractSpec from instrument_manager.rs
+    pub funding_interval_hours: f64,  // 8, 4, or 1
+    pub maker_fee_rate: Decimal,
+    pub taker_fee_rate: Decimal,
+    // ... plus all existing ContractSpec fields
+}
+```
+
+**Spot spec fetch endpoints:**
+
+- **Binance Spot**: `GET /api/v3/exchangeInfo` at `https://api.binance.com` (mainnet) or `https://testnet.binance.vision` (testnet)
+  - Parse `symbols[].filters` for `PRICE_FILTER.tickSize`, `LOT_SIZE.stepSize`, `LOT_SIZE.minQty`, `MIN_NOTIONAL.minNotional`
+  - **CRITICAL**: Binance Spot testnet uses DIFFERENT API keys than Futures testnet. Need env vars `BINANCE_SPOT_TESTNET_API_KEY` / `BINANCE_SPOT_TESTNET_SECRET_KEY`.
+
+- **Bybit Spot**: `GET /v5/market/instruments-info?category=spot` at `https://api.bybit.com` (mainnet) or `https://api-demo.bybit.com` (demo)
+  - Parse `result.list[].lotSizeFilter.minOrderQty`, `result.list[].priceFilter.tickSize`
+  - Same API keys as Futures (Unified Account)
+
+- **Gate.io Spot**: `GET /api/v4/spot/currency_pairs` at `https://api.gateio.ws` (mainnet) or `https://api-testnet.gateapi.io` (testnet)
+  - Returns array of objects with `id` (e.g., "BTC_USDT"), `min_base_amount`, `min_quote_amount`, `precision` (price decimals), `amount_precision` (qty decimals)
+
+**Fee tier fetch endpoints (authenticated):**
+
+- Binance: `GET /sapi/v1/asset/tradeFee?symbol=BTCUSDT` (mainnet only, NOT available on testnet)
+- Bybit: `GET /v5/account/fee-rate?category=spot&symbol=BTCUSDT` and `GET /v5/account/fee-rate?category=linear&symbol=BTCUSDT`
+- Gate.io: `GET /api/v4/wallet/fee` (returns all fee tiers)
+- Fallback: If fee fetch fails, use conservative defaults (0.1% taker for Spot, 0.05% taker for Futures)
+
+**Common symbol finder:**
+```rust
+pub fn find_common_symbols(
+    binance_spot: &HashMap<String, SpotMarketSpec>,
+    binance_futures: &HashMap<String, FuturesContractSpec>,
+    bybit_spot: &HashMap<String, SpotMarketSpec>,
+    bybit_futures: &HashMap<String, FuturesContractSpec>,
+    gateio_spot: &HashMap<String, SpotMarketSpec>,
+    gateio_futures: &HashMap<String, FuturesContractSpec>,
+) -> Vec<String> {
+    // Return symbols available in BOTH Spot and Futures on ALL 3 exchanges
+    // Normalize symbol names across exchanges (BTC_USDT vs BTCUSDT)
+}
+```
+
+**Also modify `instrument_manager.rs`:**
+- Add `fetch_binance_spot_specs()`, `fetch_bybit_spot_specs()`, `fetch_gateio_spot_specs()`
+- Store Spot specs separately: key = `(Exchange, "spot", symbol)`
+- Add method `get_spot_spec(exchange, symbol) -> Option<SpotMarketSpec>`
+
+---
+
+### PHASE 2: FUNDING RATE INGESTION & OPPORTUNITY SCANNING
+
+#### Modify: `rust_engine/src/multi_exchange/funding_arb.rs`
+
+**Add to `FundingRateData` struct:**
+```rust
+pub funding_interval_hours: f64,  // Actual interval (8, 4, or 1)
+pub next_funding_countdown_ms: u64,  // Milliseconds until next settlement
+```
+
+**Funding interval parsing per exchange:**
+- Binance: `GET /fapi/v1/fundingInfo` -> `fundingIntervalHours` (integer)
+- Bybit: `GET /v5/market/tickers?category=linear` -> `fundingInterval` field (in MINUTES, divide by 60)
+- Gate.io: `GET /api/v4/futures/usdt/contracts/{contract}` -> `funding_interval` field (in SECONDS, divide by 3600)
+
+**New struct `SpotFuturesOpportunity`:**
+```rust
+pub struct SpotFuturesOpportunity {
+    pub symbol: String,
+    pub exchange: ExchangeId,           // Same exchange for both legs (V1)
+    pub funding_rate: f64,              // Current funding rate on this exchange
+    pub funding_interval_hours: f64,    // Settlement interval
+    pub predicted_rate: f64,            // Weighted avg: current*0.6 + historical_avg*0.4
+    pub projected_apr: f64,             // Annualized projected yield
+    pub spot_ask_price: f64,            // Current spot ask (what we'd pay to buy)
+    pub futures_bid_price: f64,         // Current futures bid (what we'd receive to short)
+    pub spread_pct: f64,               // (futures_bid - spot_ask) / spot_ask
+    pub round_trip_fee_pct: f64,        // Total fees for entry + exit (both legs)
+    pub net_projected_daily_yield: f64, // After fees
+    pub is_actionable: bool,
+    pub next_funding_ms: u64,           // Milliseconds until next funding
+}
+```
+
+**Correct Projected Yield Calculation:**
+```
+funding_periods_per_day = 24.0 / actual_funding_interval_hours
+
+// Weight by historical rates (store last 24 observations per symbol per exchange)
+predicted_rate = current_rate * 0.6 + avg_last_3_rates * 0.4
+
+// Daily yield after all costs
+daily_funding_yield = predicted_rate * funding_periods_per_day
+daily_cost = (spot_taker_fee + futures_taker_fee) / expected_hold_days  // Amortize entry fees
+daily_net_yield = daily_funding_yield - daily_cost
+
+// Annualize
+projected_apr = daily_net_yield * 365
+
+// Entry only if projected_apr > min_apr AND daily_net_yield > 0
+```
+
+**Historical funding rate storage:**
+Use a `VecDeque<(u64, f64)>` with max capacity 24 per symbol per exchange (covers 8 days of 8h funding). Store timestamp + rate for weighted average calculation.
+
+**WebSocket feeds for real-time funding updates:**
+- Binance: Subscribe to `{symbol}@markPrice` stream -> includes `fundingRate` and `nextFundingTime`
+- Bybit: Subscribe to `tickers.{symbol}` -> includes `fundingRate` and `nextFundingTime`
+- Gate.io: No WS funding stream. Poll `GET /api/v4/futures/usdt/contracts/{contract}` every 30 seconds
+
+---
+
+### PHASE 3: CAPITAL ALLOCATION & POSITION SIZING
+
+#### New File: `rust_engine/src/multi_exchange/spot_futures_sizer.rs`
+
+**Balance queries (new methods needed on `ExecutionGateway` trait):**
+
+Add to `execution_gateway.rs`:
+```rust
+/// Get the available balance of a specific asset in the Spot wallet.
+/// e.g., get_spot_asset_balance("BTC") -> 0.05
+/// e.g., get_spot_asset_balance("USDT") -> 1500.0
+async fn get_spot_asset_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
+    Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "Spot balance not supported".into() })
+}
+
+/// Transfer funds between Spot and Futures wallets.
+/// from/to: "spot" or "futures"
+/// Only executes in TRADING_MODE=live. Returns Ok(()) as no-op in testnet/paper.
+async fn transfer_between_wallets(
+    &self, from: &str, to: &str, amount: f64, asset: &str
+) -> Result<(), ExchangeError> {
+    let _ = (from, to, amount, asset);
+    Ok(()) // Default no-op
+}
+
+/// Submit a Spot market/limit order (separate from Futures orders).
+async fn submit_spot_order(&self, intent: SpotOrderIntent) -> Result<OrderResult, ExchangeError> {
+    Err(ExchangeError::Unknown { code: "UNSUPPORTED".into(), message: "Spot orders not supported".into() })
+}
+```
+
+**New `SpotOrderIntent` struct:**
+```rust
+pub struct SpotOrderIntent {
+    pub symbol: String,              // e.g., "BTCUSDT" or "BTC_USDT"
+    pub side: OrderSide,             // Buy or Sell
+    pub qty: f64,                    // In BASE asset (e.g., 0.05 BTC)
+    pub order_type: OrderType,       // Market, Limit, PostOnly
+    pub price: Option<f64>,          // Required for Limit/PostOnly
+    pub time_in_force: String,       // "GTC", "IOC", "FOK"
+    pub quote_order_qty: Option<f64>, // For Binance market buys: spend this much USDT
+}
+```
+
+**Spot balance query endpoints per exchange:**
+- Binance: `GET /api/v3/account` (signed) -> `balances` array -> find `asset=="BTC"` -> `free` field. Mainnet: `https://api.binance.com`. Testnet: `https://testnet.binance.vision`.
+- Bybit: `GET /v5/account/wallet-balance?accountType=UNIFIED&coin=BTC` (same endpoint, different coin param)
+- Gate.io: `GET /api/v4/spot/accounts` (signed) -> find `currency=="BTC"` -> `available` field
+
+**Spot order endpoints per exchange:**
+- Binance: `POST /api/v3/order` at `https://api.binance.com` (mainnet) or `https://testnet.binance.vision` (testnet). Same HMAC-SHA256 signing as Futures. For market buys, use `quoteOrderQty` parameter (spend X USDT) instead of `quantity` (buy X BTC) for safer sizing.
+- Bybit: `POST /v5/order/create` with `"category": "spot"` (same endpoint as Futures, different category). Same signing, same keys.
+- Gate.io: `POST /api/v4/spot/orders` at `https://api.gateio.ws` (mainnet) or `https://api-testnet.gateapi.io` (testnet). Body format: `{"currency_pair":"BTC_USDT","type":"limit","account":"spot","side":"buy","amount":"0.001","price":"67000","time_in_force":"gtc"}`. Note: `amount` is BASE asset qty, NOT integer contracts. **Must use REST, not WebSocket** (Gate.io has no WS Spot trading API).
+
+**Position sizing logic:**
+```
+// Query balances
+spot_usdt = gateway.get_spot_asset_balance("USDT")
+futures_usdt = gateway.get_balance()  // Existing method returns Futures USDT
+
+// Allocation (1x leverage on short = 50/50 split)
+total_capital = spot_usdt + futures_usdt
+leverage = config.short_leverage  // 1, 2, or 3
+spot_ratio = leverage as f64 / (leverage as f64 + 1.0)  // 1x->50%, 2x->66%, 3x->75%
+spot_allocation = total_capital * spot_ratio * config.max_position_pct
+futures_allocation = total_capital * (1.0 - spot_ratio) * config.max_position_pct
+
+// Convert to quantity
+raw_qty = spot_allocation / spot_ask_price
+
+// Floor to the LARGEST step_size across both Spot and Futures
+unified_step = max(spot_spec.step_size, futures_spec.step_size_in_base_asset)
+final_qty = floor(raw_qty / unified_step) * unified_step
+
+// Verify minimum order sizes
+if final_qty < spot_spec.min_qty || final_qty < futures_spec.min_qty {
+    log("Position too small for exchange minimums, skipping");
+    return None;
+}
+
+// Verify minimum notional
+if final_qty * spot_ask_price < spot_spec.min_notional {
+    log("Below minimum notional, skipping");
+    return None;
+}
+
+// Calculate liquidation price for the short
+// For isolated margin: liq_price = entry_price * (1 + 1/leverage)
+// Ensure liq_price is >50% above current price
+liq_price = futures_bid_price * (1.0 + 1.0 / leverage as f64)
+if liq_price < futures_bid_price * 1.5 {
+    log("Liquidation price too close, reducing leverage");
+}
+```
+
+---
+
+### PHASE 4: EXECUTION ENGINE
+
+#### New File: `rust_engine/src/multi_exchange/spot_futures_executor.rs`
+
+**Maker-Taker Sniper Execution Pattern:**
+
+```
+ENTRY:
+1. Identify the less liquid leg (usually Spot has thinner books)
+2. Place Post-Only (Maker) limit order on Spot at Best Bid + 1 tick
+3. Listen for fill via private execution stream (WS user data on Binance/Bybit, REST poll on Gate.io)
+4. The MILLISECOND the Spot order fills (partial or full):
+   -> Fire Market (IOC) order on Futures for the EXACT filled quantity
+5. If Spot doesn't fill within timeout (30s), cancel it (zero exposure, zero risk)
+6. If Futures hedge fails after Spot filled:
+   -> Immediately market-sell the Spot to close exposure
+   -> Log CRITICAL alert
+   -> Record the loss from spread
+
+EXIT (reverse):
+1. Place Limit order to Buy-to-Close the Futures Short
+2. The millisecond it fills, Market-Sell the Spot holdings
+3. If Spot sell fails after Futures close:
+   -> You still hold the crypto, which has value
+   -> Retry the Spot sell with wider slippage
+   -> This is less dangerous than the entry case
+```
+
+**Spot order differences from Futures (the coding agent MUST handle these):**
+- No `leverage` parameter (Spot is always 1x)
+- No `reduce_only` (Spot doesn't have this concept)
+- Quantity is in BASE asset (e.g., 0.001 BTC), not USDT and not integer contracts
+- You receive the actual crypto asset in your Spot wallet
+- To sell Spot, you must have the asset in your Spot wallet (not USDT)
+- Gate.io Spot uses `amount` field (base qty), NOT `size` (integer contracts)
+- Binance market buys should use `quoteOrderQty` (spend X USDT) for safer sizing
+
+---
+
+### PHASE 5: LIVE MONITORING & MARGIN REBALANCING
+
+#### New File: `rust_engine/src/multi_exchange/spot_futures_monitor.rs`
+
+**Position struct:**
+```rust
+pub struct SpotFuturesPosition {
+    pub id: u64,
+    pub symbol: String,
+    pub state: PositionState,  // Validating, Entering, Active, Exiting, Closed, Failed
+    
+    // Spot leg
+    pub spot_exchange: ExchangeId,
+    pub spot_entry_price: Decimal,
+    pub spot_qty: Decimal,           // Actual crypto quantity held
+    pub spot_current_value: Decimal, // Live value in USDT
+    
+    // Futures leg
+    pub futures_exchange: ExchangeId,
+    pub futures_entry_price: Decimal,
+    pub futures_qty: Decimal,        // Short quantity (should match spot_qty)
+    pub futures_leverage: i32,
+    pub futures_margin_used: Decimal,
+    pub futures_liquidation_price: Decimal,
+    
+    // Hedge ratio tracking
+    pub hedge_ratio: Decimal,        // spot_qty / futures_qty (should be ~1.0)
+    
+    // Funding tracking
+    pub accumulated_funding: Decimal,
+    pub funding_payments: Vec<FundingPayment>,
+    pub funding_periods_collected: u32,
+    
+    // PnL (hedged, so price PnL should be ~0)
+    pub live_pnl: Decimal,  // = accumulated_funding + basis_change - fees
+    pub total_fees_paid: Decimal,
+    
+    // Timestamps
+    pub opened_at_ns: u64,
+    pub last_funding_at_ns: u64,
+}
+```
+
+**Funding Payment Verification (CRITICAL for real money):**
+```
+Before each funding settlement epoch:
+  expected_payment = position_size * funding_rate * mark_price
+
+After settlement (wait 60 seconds for exchange to process):
+  Query actual funding payment:
+  - Binance: GET /fapi/v1/income?incomeType=FUNDING_FEE&startTime=...
+  - Bybit: GET /v5/account/transaction-log?type=TRANSFER_IN
+  - Gate.io: GET /api/v4/futures/usdt/account_book?type=fund
+
+Compare actual vs expected:
+  - If actual >= expected * 0.95: OK (5% tolerance for rounding)
+  - If actual < expected * 0.95: Log WARNING
+  - If actual == 0: Log CRITICAL - funding may not have been applied
+```
+
+**Dynamic Margin Rebalancing (LIVE MODE ONLY):**
+
+When price pumps and the Futures short loses margin, the Spot position gains value. But the Spot gain is in **crypto, not USDT**. To rebalance:
+
+```
+1. Monitor futures_margin_ratio every 30 seconds
+2. If margin_ratio < SPOT_FUTURES_MARGIN_REBALANCE_THRESHOLD (default 0.30):
+   a. Calculate how much USDT the Futures account needs
+   b. On the Spot exchange:
+      - Sell a PORTION of the Spot holdings (e.g., 10% of position)
+      - This converts crypto -> USDT in the Spot wallet
+      - Transfer the USDT from Spot wallet to Futures wallet
+   c. This reduces the Spot position slightly
+   d. The hedge is now imbalanced - track the hedge_ratio
+   e. If hedge_ratio deviates > 5% from 1.0:
+      - Reduce the Futures short to match the reduced Spot qty
+      - OR buy more Spot to restore the hedge (if USDT available)
+3. TESTNET/PAPER MODE: Log the rebalance action but do NOT execute
+```
+
+**Transfer API Endpoints (LIVE MODE ONLY):**
+
+- **Binance**: `POST /sapi/v1/asset/transfer`
+  - `type=MAIN_UMFUTURE` (Spot -> USDT-M Futures)
+  - `type=UMFUTURE_MAIN` (USDT-M Futures -> Spot)
+  - **NOT available on testnet** (no `/sapi/` endpoints on testnet)
+  - Must verify transfer completed by polling `GET /sapi/v1/asset/transfer?type=...&startTime=...`
+
+- **Bybit**: Check account type first via `GET /v5/account/info`
+  - Unified Account: NO transfer needed (Spot and Futures share margin pool)
+  - Standard Account: `POST /v5/asset/transfer/inter-transfer` with `transferId` (UUID), `coin`, `amount`, `fromAccountType=SPOT`, `toAccountType=UNIFIED`
+
+- **Gate.io**: `POST /api/v4/wallet/transfers`
+  - Body: `{"currency":"USDT","from":"spot","to":"futures","amount":"100.5"}`
+  - Gate.io testnet DOES support this endpoint
+
+**Transfer Safety Protocol:**
+```
+1. Query source wallet balance BEFORE transfer
+2. Verify amount <= available_balance * 0.99 (1% buffer for fees)
+3. Execute transfer
+4. Poll destination wallet balance for up to 30 seconds (every 2s)
+5. Verify destination balance increased by approximately the transfer amount (5% tolerance)
+6. If verification fails after 30s: log CRITICAL, pause engine
+7. Record transfer in audit log: timestamp, from, to, amount, txId, verified
+```
+
+**True PnL Tracking:**
+```
+Live PnL = Accumulated Funding
+         + (Current Futures Bid - Entry Futures Price) * qty  // ~0 for hedged
+         + (Current Spot Bid - Entry Spot Price) * qty        // ~0 for hedged
+         - Total Fees Paid
+```
+
+---
+
+### PHASE 6: EXIT LOGIC
+
+#### In: `rust_engine/src/multi_exchange/spot_futures_engine.rs`
+
+**Exit Triggers (checked every 30 seconds):**
+
+1. **Negative Funding**: If funding rate turns negative for 2 consecutive periods, shorts start PAYING longs. Exit immediately.
+
+2. **Basis Reversion**: If entered when Futures were premium to Spot, and now Futures are at or below Spot, close to capture the basis as profit on top of funding.
+
+3. **Accumulated Profit Target**: When `accumulated_funding > capital_deployed * take_profit_pct` (configurable, default 0.5%).
+
+4. **Margin Danger**: If Futures margin ratio drops below 15% even after rebalancing attempts.
+
+5. **Time Stop**: Maximum hold time (configurable via `SPOT_FUTURES_MAX_HOLD_HOURS`, default 72).
+
+6. **Kill Switch**: If `kill_switch.rs` is triggered, immediately unwind all positions.
+
+**Unwind Execution:**
+```
+1. Place Limit order to Buy-to-Close the Futures Short
+2. The millisecond it fills, Market-Sell the Spot holdings
+3. Calculate final PnL:
+   final_pnl = accumulated_funding
+              + (futures_entry - futures_exit) * qty  // Basis capture
+              + (spot_exit - spot_entry) * qty        // Should be ~0
+              - total_fees
+4. Log: symbol, hold_time, funding_collected, basis_pnl, fees, net_pnl
+5. Persist closed position to SQLite
+6. Release position slot (allow new positions)
+```
+
+---
+
+### PHASE 7: MAIN ENGINE ORCHESTRATION
+
+#### New File: `rust_engine/src/multi_exchange/spot_futures_engine.rs`
+
+**Main engine loop (spawned as tokio task from `main.rs`):**
+
+```rust
+pub struct SpotFuturesEngine {
+    config: SpotFuturesConfig,
+    specs: SpotFuturesSpecs,          // From Phase 1
+    rate_monitor: FundingRateMonitor, // From Phase 2
+    sizer: SpotFuturesSizer,          // From Phase 3
+    executor: SpotFuturesExecutor,    // From Phase 4
+    monitor: SpotFuturesMonitor,      // From Phase 5
+    positions: Vec<SpotFuturesPosition>,
+    closed_positions: Vec<SpotFuturesPosition>,
+    state_store: SqliteStateStore,    // Persistence
+    shutdown: Arc<AtomicBool>,
+    trading_mode: TradingMode,        // Live, Testnet, Paper
+}
+
+impl SpotFuturesEngine {
+    pub async fn run(&mut self, gateways: ...) {
+        // 1. Load any persisted positions from SQLite (crash recovery)
+        // 2. Reconcile persisted positions against exchange state
+        // 3. Enter main loop:
+        loop {
+            // a. Fetch funding rates from all exchanges (every 60s)
+            // b. Scan for opportunities (only if no active positions or below max)
+            // c. If opportunity found: validate -> size -> execute -> monitor
+            // d. For active positions: check exits, verify funding, rebalance margin
+            // e. Update dashboard state
+            // f. Check kill switch
+            // g. Persist state to SQLite
+        }
+    }
+}
+```
+
+---
+
+### FILES TO CREATE
+
+1. `rust_engine/src/multi_exchange/spot_futures_specs.rs` - Exchange spec bootstrapping (Spot + Futures)
+2. `rust_engine/src/multi_exchange/spot_futures_sizer.rs` - Position sizing
+3. `rust_engine/src/multi_exchange/spot_futures_engine.rs` - Main engine orchestration
+4. `rust_engine/src/multi_exchange/spot_futures_executor.rs` - Maker-Taker execution
+5. `rust_engine/src/multi_exchange/spot_futures_monitor.rs` - Live monitoring & margin rebalancing
+
+### FILES TO MODIFY
+
+1. `rust_engine/src/multi_exchange/mod.rs` - Add new modules
+2. `rust_engine/src/multi_exchange/funding_arb.rs` - Add `funding_interval_hours`, historical rate storage, `SpotFuturesOpportunity` struct. Mark old `FundingArbOpportunity` as `#[deprecated]`
+3. `rust_engine/src/execution_gateway.rs` - Add `SpotOrderIntent`, `get_spot_asset_balance()`, `transfer_between_wallets()`, `submit_spot_order()` to trait
+4. `rust_engine/src/binance_gateway.rs` - Implement Spot API methods (separate base URL for Spot)
+5. `rust_engine/src/bybit_gateway.rs` - Implement Spot API methods (`category=spot`)
+6. `rust_engine/src/gateio_gateway.rs` - Add `rest_post()` helper, implement Spot API methods via REST
+7. `rust_engine/src/instrument_manager.rs` - Add `fetch_binance_spot_specs()`, `fetch_bybit_spot_specs()`, `fetch_gateio_spot_specs()`, `SpotMarketSpec` struct
+8. `rust_engine/src/main.rs` - Wire up `SpotFuturesEngine` when `SPOT_FUTURES_ENABLED=true` and `USE_MULTI_EXCHANGE=on`
+9. `rust_engine/src/config.rs` - Add `SpotFuturesConfig` section
+10. `rust_engine/src/multi_exchange/margin_monitor.rs` - Add Spot balance tracking alongside Futures balance
+11. `rust_engine/src/multi_exchange/funding_arb_engine.rs` - Add `#[deprecated]` attribute
+12. `rust_engine/src/multi_exchange/funding_arb_executor.rs` - Add `#[deprecated]` attribute
+13. `rust_engine/src/multi_exchange/funding_arb_risk.rs` - Add `#[deprecated]` attribute
+
+### FILES TO NOT TOUCH (keep as-is)
+
+- All existing strategy files in `crypto_trading_bot/`
+- All existing Python files
+- `rust_engine/src/orderbook.rs`, `flat_book.rs`, `spsc.rs` (core infrastructure)
+- All test files
+
+---
+
+### ENVIRONMENT VARIABLES
+
+**Existing (already handled in `main.rs`):**
+```
+TRADING_MODE=live|testnet|paper
+USE_MULTI_EXCHANGE=on|off
+BINANCE_API_KEY, BINANCE_SECRET_KEY, BINANCE_TESTNET
+BYBIT_API_KEY, BYBIT_SECRET_KEY, BYBIT_TESTNET
+GATEIO_API_KEY / GATEIO_TESTNET_API_KEY
+GATEIO_SECRET_KEY / GATEIO_TESTNET_SECRET_KEY
+```
+
+**New (add to `apply_env_overrides()` in `main.rs`):**
+```
+SPOT_FUTURES_ENABLED=true|false              # Master toggle
+SPOT_FUTURES_MAX_POSITIONS=1                 # Default 1 (one at a time)
+SPOT_FUTURES_SHORT_LEVERAGE=1                # 1x, 2x, or 3x on futures short
+SPOT_FUTURES_MIN_APR=10                      # Minimum projected APR % to enter
+SPOT_FUTURES_MAX_HOLD_HOURS=72               # Maximum hold time
+SPOT_FUTURES_MARGIN_REBALANCE_THRESHOLD=0.30 # 30% margin ratio triggers rebalance
+SPOT_FUTURES_SAME_EXCHANGE_ONLY=true         # V1: same exchange only
+SPOT_FUTURES_SPOT_ORDER_TYPE=limit           # "market" or "limit" for spot entry
+SPOT_FUTURES_FUNDING_HISTORY_DEPTH=24        # Historical rates to average
+SPOT_FUTURES_REBALANCE_ENABLED=true          # Enable margin rebalancing
+SPOT_FUTURES_HEDGE_RATIO_TOLERANCE=0.05      # Max deviation from 1.0
+SPOT_FUTURES_TAKE_PROFIT_PCT=0.5             # Take profit at 0.5% of capital
+BINANCE_SPOT_TESTNET_API_KEY=                # Separate from Futures testnet
+BINANCE_SPOT_TESTNET_SECRET_KEY=             # Separate from Futures testnet
+```
+
+---
+
+### TESTNET LIMITATIONS TO HANDLE GRACEFULLY
+
+- **Binance Spot Testnet** (`testnet.binance.vision`): Different API keys from Futures testnet. Limited liquidity. `/sapi/` endpoints (transfers) do NOT exist.
+- **Bybit Demo Trading** (`api-demo.bybit.com`): Same keys as mainnet with simulated funds. Both Spot and Futures work. Unified Account means no transfers needed.
+- **Gate.io Testnet** (`api-testnet.gateapi.io`): Spot API exists but thin orderbooks. Funding rates often 0 or random. Transfer API works with fake balances.
+- **ALL testnets**: The bot must gracefully handle transfer failures, missing symbols, zero funding rates, and thin orderbooks without crashing. Log warnings and skip, never panic.
+
+---
+
+### TESTING CHECKLIST (for the coding agent to verify)
+
+1. [ ] Bot starts with `SPOT_FUTURES_ENABLED=true` and `USE_MULTI_EXCHANGE=on` without crashing
+2. [ ] Spot and Futures specs are fetched from all 3 exchanges at startup
+3. [ ] Common symbols are correctly identified across all exchanges
+4. [ ] Funding rates are fetched and stored with correct intervals per exchange
+5. [ ] Position sizing works with $50 total balance (no panics, no oversized orders)
+6. [ ] Spot buy order is correctly formatted per exchange (base qty, not contracts)
+7. [ ] Futures short order is correctly formatted per exchange
+8. [ ] Hedge ratio is tracked and logged
+9. [ ] Funding payments are verified against exchange records
+10. [ ] Exit triggers fire correctly (negative funding, time stop, profit target)
+11. [ ] Kill switch immediately unwinds all positions
+12. [ ] Position state persists to SQLite and recovers on restart
+13. [ ] Wallet transfers are blocked in testnet/paper mode
+14. [ ] All `#[deprecated]` attributes are on old Futures-Futures modules
+15. [ ] No hardcoded fee rates, tick sizes, or step sizes anywhere in new code
+16. [ ] `rust_decimal::Decimal` used for all financial math in new modules
