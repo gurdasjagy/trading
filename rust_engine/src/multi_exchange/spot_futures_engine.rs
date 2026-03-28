@@ -146,7 +146,7 @@ impl SpotFuturesEngine {
     /// * `binance_testnet` / `bybit_testnet` / `gateio_testnet` - Testnet flags
     pub async fn run(
         &mut self,
-        gateways: HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
         symbols: Vec<String>,
         binance_testnet: bool,
         bybit_testnet: bool,
@@ -234,7 +234,7 @@ impl SpotFuturesEngine {
     /// Fetch funding rates from all exchanges for tracked symbols.
     async fn fetch_funding_rates(
         &mut self,
-        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
         symbols: &[String],
         binance_testnet: bool,
         bybit_testnet: bool,
@@ -340,7 +340,7 @@ impl SpotFuturesEngine {
     /// Scan for spot-futures arbitrage opportunities.
     async fn scan_opportunities(
         &self,
-        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
         symbols: &[String],
     ) -> Vec<SpotFuturesOpportunity> {
         let mut opportunities = Vec::new();
@@ -429,7 +429,7 @@ impl SpotFuturesEngine {
     async fn try_enter_position(
         &mut self,
         opportunity: &SpotFuturesOpportunity,
-        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
     ) {
         let exchange = opportunity.exchange;
         let gateway = match gateways.get(&exchange) {
@@ -575,7 +575,7 @@ impl SpotFuturesEngine {
     /// Monitor all active positions for exit conditions.
     async fn monitor_active_positions(
         &mut self,
-        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
     ) {
         let mut positions_to_close = Vec::new();
 
@@ -661,7 +661,7 @@ impl SpotFuturesEngine {
     /// Emergency unwind all positions (kill switch / shutdown).
     async fn emergency_unwind_all(
         &mut self,
-        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway>>,
+        gateways: &HashMap<ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>>,
     ) {
         if self.positions.is_empty() {
             info!("[spot-futures-engine] No active positions to unwind");
