@@ -1,5 +1,9 @@
 //! Dual-Leg Execution Engine for Funding Rate Arbitrage
 //!
+//! **DEPRECATED**: This module implements Futures-Futures dual-leg execution.
+//! Replaced by `spot_futures_executor.rs` which uses Spot-Futures execution pattern.
+//! Kept for rollback safety.
+//!
 //! Handles the critical execution phase where both legs must be filled
 //! simultaneously to maintain delta neutrality. Implements:
 //! - Asynchronous simultaneous order routing (tokio::join!)

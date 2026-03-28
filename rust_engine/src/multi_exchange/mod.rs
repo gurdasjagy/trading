@@ -24,6 +24,14 @@ pub mod funding_arb_executor;
 pub mod funding_arb_risk;
 pub mod delta_monitor;
 
+// Spot-Futures (Cash and Carry) Arbitrage Engine modules
+pub mod spot_futures_specs;
+pub mod spot_futures_sizer;
+pub mod spot_futures_executor;
+pub mod spot_futures_monitor;
+pub mod spot_futures_engine;
+
 // Re-export commonly used types
 pub use global_book::{ExchangeId, GlobalBookRegistry};
 pub use funding_arb_engine::{FundingArbEngine, FundingArbEngineConfig};
+pub use spot_futures_engine::SpotFuturesEngine;

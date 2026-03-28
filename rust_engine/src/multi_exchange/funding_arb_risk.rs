@@ -1,5 +1,9 @@
 //! Pre-Trade Validation and Exit Logic for Funding Rate Arbitrage
 //!
+//! **DEPRECATED**: This module validates Futures-Futures arbitrage positions.
+//! Replaced by `spot_futures_monitor.rs` which validates Spot-Futures positions.
+//! Kept for rollback safety.
+//!
 //! Implements the "Serious Checks" from overview.txt:
 //! 1. Spread vs Fee Check (profitability gate)
 //! 2. Order Book Depth & VWAP Slippage Check

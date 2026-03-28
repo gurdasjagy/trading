@@ -1,5 +1,10 @@
 //! Institutional-Grade Cross-Exchange Funding Rate Arbitrage Engine
 //!
+//! **DEPRECATED**: This module implements Futures-Futures arbitrage (Long on one exchange,
+//! Short on another). This exposes the bot to basis risk and double liquidation risk.
+//! Replaced by the Spot-Futures (Cash and Carry) engine in `spot_futures_engine.rs`.
+//! Kept for rollback safety.
+//!
 //! Full lifecycle management for delta-neutral funding rate arbitrage:
 //!   Phase 1: Pre-Trade Checks (profitability gate, slippage, basis, margin)
 //!   Phase 2: Execution (simultaneous dual-leg with legging protection)

@@ -504,6 +504,54 @@ pub trait ExecutionGateway: Send + Sync {
         Vec::new()
     }
 
+    // -----------------------------------------------------------------------
+    // Spot-Futures Arbitrage: Spot wallet & order methods
+    // -----------------------------------------------------------------------
+
+    /// Get the available balance of a specific asset in the Spot wallet.
+    /// e.g., get_spot_asset_balance("BTC") -> 0.05
+    /// e.g., get_spot_asset_balance("USDT") -> 1500.0
+    ///
+    /// Default: returns Unsupported error. Gateways that support Spot override this.
+    async fn get_spot_asset_balance(&self, _asset: &str) -> Result<f64, ExchangeError> {
+        Err(ExchangeError::Unknown {
+            code: "UNSUPPORTED".into(),
+            message: "Spot balance not supported by this gateway".into(),
+        })
+    }
+
+    /// Transfer funds between Spot and Futures wallets on the same exchange.
+    /// `from`/`to`: "spot" or "futures".
+    ///
+    /// CRITICAL: Only executes in TRADING_MODE=live. Returns Ok(()) as no-op
+    /// in testnet/paper modes. Callers must check the trading mode env var.
+    async fn transfer_between_wallets(
+        &self,
+        _from: &str,
+        _to: &str,
+        _amount: f64,
+        _asset: &str,
+    ) -> Result<(), ExchangeError> {
+        // Default no-op: testnets/paper don't support transfers
+        Ok(())
+    }
+
+    /// Submit a Spot market/limit order (separate from Futures orders).
+    ///
+    /// Key differences from `submit_order`:
+    /// - Quantity is in BASE asset, not integer contracts
+    /// - No leverage, no reduce_only
+    /// - Gate.io Spot MUST use REST (no WS Spot trading API)
+    async fn submit_spot_order(
+        &self,
+        _intent: SpotOrderIntent,
+    ) -> Result<SpotOrderResult, ExchangeError> {
+        Err(ExchangeError::Unknown {
+            code: "UNSUPPORTED".into(),
+            message: "Spot orders not supported by this gateway".into(),
+        })
+    }
+
     /// Convert a USDT amount to integer contracts for a given futures contract.
     /// Each gateway implements this based on the exchange's contract specifications.
     /// Default implementation uses get_ticker to do a simple price-based conversion.
@@ -530,6 +578,55 @@ pub struct RustTicker {
     pub bid: f64,
     pub ask: f64,
     pub volume_24h: f64,
+}
+
+// ---------------------------------------------------------------------------
+// Spot-Futures Arbitrage: Spot Order Intent
+// ---------------------------------------------------------------------------
+
+/// An order intent for the Spot market (as opposed to Futures).
+///
+/// Key differences from Futures `OrderIntent`:
+/// - No `leverage` parameter (Spot is always 1x, you own the asset)
+/// - No `reduce_only` (Spot doesn't have this concept)
+/// - Quantity is in BASE asset (e.g., 0.001 BTC), not USDT and not integer contracts
+/// - `quote_order_qty` enables Binance-style "spend X USDT" market buys
+/// - Gate.io Spot uses `amount` field (base qty), NOT `size` (integer contracts)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotOrderIntent {
+    /// Symbol in exchange-specific format (e.g., "BTCUSDT" or "BTC_USDT").
+    pub symbol: String,
+    /// Buy or Sell.
+    pub side: OrderSide,
+    /// Quantity in BASE asset (e.g., 0.05 BTC). Set to 0.0 if using `quote_order_qty`.
+    pub qty: f64,
+    /// Order type: Market, Limit, or PostOnly.
+    pub order_type: OrderType,
+    /// Required for Limit/PostOnly orders.
+    pub price: Option<f64>,
+    /// Time-in-force: "GTC", "IOC", "FOK".
+    pub time_in_force: String,
+    /// For Binance market buys: spend this much USDT instead of specifying base qty.
+    /// Safer for market buys because you know exactly how much USDT you spend.
+    pub quote_order_qty: Option<f64>,
+}
+
+/// Result of a Spot order execution (reuses the same shape as Futures OrderResult
+/// but `filled_size` is in base-asset units as f64, not integer contracts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotOrderResult {
+    pub order_id: String,
+    /// "open", "closed", "filled", "rejected"
+    pub status: String,
+    /// Filled quantity in BASE asset (e.g., 0.05 BTC).
+    pub filled_qty: f64,
+    /// Average fill price in quote asset (USDT).
+    pub avg_fill_price: f64,
+    /// Total fee paid (in quote asset).
+    pub fee: f64,
+    /// Latency from intent creation to response (microseconds).
+    pub latency_us: u64,
+    pub rejection_reason: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
