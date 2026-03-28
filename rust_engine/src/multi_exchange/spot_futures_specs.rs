@@ -695,6 +695,7 @@ impl SpotFuturesSpecs {
     }
 
     /// Bootstrap: fetch all specs from all exchanges.
+    /// Fetches sequentially to avoid multiple mutable borrows of self.
     pub async fn bootstrap(
         &mut self,
         binance_testnet: bool,
@@ -703,12 +704,10 @@ impl SpotFuturesSpecs {
     ) {
         info!("[spot-futures-specs] Bootstrapping Spot + Futures specs from all exchanges...");
 
-        // Fetch Spot specs in parallel
-        let (binance_spot, bybit_spot, gateio_spot) = tokio::join!(
-            self.fetch_binance_spot_specs(binance_testnet),
-            self.fetch_bybit_spot_specs(bybit_testnet),
-            self.fetch_gateio_spot_specs(gateio_testnet),
-        );
+        // Fetch Spot specs sequentially (each call borrows &mut self to store results)
+        let binance_spot = self.fetch_binance_spot_specs(binance_testnet).await;
+        let bybit_spot = self.fetch_bybit_spot_specs(bybit_testnet).await;
+        let gateio_spot = self.fetch_gateio_spot_specs(gateio_testnet).await;
 
         info!(
             "[spot-futures-specs] Bootstrap complete: Binance Spot={}, Bybit Spot={}, Gate.io Spot={}",

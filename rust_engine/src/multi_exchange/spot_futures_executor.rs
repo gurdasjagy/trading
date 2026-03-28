@@ -8,7 +8,6 @@
 //! CRITICAL: Gate.io Spot orders MUST use REST, not WebSocket.
 //! Gate.io does NOT have a WebSocket trading API for Spot.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use rust_decimal::Decimal;
@@ -221,7 +220,7 @@ impl SpotFuturesExecutor {
             leverage: Some(self.config.short_leverage),
             time_in_force: "ioc".to_string(),
             slippage_cap_pct: Some(0.005), // 0.5% max slippage
-            placement: PlacementType::Aggressive,
+            placement: PlacementType::AtBest,
             stop_loss: None,
             take_profit: None,
             confidence: 1.0,
@@ -316,7 +315,7 @@ impl SpotFuturesExecutor {
             leverage: Some(self.config.short_leverage),
             time_in_force: "ioc".to_string(),
             slippage_cap_pct: Some(0.01), // 1% max slippage on exit
-            placement: PlacementType::Aggressive,
+            placement: PlacementType::AtBest,
             stop_loss: None,
             take_profit: None,
             confidence: 1.0,

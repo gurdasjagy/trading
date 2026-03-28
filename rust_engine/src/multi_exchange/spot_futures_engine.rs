@@ -26,14 +26,13 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
 use crate::config::SpotFuturesConfig;
-use crate::execution_gateway::{ExecutionGateway, ExchangeError};
+use crate::execution_gateway::ExecutionGateway;
 use crate::multi_exchange::global_book::ExchangeId;
-use crate::multi_exchange::funding_arb::{CrossExchangeFundingArb, FundingRateData};
 use crate::multi_exchange::spot_futures_executor::{
     SpotFuturesExecutor, SpotFuturesEntryResult, SpotFuturesExitResult,
 };
 use crate::multi_exchange::spot_futures_monitor::{
-    FundingPayment, FundingRateHistory, SpotFuturesExitReason, SpotFuturesMonitor,
+    FundingRateHistory, SpotFuturesMonitor,
     SpotFuturesPosition, SpotFuturesPositionState,
 };
 use crate::multi_exchange::spot_futures_sizer::SpotFuturesSizer;

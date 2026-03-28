@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 use crate::config::SpotFuturesConfig;
 use crate::multi_exchange::global_book::ExchangeId;
