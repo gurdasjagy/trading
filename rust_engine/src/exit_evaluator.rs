@@ -564,6 +564,12 @@ impl ExitEvaluator {
         self.positions.contains_key(&symbol_id)
     }
 
+    /// CHECK #4: Block duplicate positions per symbol.
+    /// Returns true if the symbol already has an open position being tracked.
+    pub fn has_position(&self, symbol_id: u16) -> bool {
+        self.positions.contains_key(&symbol_id)
+    }
+
     /// Get the number of positions being tracked.
     pub fn tracked_count(&self) -> usize {
         self.positions.len()

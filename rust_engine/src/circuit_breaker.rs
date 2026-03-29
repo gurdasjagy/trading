@@ -386,9 +386,40 @@ impl CircuitBreaker {
     }
 
     /// Set the daily starting balance (call at start of day or engine start).
+    /// BUG #4 FIX: Also initialise equity tracking so Kelly sizing and
+    /// drawdown-based position scaling work from the first trade.
     pub fn set_daily_start_balance(&self, balance_fp: i64) {
         self.daily_start_balance_fp.store(balance_fp, Ordering::Relaxed);
         self.daily_pnl_fp.store(0, Ordering::Relaxed);
+        // Only update peak_equity if current peak is 0 (first call at startup).
+        let current_peak = self.peak_equity.load(Ordering::Relaxed);
+        if current_peak == 0 {
+            self.peak_equity.store(balance_fp, Ordering::Relaxed);
+        }
+        let current_eq = self.current_equity.load(Ordering::Relaxed);
+        if current_eq == 0 {
+            self.current_equity.store(balance_fp, Ordering::Relaxed);
+        }
+    }
+
+    /// Update current equity from a live balance fetch.
+    /// Call this from the execution thread's periodic balance refresh.
+    pub fn update_equity(&self, balance_fp: i64) {
+        self.current_equity.store(balance_fp, Ordering::Relaxed);
+        let peak = self.peak_equity.load(Ordering::Relaxed);
+        if balance_fp > peak {
+            self.peak_equity.store(balance_fp, Ordering::Relaxed);
+        }
+        // Re-check daily drawdown with updated equity
+        let start_balance = self.daily_start_balance_fp.load(Ordering::Relaxed);
+        if start_balance > 0 {
+            let daily_pnl = balance_fp - start_balance;
+            self.daily_pnl_fp.store(daily_pnl, Ordering::Relaxed);
+            let drawdown_pct = -(daily_pnl as f64) / (start_balance as f64);
+            if drawdown_pct > self.config.max_daily_drawdown_pct && daily_pnl < 0 {
+                self.trip(TripReason::DailyDrawdown);
+            }
+        }
     }
 
     /// Get current state for telemetry/dashboard.

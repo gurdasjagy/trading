@@ -1286,10 +1286,22 @@ fn strategy_evaluator_loop(
     // Upgrade 1: Funding rate check counter (check every 1000 snapshots)
     let mut funding_check_counter: u64 = 0;
     // Upgrade 1: Funding rate monitor for arbitrage opportunities
+    // BUG #7 FIX: Use correct env var names consistent with the rest of the engine.
+    // .env uses GATEIO_SECRET_KEY (not GATEIO_API_SECRET).
+    // Testnet mode is controlled by TRADING_MODE, not a separate GATEIO_TESTNET var.
+    let funding_api_key = std::env::var("GATEIO_TESTNET_API_KEY")
+        .or_else(|_| std::env::var("GATEIO_API_KEY"))
+        .unwrap_or_default();
+    let funding_secret = std::env::var("GATEIO_TESTNET_SECRET_KEY")
+        .or_else(|_| std::env::var("GATEIO_SECRET_KEY"))
+        .unwrap_or_default();
+    let funding_testnet = std::env::var("TRADING_MODE")
+        .unwrap_or_default()
+        .to_lowercase() == "testnet";
     let mut funding_monitor = funding_rate::FundingRateMonitor::new(
-        std::env::var("GATEIO_API_KEY").unwrap_or_default(),
-        std::env::var("GATEIO_API_SECRET").unwrap_or_default(),
-        std::env::var("GATEIO_TESTNET").unwrap_or_default() == "true",
+        funding_api_key,
+        funding_secret,
+        funding_testnet,
     );
     // FIX 3: Track funding arb positions for exit logic (symbol_id -> (open_timestamp_ns, entry_price))
     let mut funding_arb_positions: HashMap<u16, (u64, f64)> = HashMap::new();
@@ -1297,6 +1309,11 @@ fn strategy_evaluator_loop(
     info!("[strategy] 📊 VPIN calculator initialized (bucket=100k, depth=50)");
     info!("[strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)");
     info!("[strategy] 💰 Funding rate checks every ~1000 book snapshots");
+
+    // ENHANCEMENT #5/#7 + CHECK #1/#5: State variables for session filter, spread gate, trade count, win rate
+    let mut avg_spread_ema: f64 = 5.0; // CHECK #1: Initial spread EMA in bps
+    let mut daily_trade_count: u32 = 0; // CHECK #5: Daily trade counter
+    let mut last_day_for_trade_count: u64 = 0; // CHECK #5: Day tracker for reset
     info!("[strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)");
     info!("[strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)");
     info!("[strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)");
@@ -1343,6 +1360,24 @@ fn strategy_evaluator_loop(
         if let Some(snapshot) = book_ring.try_pop() {
             let symbol_name = registry.get_name(snapshot.symbol_id);
             let signal_start = std::time::Instant::now();
+
+            // ENHANCEMENT #5: Session-aware trading filter.
+            // Skip signals during known low-liquidity periods.
+            {
+                let now_utc_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let hour_of_day = (now_utc_secs % 86400) / 3600;
+                // Hard skip: Saturday 00:00-06:00 UTC (crypto weekend is slow)
+                let day_of_week = (now_utc_secs / 86400 + 4) % 7; // 0=Monday, 6=Sunday
+                let is_weekend_night = day_of_week == 5 && hour_of_day < 6;
+                if is_weekend_night {
+                    while book_ring.try_pop().is_some() {}
+                    std::hint::spin_loop();
+                    continue;
+                }
+            }
 
             // Periodically refresh regime from shared memory (every 1s)
             if last_regime_check.elapsed() > Duration::from_secs(1) {
@@ -2186,37 +2221,32 @@ fn strategy_evaluator_loop(
                     }
                 }
 
-                // FEATURE 13: Drawdown-based position scaling
-                // Track peak equity and reduce position size during drawdowns
+                // ENHANCEMENT #8: Enhanced drawdown scaling with step-down tiers.
+                // 4-tier system for smoother risk management.
                 let (drawdown_scalar, should_halt) = if let Some(ref cb) = circuit_breaker {
                     let cb_state = cb.get_state();
                     let current_equity = cb_state.current_equity as f64 / 1e8;
                     let peak_equity = cb_state.peak_equity as f64 / 1e8;
-                    
-                    if peak_equity > 0.0 {
+
+                    if peak_equity > 0.0 && current_equity > 0.0 {
                         let drawdown_pct = (peak_equity - current_equity) / peak_equity;
-                        
-                        if drawdown_pct > 0.05 {
-                            // Halt new trades when drawdown > 5%
-                            warn!(
-                                "[strategy] 🛑 Drawdown {:.2}% exceeds 5% threshold — halting new trades",
-                                drawdown_pct * 100.0
-                            );
+                        if drawdown_pct >= 0.08 {
+                            error!("[strategy] HALT: Drawdown {:.1}% >= 8% — all trading suspended", drawdown_pct * 100.0);
                             (0.0, true)
-                        } else if drawdown_pct > 0.02 {
-                            // Reduce position size by drawdown_pct * 10 when drawdown > 2%
-                            let reduction = drawdown_pct * 10.0;
-                            let scalar = (1.0 - reduction).max(0.1);
-                            info!(
-                                "[strategy] 📉 Drawdown {:.2}% — reducing position size by {:.1}%",
-                                drawdown_pct * 100.0, reduction * 100.0
-                            );
-                            (scalar, false)
+                        } else if drawdown_pct >= 0.05 {
+                            warn!("[strategy] DD {:.1}%: sizing at 25%", drawdown_pct * 100.0);
+                            (0.25, false)
+                        } else if drawdown_pct >= 0.03 {
+                            warn!("[strategy] DD {:.1}%: sizing at 50%", drawdown_pct * 100.0);
+                            (0.50, false)
+                        } else if drawdown_pct >= 0.015 {
+                            info!("[strategy] DD {:.1}%: sizing at 75%", drawdown_pct * 100.0);
+                            (0.75, false)
                         } else {
                             (1.0, false)
                         }
                     } else {
-                        (1.0, false)
+                        (1.0, false) // No equity data yet — full size
                     }
                 } else {
                     (1.0, false)
@@ -2265,8 +2295,39 @@ fn strategy_evaluator_loop(
                 let vol_regime_scale = realized_vol_calc.get_regime().get_scale_factor();
                 trail_distance *= vol_regime_scale;
                 
-                let sl_pct = (trail_distance / entry_price).max(0.005).min(0.05);
-                let tp_pct = (sl_pct * 2.0).min(0.10); // 2:1 reward-risk minimum
+                // ENHANCEMENT #3: Asset-class calibrated ATR stop distances.
+                // BTC/ETH/SOL have very different volatility profiles.
+                let symbol_name_for_sl = registry.get_name(snapshot.symbol_id);
+                let (min_sl_pct, max_sl_pct, rr_ratio) = if symbol_name_for_sl.contains("BTC") {
+                    (0.003, 0.025, 2.5) // BTC: tight stops (0.3%-2.5%), 2.5:1 RR
+                } else if symbol_name_for_sl.contains("ETH") {
+                    (0.004, 0.030, 2.2) // ETH: slightly wider (0.4%-3%), 2.2:1 RR
+                } else if symbol_name_for_sl.contains("SOL") {
+                    (0.006, 0.040, 2.0) // SOL: wider stops (0.6%-4%), 2:1 RR
+                } else if symbol_name_for_sl.contains("XAU") || symbol_name_for_sl.contains("XAUT") {
+                    (0.002, 0.015, 3.0) // Gold: tight stops, 3:1 RR
+                } else {
+                    (0.005, 0.035, 2.0) // Default
+                };
+
+                // Use ATR-based distance if available, otherwise use asset minimum
+                let sl_pct = if trail_distance > 0.0 && entry_price > 0.0 {
+                    let atr_pct = trail_distance / entry_price;
+                    // Vol-regime scaling: wider stops in high-vol, tighter in low-vol
+                    let vol_multiplier = match metrics.realized_vol_regime.as_str() {
+                        "Low"     => 0.7,
+                        "Normal"  => 1.0,
+                        "High"    => 1.3,
+                        "Extreme" => 1.6,
+                        _         => 1.0,
+                    };
+                    (atr_pct * vol_multiplier).max(min_sl_pct).min(max_sl_pct)
+                } else {
+                    // Fallback: use half the max SL as default
+                    (min_sl_pct + max_sl_pct) / 2.0
+                };
+                let tp_pct = (sl_pct * rr_ratio).min(max_sl_pct * rr_ratio);
+
                 let stop_loss_price = if is_buy {
                     entry_price * (1.0 - sl_pct)
                 } else {
@@ -2458,6 +2519,41 @@ fn strategy_evaluator_loop(
                             impact.total_bps, impact.recommended_slices);
                     }
 
+                    // CHECK #1: Spread quality gate — skip if spread is abnormally wide
+                    {
+                        avg_spread_ema = avg_spread_ema * 0.999 + metrics.spread_bps * 0.001;
+                        if metrics.spread_bps > avg_spread_ema * 3.0 && metrics.spread_bps > 15.0 {
+                            debug!("[strategy] Spread quality gate: {:.1}bps > 3x avg {:.1}bps — skipping",
+                                metrics.spread_bps, avg_spread_ema);
+                            continue;
+                        }
+                    }
+
+                    // CHECK #4: Block duplicate positions per symbol.
+                    if exit_evaluator.has_position(snapshot.symbol_id) {
+                        debug!("[strategy] Duplicate position block: {} already has open position",
+                            registry.get_name(snapshot.symbol_id));
+                        continue;
+                    }
+
+                    // CHECK #5: Maximum daily trade count (cap at 20 trades/day)
+                    {
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let today = now_secs / 86400;
+                        if today != last_day_for_trade_count {
+                            daily_trade_count = 0;
+                            last_day_for_trade_count = today;
+                        }
+                        let max_daily_trades: u32 = 20;
+                        if daily_trade_count >= max_daily_trades {
+                            debug!("[strategy] Daily trade limit reached ({}/{})", daily_trade_count, max_daily_trades);
+                            continue;
+                        }
+                    }
+
                     // ── Institutional: Pre-Trade Risk + Position Slot Checks ──
                     // BEFORE pushing to SPSC, validate through the risk engine and
                     // acquire a position slot. This prevents overexposure and ensures
@@ -2543,6 +2639,9 @@ fn strategy_evaluator_loop(
 
                             // Step 4: Record book_to_signal latency
                             latency_tracker.book_to_signal.record_since(signal_start);
+
+                            // CHECK #5: Increment daily trade counter
+                            daily_trade_count += 1;
 
                             // Step 5: Push to execution ring
                             if !exec_ring.try_push(cmd) {
@@ -2686,6 +2785,8 @@ fn execution_router_loop(
     ws_fill_sink: ws_fill_receiver::FillUpdateSink,
     // Gate.io USDT contract fix: InstrumentManager for dynamic quanto_multiplier lookup
     instrument_mgr: Arc<instrument_manager::InstrumentManager>,
+    // BUG #1/#3 FIX: PreTradeRiskEngine for balance/position sync from execution thread
+    pre_trade_risk_engine: &'static PreTradeRiskEngine,
 ) {
     info!("[execution] Starting execution router on dedicated core (Institutional)");
 
@@ -2742,7 +2843,19 @@ fn execution_router_loop(
         smart_router::SmartOrderRouter::default_venues()
     };
     
-    let ws_mgr = ws_order_manager::WsOrderManager::new_paper();
+    // BUG #5 FIX: Use live WS order manager when TRADING_MODE is live or testnet.
+    // new_paper() simulates all order confirmations locally without hitting the exchange.
+    let trading_mode_for_ws = std::env::var("TRADING_MODE")
+        .unwrap_or_else(|_| "paper".to_string())
+        .to_lowercase();
+    let ws_mgr = if trading_mode_for_ws == "live" || trading_mode_for_ws == "testnet" {
+        ws_order_manager::WsOrderManager::new_live()
+    } else {
+        ws_order_manager::WsOrderManager::new_paper()
+    };
+    info!("[execution] WsOrderManager mode: {} (TRADING_MODE={})",
+        if trading_mode_for_ws == "live" || trading_mode_for_ws == "testnet" { "LIVE" } else { "PAPER" },
+        trading_mode_for_ws);
     let mut exec_ctx = execution_gateway::ExecutionContext::new(
         mbo_book,
         adverse_detector,
@@ -2859,7 +2972,14 @@ fn execution_router_loop(
                 Ok(balance) => {
                     let balance_fp = (balance * 1e8) as i64;
                     circuit_breaker.set_daily_start_balance(balance_fp);
-                    info!("[execution] ✅ Auth OK — Initial balance: ${:.2} — circuit breaker armed", balance);
+                    // BUG #1 FIX: Feed balance into pre_trade_risk_engine so its
+                    // correlated exposure check doesn't block every order.
+                    pre_trade_risk_engine.update_balance(balance_fp);
+                    // BUG #4 FIX: Also initialise circuit_breaker equity tracking.
+                    circuit_breaker.current_equity.store(balance_fp, Ordering::Relaxed);
+                    circuit_breaker.peak_equity.store(balance_fp, Ordering::Relaxed);
+                    info!("[execution] ✅ Auth OK — Initial balance: ${:.2} USDT — circuit breaker armed \
+                          — pre_trade_risk armed", balance);
                 }
                 Err(e) => {
                     let err_str = format!("{}", e);
@@ -2872,7 +2992,12 @@ fn execution_router_loop(
                         error!("[execution]   5. Ensure the key has 'Futures' permission enabled");
                     }
                     warn!("[execution] Failed to fetch initial balance: {} — using $10k default", e);
-                    circuit_breaker.set_daily_start_balance(10_000_0000_0000); // $10k default
+                    let fallback_fp = 10_000_0000_0000i64; // $10,000
+                    circuit_breaker.set_daily_start_balance(fallback_fp);
+                    // BUG #1 FIX: Always initialise pre_trade_risk_engine, even on error.
+                    pre_trade_risk_engine.update_balance(fallback_fp);
+                    circuit_breaker.current_equity.store(fallback_fp, Ordering::Relaxed);
+                    circuit_breaker.peak_equity.store(fallback_fp, Ordering::Relaxed);
                 }
             }
 
@@ -3639,6 +3764,16 @@ fn execution_router_loop(
                             // FIX 1: Only insert position entries on non-close fills
                             if cmd.is_close == 0 {
                                 position_entries.insert(cmd.symbol_id, (res.avg_fill_price, res.filled_size, cmd.side == spsc::side::BUY));
+                                // BUG #3 FIX: Notify PreTradeRiskEngine that a position was opened.
+                                // This keeps per_symbol_margin and active_positions in sync.
+                                {
+                                    let notional_usdt = res.avg_fill_price * (res.filled_size as f64).abs();
+                                    let leverage = cmd.target_leverage().max(1) as f64;
+                                    let margin_fp = ((notional_usdt / leverage) * 1e8) as i64;
+                                    pre_trade_risk_engine.on_position_opened(cmd.symbol_id, margin_fp);
+                                    debug!("[execution] PreTradeRisk: position opened sym_id={} margin=${:.2}",
+                                        cmd.symbol_id, notional_usdt / leverage);
+                                }
                             }
 
                             // Task 1: Record fill in ExecutionAnalytics
@@ -3701,6 +3836,16 @@ fn execution_router_loop(
                             };
                             total_pnl_fp += pnl_fp;
                             circuit_breaker.on_trade_result(pnl_fp);
+
+                            // BUG #3 FIX: Notify PreTradeRiskEngine that the position was closed.
+                            if cmd.is_close == 1 {
+                                let notional_usdt = FixedPrice(cmd.price).to_f64()
+                                    * (fixed_point::FixedQty(cmd.qty).to_f64()).abs();
+                                let leverage = cmd.target_leverage().max(1) as f64;
+                                let margin_fp = ((notional_usdt / leverage) * 1e8) as i64;
+                                pre_trade_risk_engine.on_position_closed(cmd.symbol_id, margin_fp);
+                                debug!("[execution] PreTradeRisk: position closed sym_id={}", cmd.symbol_id);
+                            }
 
                             // ── FIX 6: Submit SL/TP conditional orders to exchange ──
                             // Gate.io supports setting SL/TP via the price_trigger REST API.
@@ -4886,10 +5031,15 @@ fn execution_router_loop(
                     if let Some(ref gw) = gateway {
                         match gw.get_balance().await {
                             Ok(balance) => {
-                                dashboard_state.balance_fp.store((balance * 1e8) as i64, Ordering::Relaxed);
-                                dashboard_state.equity_fp.store((balance * 1e8) as i64, Ordering::Relaxed);
+                                let balance_fp = (balance * 1e8) as i64;
+                                dashboard_state.balance_fp.store(balance_fp, Ordering::Relaxed);
+                                dashboard_state.equity_fp.store(balance_fp, Ordering::Relaxed);
                                 // TASK 3: Also update multi-exchange balance for Gate.io (index 0)
                                 dashboard_state.set_exchange_balance(0, balance);
+                                // BUG #1 FIX: Keep pre_trade_risk_engine in sync with real balance.
+                                pre_trade_risk_engine.update_balance(balance_fp);
+                                // BUG #4 FIX: Update equity tracking for drawdown and Kelly sizing.
+                                circuit_breaker.update_equity(balance_fp);
                             }
                             Err(e) => {
                                 // Only log once per 60s to reduce noise
@@ -5357,6 +5507,26 @@ fn main() {
 
                 Some(Arc::new(gateway) as Arc<dyn ExecutionGateway + Send + Sync>)
             });
+
+    // BUG #6 FIX: Fail loudly instead of silently running signal-only.
+    if gateway.is_none() {
+        error!("======================================================================");
+        error!("  FATAL: NO EXECUTION GATEWAY -- ZERO TRADES WILL OPEN");
+        error!("======================================================================");
+        error!("[startup] GATEIO_API_KEY / GATEIO_SECRET_KEY check:");
+        let key = std::env::var("GATEIO_API_KEY").unwrap_or_else(|_| "<NOT SET>".into());
+        let sec = std::env::var("GATEIO_SECRET_KEY").unwrap_or_else(|_| "<NOT SET>".into());
+        error!("[startup]   GATEIO_API_KEY = '{}...' (len={})",
+            &key[..key.len().min(6)], key.len());
+        error!("[startup]   GATEIO_SECRET_KEY = '{}...' (len={})",
+            &sec[..sec.len().min(6)], sec.len());
+        error!("[startup] Possible causes:");
+        error!("[startup]   1. .env file not found or not loaded");
+        error!("[startup]   2. Keys still set to placeholder values");
+        error!("[startup]   3. Keys have leading/trailing whitespace");
+        error!("[startup]   4. For TRADING_MODE=testnet, use GATEIO_TESTNET_API_KEY instead");
+        // Continue running (dashboard still works) but make it unmissable in logs.
+    }
 
     // 7c. Initialize Order Lifecycle Tracker (Institutional Feature)
     let lifecycle_tracker: &'static OrderLifecycleTracker =
@@ -6109,6 +6279,7 @@ fn main() {
                     shared_margin_monitor_exec,
                     exec_fill_sink,
                     exec_instrument_mgr,
+                    pre_trade_risk_engine,
                 );
             })
             .expect("Failed to spawn execution thread");
