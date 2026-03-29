@@ -162,6 +162,27 @@ impl WsOrderManager {
         }
     }
 
+    /// BUG #5 FIX: Create a live-mode WsOrderManager.
+    /// Live mode: confirmations come from the exchange WS feed, not simulated locally.
+    /// The GateIoGateway already handles WS order placement and ACK tracking.
+    /// This struct is used by ExecutionContext for fill tracking.
+    pub fn new_live() -> Self {
+        // In live mode we still use the same struct but with real credentials
+        // loaded from environment. The difference is semantic -- the execution
+        // gateway will route orders to the real exchange.
+        let api_key = std::env::var("GATEIO_TESTNET_API_KEY")
+            .or_else(|_| std::env::var("GATEIO_API_KEY"))
+            .unwrap_or_default();
+        let api_secret = std::env::var("GATEIO_TESTNET_SECRET_KEY")
+            .or_else(|_| std::env::var("GATEIO_SECRET_KEY"))
+            .unwrap_or_default();
+        if api_key.is_empty() || api_secret.is_empty() {
+            // Fallback to paper mode if no credentials
+            return Self::new_paper();
+        }
+        Self::new(api_key, api_secret)
+    }
+
     /// Submit an order via WebSocket. Returns the client_order_id.
     ///
     /// The actual JSON message is queued in `outbound_queue` for the

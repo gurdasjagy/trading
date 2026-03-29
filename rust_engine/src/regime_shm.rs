@@ -188,11 +188,23 @@ impl RegimeWeights {
     }
 
     /// Returns a conservative safe default.
+    /// BUG #10 FIX: Use current timestamp so the safe default is treated as
+    /// fresh (not expired). An expired safe default would also return safe_default()
+    /// but incurs unnecessary is_expired() overhead on every read.
+    /// Also changed position_scale_fp from 5000 (0.5x) to 10000 (1.0x) -- when
+    /// there's no regime signal, use full sizing and let other risk controls do their job.
     pub fn safe_default() -> Self {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
         Self {
+            magic: REGIME_MAGIC,
+            sequence: 0,
+            timestamp_ms: now_ms, // FIX: was 0, which makes is_expired() always true
             overall_regime: regime_type::UNKNOWN,
             volatility_regime: volatility_type::HIGH,
-            position_scale_fp: 5000, // 0.5
+            position_scale_fp: 10_000, // FIX: was 5000 (0.5x). Use 1.0x when no regime data.
             ttl_seconds: 600,
             ..Default::default()
         }
@@ -358,7 +370,8 @@ mod tests {
         let w = RegimeWeights::safe_default();
         assert_eq!(w.overall_regime, regime_type::UNKNOWN);
         assert_eq!(w.volatility_regime, volatility_type::HIGH);
-        assert!((w.position_scale() - 0.5).abs() < 1e-6);
+        // BUG #10 FIX: Changed from 0.5 to 1.0 (full sizing when no regime data)
+        assert!((w.position_scale() - 1.0).abs() < 1e-6);
     }
 
     #[test]

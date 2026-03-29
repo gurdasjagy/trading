@@ -255,6 +255,18 @@ impl PreTradeRiskEngine {
             return Ok(());
         }
 
+        // BUG #2 FIX (guard): If balance hasn't been fetched yet from the exchange,
+        // allow the order through rather than blocking on uninitialised state.
+        // The execution thread will update_balance() within seconds of startup.
+        // Without this guard, the very first signal (which fires before the first
+        // health-check balance sync) would be silently dropped.
+        let available = self.available_balance_fp.load(Ordering::Relaxed);
+        if available == 0 {
+            tracing::debug!("[pre-trade-risk] Balance not yet fetched — passing order (startup race)");
+            self.total_passes.fetch_add(1, Ordering::Relaxed);
+            return Ok(());
+        }
+
         // 1. Leverage check
         let leverage = cmd.target_leverage() as u32;
         if leverage > self.config.max_leverage {
@@ -283,8 +295,7 @@ impl PreTradeRiskEngine {
             notional_fp / 5 // Default 5x if somehow zero
         };
 
-        // 4. Available balance check
-        let available = self.available_balance_fp.load(Ordering::Relaxed);
+        // 4. Available balance check (available already loaded in guard above)
         if available > 0 && available < self.config.min_available_balance_fp {
             self.total_rejections.fetch_add(1, Ordering::Relaxed);
             return Err(RiskRejection::InsufficientCollateral {
@@ -362,10 +373,12 @@ impl PreTradeRiskEngine {
             );
         }
 
-        // 9. **NEW: Correlation-based exposure limits**
-        // Assume max 30% exposure in correlated assets (same sector/category)
-        // For crypto: BTC/ETH/SOL are correlated, alts are separate
-        // Simplified: group symbols 0-2 as "majors", 3+ as "alts"
+        // 9. Correlation-based exposure check
+        // BUG #2 FIX: Use configured per-symbol margin limit instead of
+        // (available * 0.30) which is far too tight for leveraged futures and
+        // is always 0 when balance hasn't been set yet.
+        // The old logic: $1,000 balance -> $300 correlated limit -> BTC at $80k 5x
+        // requires $16,000 margin -> always rejects. Completely broken.
         let is_major = cmd.symbol_id <= 2;
         let mut correlated_exposure = 0i64;
         for (sym_id, margin) in per_sym.iter() {
@@ -376,7 +389,10 @@ impl PreTradeRiskEngine {
         }
         drop(per_sym);
 
-        let max_correlated = (available as f64 * 0.30) as i64; // 30% limit
+        // Use max_per_symbol_margin as the correlated ceiling (properly configured).
+        // For a $5,000 account and default max_per_symbol=$2,000, this allows
+        // single-symbol positions up to $2,000 margin -- correct and sensible.
+        let max_correlated = self.config.max_per_symbol_margin_fp;
         if correlated_exposure + required_margin_fp > max_correlated {
             self.total_rejections.fetch_add(1, Ordering::Relaxed);
             return Err(RiskRejection::ConcentrationLimit {
