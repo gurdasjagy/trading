@@ -383,15 +383,23 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         for ex in cfg.exchanges.iter_mut() {
             if ex.name == "gateio" {
                 ex.testnet = true;
-                // Gate.io USDT futures testnet WebSocket endpoint (current URL per official docs).
-                // Old URL wss://fx-ws-testnet.gateio.ws/v4/ws/usdt still accepts TCP but uses
-                // a different key pool — authenticated subscriptions fail with INVALID_KEY.
-                ex.ws_url = "wss://ws-testnet.gate.com/v4/ws/futures/usdt".to_string();
-                // CRITICAL: The correct testnet REST URL is api-testnet.gateapi.io
-                // (same as CCXT's set_sandbox_mode). The old fx-api-testnet.gateio.ws
-                // is a DIFFERENT server with a DIFFERENT API key pool — keys created
-                // on the Gate.io testnet page only work with gateapi.io domain.
+                // ROOT CAUSE FIX: wss://ws-testnet.gate.com is the ORDER EXECUTION endpoint,
+                // NOT a market data feed. Subscribing to futures.order_book/futures.trades
+                // on this URL results in zero data (server ignores market data subscriptions).
+                //
+                // The GateIoGateway execution struct has its own HARDCODED testnet URL
+                // (wss://ws-testnet.gate.com) for order placement — it does NOT use config.ws_url.
+                // Therefore config.ws_url is ONLY used by the market data ingestion loop.
+                //
+                // Solution: always use mainnet public market data WS for the ingestion loop.
+                // Gate.io mainnet streams real BTC/ETH/SOL orderbooks freely, no auth required.
+                // This gives real price signals while testnet is used for safe order execution.
+                ex.ws_url = "wss://fx-ws.gateio.ws/v4/ws/usdt".to_string();
+                // Only override the REST URL to testnet (for balance checks, order management):
                 ex.rest_url = Some("https://api-testnet.gateapi.io/api/v4".to_string());
+                // NOTE: Do NOT change ex.ws_url to the testnet execution endpoint.
+                // The GateIoGateway handles testnet order execution via its own internal
+                // hardcoded WS connection — see gateio_gateway.rs GateIoGateway::new().
             }
         }
         eprintln!(

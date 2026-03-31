@@ -311,7 +311,7 @@ class ConfluenceEngine:
     min_risk_reward : float
         Minimum Risk/Reward ratio required (default 2.0).
     min_confidence : float
-        Minimum average confidence across agreeing strategies (default 0.6).
+        Minimum average confidence across agreeing strategies (default 0.3).
     cooldown_seconds : float
         Minimum time between signals for the same symbol (default 300s = 5min).
     """
@@ -320,7 +320,7 @@ class ConfluenceEngine:
         self,
         min_confluence_pct: float = 0.75,
         min_risk_reward: float = 2.0,
-        min_confidence: float = 0.6,
+        min_confidence: float = 0.3,
         cooldown_seconds: float = 300.0,
     ):
         self.min_confluence_pct = min_confluence_pct
@@ -499,7 +499,7 @@ class AlphaOracle:
         self,
         min_confluence_pct: float = 0.75,
         min_risk_reward: float = 2.0,
-        min_confidence: float = 0.6,
+        min_confidence: float = 0.3,
         cooldown_seconds: float = 300.0,
     ):
         self.confluence = ConfluenceEngine(
