@@ -1,3 +1,15 @@
+-- Compatibility role bootstrap for libraries/tools that assume postgres superuser
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
+        CREATE ROLE postgres WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD 'postgres';
+    END IF;
+END
+$$;
+
+GRANT ALL PRIVILEGES ON DATABASE trading_bot TO trading;
+ALTER DATABASE trading_bot OWNER TO trading;
+
 -- init-db.sql — Trading Bot Database Schema
 -- PostgreSQL 16 — Optimized for 4vCPU / 8GB RAM VPS
 

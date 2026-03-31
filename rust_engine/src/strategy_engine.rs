@@ -42,15 +42,15 @@
 //! It does NOT generate trade signals. The Rust engine is the sole
 //! decision-maker.
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::{HashMap, VecDeque};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
+use crate::candle_aggregator::{CandleAggregator, Timeframe};
 use crate::execution_gateway::{OrderIntent, OrderSide, OrderType};
 use crate::execution_state::PlacementType;
 use crate::regime::RegimeState;
-use crate::candle_aggregator::{CandleAggregator, Timeframe};
 
 // ---------------------------------------------------------------------------
 // Configuration Constants
@@ -82,7 +82,7 @@ const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.015;
 const MIN_SPREAD_BPS: f64 = 1.0;
 
 /// Maximum spread in bps — don't trade if spread is insane.
-const MAX_SPREAD_BPS: f64 = 200.0;
+const MAX_SPREAD_BPS: f64 = 500.0; // Testnet can have wide spreads — do not hard-block valid signals
 
 /// Base position size (in contracts) before regime scaling.
 const BASE_POSITION_SIZE: f64 = 1.0;
@@ -92,7 +92,7 @@ const MAX_POSITION_SIZE: f64 = 50.0;
 
 /// Minimum depth in USD on both sides to consider orderbook valid.
 /// Lowered from 1000 to 100 for testnet compatibility where books are thinner.
-const MIN_DEPTH_USD: f64 = 100.0;
+const MIN_DEPTH_USD: f64 = 10.0; // Testnet books are thin — accept shallow depth
 
 // ---------------------------------------------------------------------------
 // Microstructure Metrics — Fed from BookSnapshot
@@ -239,7 +239,8 @@ impl VPINCalculator {
                 }
 
                 // Push completed bucket
-                self.buckets.push_back((self.current_buy_vol, self.current_sell_vol));
+                self.buckets
+                    .push_back((self.current_buy_vol, self.current_sell_vol));
                 if self.buckets.len() > self.max_buckets {
                     self.buckets.pop_front();
                 }
@@ -278,7 +279,9 @@ impl VPINCalculator {
             return 0.0;
         }
         let n = self.buckets.len() as f64;
-        let sum_abs_diff: f64 = self.buckets.iter()
+        let sum_abs_diff: f64 = self
+            .buckets
+            .iter()
             .map(|(buy, sell)| (buy - sell).abs())
             .sum();
         (sum_abs_diff / (n * self.bucket_size)).clamp(0.0, 1.0)
@@ -425,7 +428,7 @@ impl StrategyEngine {
     pub fn new(engine_config: &crate::config::EngineConfig) -> Self {
         let num_symbols = 64; // Pre-allocate for max symbols
         let mut vpin_calcs = Vec::with_capacity(num_symbols);
-        
+
         // Task 9: Apply pair-specific VPIN bucket size
         // For now, use default bucket size - will be customized per symbol in future
         for _ in 0..num_symbols {
@@ -499,13 +502,17 @@ impl StrategyEngine {
             return None;
         }
         if metrics.spread_bps < MIN_SPREAD_BPS || metrics.spread_bps > MAX_SPREAD_BPS {
-            debug!("[strategy] Gate: spread_bps={:.1} outside [{:.1}, {:.1}] — skipping",
-                metrics.spread_bps, MIN_SPREAD_BPS, MAX_SPREAD_BPS);
+            debug!(
+                "[strategy] Gate: spread_bps={:.1} outside [{:.1}, {:.1}] — skipping",
+                metrics.spread_bps, MIN_SPREAD_BPS, MAX_SPREAD_BPS
+            );
             return None;
         }
         if metrics.bid_depth_usdt < MIN_DEPTH_USD || metrics.ask_depth_usdt < MIN_DEPTH_USD {
-            debug!("[strategy] Gate: depth too low bid=${:.0} ask=${:.0} (min=${:.0}) — skipping",
-                metrics.bid_depth_usdt, metrics.ask_depth_usdt, MIN_DEPTH_USD);
+            debug!(
+                "[strategy] Gate: depth too low bid=${:.0} ask=${:.0} (min=${:.0}) — skipping",
+                metrics.bid_depth_usdt, metrics.ask_depth_usdt, MIN_DEPTH_USD
+            );
             return None;
         }
 
@@ -653,18 +660,23 @@ impl StrategyEngine {
         // ── Phase 2 Feature 6: Adaptive Imbalance Threshold ──
         // Update the adaptive threshold with current imbalance
         self.adaptive_threshold.lock().update(abs_imbalance);
-        
+
         // Task 8: Apply pair-specific imbalance threshold
         // Get the dynamic threshold (mean + 1.5σ, floored at 2%)
         let base_threshold = self.adaptive_threshold.lock().get_threshold();
-        
+
         // Override with pair profile if available
-        let threshold = self.pair_profiles.get(symbol)
+        let threshold = self
+            .pair_profiles
+            .get(symbol)
             .map(|profile| profile.imbalance_threshold)
             .unwrap_or(base_threshold);
-        
+
         if abs_imbalance < threshold {
-            debug!("[strategy] Gate: imbalance {:.4} < threshold {:.4} — skipping", abs_imbalance, threshold);
+            debug!(
+                "[strategy] Gate: imbalance {:.4} < threshold {:.4} — skipping",
+                abs_imbalance, threshold
+            );
             return None; // Not enough signal
         }
 
@@ -678,7 +690,7 @@ impl StrategyEngine {
         } else {
             1.0
         };
-        
+
         // ENHANCEMENT #2: Funding rate hard filter for BTC/ETH/SOL.
         // If funding rate strongly opposes our signal direction, skip entirely.
         let abs_funding = metrics.funding_rate.abs();
@@ -690,13 +702,17 @@ impl StrategyEngine {
         // Use abs_imbalance as proxy for signal strength (confidence not yet computed)
         let signal_strength = abs_imbalance / threshold;
         if funding_strongly_positive && is_long_signal_funding && signal_strength < 2.0 {
-            debug!("[strategy] Funding rate block: rate={:.4}% favors shorts, skipping long signal",
-                metrics.funding_rate * 100.0);
+            debug!(
+                "[strategy] Funding rate block: rate={:.4}% favors shorts, skipping long signal",
+                metrics.funding_rate * 100.0
+            );
             return None;
         }
         if funding_strongly_negative && !is_long_signal_funding && signal_strength < 2.0 {
-            debug!("[strategy] Funding rate block: rate={:.4}% favors longs, skipping short signal",
-                metrics.funding_rate * 100.0);
+            debug!(
+                "[strategy] Funding rate block: rate={:.4}% favors longs, skipping short signal",
+                metrics.funding_rate * 100.0
+            );
             return None;
         }
 
@@ -712,14 +728,14 @@ impl StrategyEngine {
         } else {
             1.0
         };
-        
+
         // VPOC distance score: boost signals near VPOC (high liquidity zone)
         let vpoc_score = if metrics.vpoc_distance_pct.abs() < 0.005 {
             1.15 // Within 0.5% of VPOC = boost
         } else {
             1.0
         };
-        
+
         // Volatility regime scaling
         let vol_regime_scale = match metrics.realized_vol_regime.as_str() {
             "Low" => 1.5,      // Low vol = increase size
@@ -728,7 +744,7 @@ impl StrategyEngine {
             "Extreme" => 0.25, // Extreme vol = minimal size
             _ => 1.0,
         };
-        
+
         // VPIN penalty (toxic flow detection)
         let vpin_penalty = if vpin > VPIN_SAFE_THRESHOLD {
             ((vpin - VPIN_SAFE_THRESHOLD) / (VPIN_TOXIC_THRESHOLD - VPIN_SAFE_THRESHOLD))
@@ -736,34 +752,41 @@ impl StrategyEngine {
         } else {
             0.0
         };
-        
+
         // FIXED composite signal scoring — weighted sum (not product).
         // Each factor contributes additively with its designated weight.
         // STRATEGY 1 FIX: Added confluence_score as a multiplicative factor
         // to soften (not block) counter-trend signals.
-        let imbalance_score    = (abs_imbalance / threshold).min(3.0) * 0.35; // 35% weight
-        let cvd_contribution   = cvd_score * 0.15;                             // 15% weight
-        let funding_contribution = funding_score * 0.15;                       // 15% weight
-        let vpoc_contribution  = vpoc_score * 0.10;                            // 10% weight
-        let vol_contribution   = (vol_regime_scale / 1.5_f64).min(1.0) * 0.10;    // 10% weight
+        let imbalance_score = (abs_imbalance / threshold).min(3.0) * 0.35; // 35% weight
+        let cvd_contribution = cvd_score * 0.15; // 15% weight
+        let funding_contribution = funding_score * 0.15; // 15% weight
+        let vpoc_contribution = vpoc_score * 0.10; // 10% weight
+        let vol_contribution = (vol_regime_scale / 1.5_f64).min(1.0) * 0.10; // 10% weight
         let confluence_contribution = (confluence_score / 1.2_f64).min(1.0) * 0.15; // 15% weight
 
-        let composite = (imbalance_score + cvd_contribution + funding_contribution
-            + vpoc_contribution + vol_contribution + confluence_contribution)
+        let composite = (imbalance_score
+            + cvd_contribution
+            + funding_contribution
+            + vpoc_contribution
+            + vol_contribution
+            + confluence_contribution)
             * (1.0 - vpin_penalty * 0.5);
 
         let confidence = composite.clamp(0.0, 1.0);
 
         // ── ML Weights Blending ──
-        let ml_w = ml_weights.get_weights(symbol_id).unwrap_or(crate::ml_weight_receiver::SymbolWeight {
-            symbol_id,
-            _pad: 0,
-            momentum_weight: 1.0,
-            mean_reversion_weight: 0.0,
-            volatility_weight: 1.0,
-            confidence_floor: 0.0,
-            max_position_scale: 1.0,
-        });
+        let ml_w =
+            ml_weights
+                .get_weights(symbol_id)
+                .unwrap_or(crate::ml_weight_receiver::SymbolWeight {
+                    symbol_id,
+                    _pad: 0,
+                    momentum_weight: 1.0,
+                    mean_reversion_weight: 0.0,
+                    volatility_weight: 1.0,
+                    confidence_floor: 0.0,
+                    max_position_scale: 1.0,
+                });
 
         if confidence < ml_w.confidence_floor as f64 {
             return None; // Floor not met
@@ -773,9 +796,17 @@ impl StrategyEngine {
 
         // ── Direction ──
         let side = if is_mean_rev {
-            if imbalance > 0.0 { OrderSide::Sell } else { OrderSide::Buy }
+            if imbalance > 0.0 {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            }
         } else {
-            if imbalance > 0.0 { OrderSide::Buy } else { OrderSide::Sell }
+            if imbalance > 0.0 {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            }
         };
 
         // ── Position sizing (regime-adaptive) ──
@@ -786,12 +817,13 @@ impl StrategyEngine {
         // In high-volatility regimes, Python sets this lower.
         let regime_scale = regime.momentum_weight() * (ml_w.volatility_weight as f64).max(0.5);
         let vpin_scale = 1.0 - vpin_penalty * 0.5; // Reduce size as VPIN increases
-        
+
         let base_size = BASE_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64;
 
-        let position_size = (base_size * (abs_imbalance / threshold).min(3.0) * regime_scale * vpin_scale)
-            .max(1.0)  // Minimum 1 contract
-            .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
+        let position_size =
+            (base_size * (abs_imbalance / threshold).min(3.0) * regime_scale * vpin_scale)
+                .max(1.0) // Minimum 1 contract
+                .min(MAX_POSITION_SIZE * ml_w.max_position_scale.max(1.0) as f64);
 
         // ── Fee-aware order type & price selection (INST) ──
         //
@@ -808,7 +840,11 @@ impl StrategyEngine {
             let half_spread_price = metrics.mid_price * (metrics.spread_bps / 2.0) / 10_000.0;
             // Reasonable tick: roughly 1 bps of price, but at least 1/10 of half-spread
             let tick = (metrics.mid_price * 0.0001).max(half_spread_price / 10.0);
-            if tick <= 0.0 { metrics.mid_price * 0.0001 } else { tick }
+            if tick <= 0.0 {
+                metrics.mid_price * 0.0001
+            } else {
+                tick
+            }
         };
         let vpin_widen_amount = vpin_widen_ticks as f64 * estimated_tick_size;
 
@@ -820,19 +856,19 @@ impl StrategyEngine {
         //   > 0.45 confidence -> GTC Limit (sit 1 tick inside best bid/ask)
         //   <= 0.45           -> PostOnly (only for very low-confidence signals)
         let half_spread = metrics.mid_price * (metrics.spread_bps / 2.0) / 10_000.0;
-        let (order_type, time_in_force, price) = if confidence > 0.65 {
-            // High confidence: cross the spread immediately.
-            let aggressive_price = if side == OrderSide::Buy {
-                metrics.mid_price + half_spread * 0.5 // Pay slightly above mid
+        let (order_type, time_in_force, price) = if confidence > 0.55 {
+            // High confidence: IOC crossing adjustment for faster execution.
+            let aggressive = if side == OrderSide::Buy {
+                metrics.mid_price + metrics.mid_price * 0.0005
             } else {
-                metrics.mid_price - half_spread * 0.5 // Sell slightly below mid
+                metrics.mid_price - metrics.mid_price * 0.0005
             };
-            (OrderType::Limit, "ioc".to_string(), Some(aggressive_price))
-        } else if confidence > 0.45 {
-            // Moderate confidence: GTC limit at mid (passive, but not PostOnly)
+            (OrderType::Limit, "ioc".to_string(), Some(aggressive))
+        } else if confidence > 0.30 {
+            // Moderate confidence: trade at mid with GTC.
             (OrderType::Limit, "gtc".to_string(), Some(metrics.mid_price))
         } else {
-            // Low confidence: PostOnly for maker rebate (accept lower fill rate)
+            // Low confidence: keep maker-only behavior.
             let maker_price = if side == OrderSide::Buy {
                 metrics.mid_price - half_spread - vpin_widen_amount
             } else {
@@ -938,7 +974,9 @@ impl StrategyEngine {
     /// (update_type=3 from the SPSC ring).
     #[inline]
     pub fn update_candles(&self, timestamp_ns: u64, price: f64, volume: f64) {
-        self.candle_aggregator.lock().on_trade(timestamp_ns, price, volume);
+        self.candle_aggregator
+            .lock()
+            .on_trade(timestamp_ns, price, volume);
     }
 }
 
@@ -946,14 +984,30 @@ impl StrategyEngine {
 // StrategyConfig — retained for backward compatibility with config.rs
 // ---------------------------------------------------------------------------
 
-fn sc_default_imbalance() -> f64 { 0.15 }
-fn sc_default_max_spread() -> f64 { 200.0 }
-fn sc_default_min_depth() -> f64 { 1000.0 }
-fn sc_default_order_size() -> i64 { 1 }
-fn sc_default_post_only() -> bool { true }
-fn sc_default_leverage() -> Option<i32> { Some(5) }
-fn sc_default_min_fill_prob() -> f64 { 0.3 }
-fn sc_default_max_stale_s() -> f64 { 5.0 }
+fn sc_default_imbalance() -> f64 {
+    0.15
+}
+fn sc_default_max_spread() -> f64 {
+    200.0
+}
+fn sc_default_min_depth() -> f64 {
+    1000.0
+}
+fn sc_default_order_size() -> i64 {
+    1
+}
+fn sc_default_post_only() -> bool {
+    true
+}
+fn sc_default_leverage() -> Option<i32> {
+    Some(5)
+}
+fn sc_default_min_fill_prob() -> f64 {
+    0.3
+}
+fn sc_default_max_stale_s() -> f64 {
+    5.0
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyConfig {
@@ -1046,7 +1100,11 @@ mod tests {
         for _ in 0..20 {
             calc.update(100.0, 50.0, Some(true));
         }
-        assert!(calc.current() > 0.8, "All-buy VPIN should be high, got {}", calc.current());
+        assert!(
+            calc.current() > 0.8,
+            "All-buy VPIN should be high, got {}",
+            calc.current()
+        );
     }
 
     #[test]
@@ -1058,7 +1116,11 @@ mod tests {
             let is_buy = i % 2 == 0;
             calc.update(100.0, 50.0, Some(is_buy));
         }
-        assert!(calc.current() < 0.3, "Balanced VPIN should be low, got {}", calc.current());
+        assert!(
+            calc.current() < 0.3,
+            "Balanced VPIN should be low, got {}",
+            calc.current()
+        );
     }
 
     #[test]
@@ -1096,9 +1158,12 @@ mod tests {
             cascade_active: false,
         };
         let regime = RegimeState::default();
-        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
-            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none());
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = Box::leak(Box::new(
+            crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test"),
+        ));
+        assert!(engine
+            .evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1)
+            .is_none());
     }
 
     #[test]
@@ -1130,10 +1195,14 @@ mod tests {
             cascade_active: false,
         };
         let regime = RegimeState::default();
-        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
-            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = Box::leak(Box::new(
+            crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test"),
+        ));
         let intent = engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1);
-        assert!(intent.is_some(), "Should generate signal for high imbalance");
+        assert!(
+            intent.is_some(),
+            "Should generate signal for high imbalance"
+        );
         let intent = intent.unwrap();
         assert!(matches!(intent.side, OrderSide::Buy)); // Bid-heavy → buy
     }
@@ -1167,9 +1236,15 @@ mod tests {
             cascade_active: false,
         };
         let regime = RegimeState::default();
-        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
-            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none(), "Should skip on toxic VPIN");
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = Box::leak(Box::new(
+            crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test"),
+        ));
+        assert!(
+            engine
+                .evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1)
+                .is_none(),
+            "Should skip on toxic VPIN"
+        );
     }
 
     #[test]
@@ -1202,9 +1277,11 @@ mod tests {
             cascade_active: false,
         };
         let regime = RegimeState::default();
-        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = 
-            Box::leak(Box::new(crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test")));
-        assert!(engine.evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1).is_none());
+        let ml_weights: &'static crate::ml_weight_receiver::MlWeightReader = Box::leak(Box::new(
+            crate::ml_weight_receiver::MlWeightReader::new("/dev/shm/ml_weights_test"),
+        ));
+        assert!(engine
+            .evaluate(&metrics, &regime, "BTC_USDT", ml_weights, 1)
+            .is_none());
     }
 }
-

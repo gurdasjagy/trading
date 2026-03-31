@@ -24,13 +24,13 @@ max_leverage = 20
 symbols = ["BTC_USDT", "ETH_USDT", "XAUT_USDT"]
 
 [strategy]
-imbalance_threshold = 0.15
-max_spread_bps = 10.0
-min_bid_depth_usdt = 5000.0
-min_ask_depth_usdt = 5000.0
+imbalance_threshold = 0.015
+max_spread_bps = 150.0
+min_bid_depth_usdt = 50.0
+min_ask_depth_usdt = 50.0
 min_vpin = 0.0
 order_size_contracts = 1
-post_only = true
+post_only = false
 enabled_symbols = []
 leverage = 5
 enabled = true
@@ -46,54 +46,39 @@ position_size_pct = 2.0
 # BTC: High liquidity, conservative thresholds
 [[pair_profiles]]
 symbol = "BTC_USDT"
-imbalance_threshold = 0.02
-vpin_bucket_size = 50000.0
+imbalance_threshold = 0.015
+vpin_bucket_size = 5000.0
 trailing_stop_atr_multiplier = 3.0
-max_leverage = 20
-max_position_size = 20
-leverage = 10
+max_leverage = 10
+max_position_size = 5
+leverage = 5
 sl_pct = 1.5
 tp_pct = 3.0
 tick_size = 0.1
 
-# ETH: Medium-high liquidity, moderate thresholds
 [[pair_profiles]]
 symbol = "ETH_USDT"
-imbalance_threshold = 0.03
-vpin_bucket_size = 30000.0
+imbalance_threshold = 0.015
+vpin_bucket_size = 2000.0
 trailing_stop_atr_multiplier = 2.0
-max_leverage = 25
-max_position_size = 30
-leverage = 15
+max_leverage = 10
+max_position_size = 10
+leverage = 5
 sl_pct = 2.0
 tp_pct = 4.0
 tick_size = 0.01
 
-# SOL: Medium liquidity, aggressive thresholds
 [[pair_profiles]]
 symbol = "SOL_USDT"
-imbalance_threshold = 0.05
-vpin_bucket_size = 10000.0
+imbalance_threshold = 0.015
+vpin_bucket_size = 1000.0
 trailing_stop_atr_multiplier = 3.0
 max_leverage = 10
-max_position_size = 100
+max_position_size = 30
 leverage = 5
 sl_pct = 3.0
 tp_pct = 6.0
 tick_size = 0.001
-
-# XAUT: Gold token, low volatility
-[[pair_profiles]]
-symbol = "XAUT_USDT"
-imbalance_threshold = 0.04
-vpin_bucket_size = 20000.0
-trailing_stop_atr_multiplier = 2.5
-max_leverage = 10
-max_position_size = 5
-leverage = 5
-sl_pct = 1.0
-tp_pct = 2.0
-tick_size = 0.01
 
 # ============================================================================
 # INSTITUTIONAL FEATURES CONFIGURATION

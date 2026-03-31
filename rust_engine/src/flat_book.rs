@@ -7,7 +7,7 @@
 //! For 10,000 levels × 8 bytes = 80 KB per side = 160 KB per book.
 //! Fits entirely in L2 cache of a modern CPU core.
 
-use crate::fixed_point::{FixedPrice, FixedQty, notional_fp};
+use crate::fixed_point::{notional_fp, FixedPrice, FixedQty};
 
 // ---------------------------------------------------------------------------
 // FlatBookConfig
@@ -31,9 +31,9 @@ pub struct FlatBookConfig {
 impl Default for FlatBookConfig {
     fn default() -> Self {
         Self {
-            tick_size_fp: 10_000_000,       // 0.1 USDT at 1e8
+            tick_size_fp: 10_000_000, // 0.1 USDT at 1e8
             max_levels: 10_000,
-            reference_price_fp: 0,          // Will be set on first snapshot
+            reference_price_fp: 0, // Will be set on first snapshot
         }
     }
 }
@@ -218,8 +218,25 @@ impl FlatOrderBook {
         (old, qty)
     }
 
+    /// Clear all levels. Called when a full snapshot arrives to remove stale data.
+    pub fn clear(&mut self) {
+        for qty in self.bid_levels.iter_mut() {
+            *qty = FixedQty::ZERO;
+        }
+        for qty in self.ask_levels.iter_mut() {
+            *qty = FixedQty::ZERO;
+        }
+        self.best_bid_idx = self.config.max_levels;
+        self.best_ask_idx = self.config.max_levels;
+        self.sequence = 0;
+    }
+
     /// Apply a full snapshot: clear all levels and insert from slice.
-    pub fn apply_snapshot(&mut self, bids: &[(FixedPrice, FixedQty)], asks: &[(FixedPrice, FixedQty)]) {
+    pub fn apply_snapshot(
+        &mut self,
+        bids: &[(FixedPrice, FixedQty)],
+        asks: &[(FixedPrice, FixedQty)],
+    ) {
         // Clear all levels
         for level in self.bid_levels.iter_mut() {
             *level = FixedQty(0);
@@ -594,11 +611,8 @@ mod tests {
         assert!(book.best_ask().is_some());
 
         // Apply delta — update best bid qty
-        let (old, new) = book.apply_delta_tracked(
-            FixedPrice::from_f64(49999.9),
-            FixedQty::from_f64(3.0),
-            true,
-        );
+        let (old, new) =
+            book.apply_delta_tracked(FixedPrice::from_f64(49999.9), FixedQty::from_f64(3.0), true);
         assert!((old.to_f64() - 1.0).abs() < 0.01);
         assert!((new.to_f64() - 3.0).abs() < 0.01);
     }
@@ -611,16 +625,22 @@ mod tests {
             (FixedPrice::from_f64(49999.9), FixedQty::from_f64(1.0)),
             (FixedPrice::from_f64(49999.8), FixedQty::from_f64(1.0)),
         ];
-        let asks = vec![
-            (FixedPrice::from_f64(50000.1), FixedQty::from_f64(1.0)),
-        ];
+        let asks = vec![(FixedPrice::from_f64(50000.1), FixedQty::from_f64(1.0))];
         book.apply_snapshot(&bids, &asks);
 
         let bid_depth = book.bid_depth_usdt(10);
-        assert!(bid_depth > 99000.0, "Bid depth should be ~$100K, got {}", bid_depth);
+        assert!(
+            bid_depth > 99000.0,
+            "Bid depth should be ~$100K, got {}",
+            bid_depth
+        );
 
         let ask_depth = book.ask_depth_usdt(10);
-        assert!(ask_depth > 49000.0, "Ask depth should be ~$50K, got {}", ask_depth);
+        assert!(
+            ask_depth > 49000.0,
+            "Ask depth should be ~$50K, got {}",
+            ask_depth
+        );
     }
 
     #[test]
@@ -633,7 +653,11 @@ mod tests {
         book.apply_snapshot(&bids, &asks);
 
         let imb = book.imbalance(10);
-        assert!(imb.abs() < 0.01, "Equal depth should give ~0 imbalance, got {}", imb);
+        assert!(
+            imb.abs() < 0.01,
+            "Equal depth should give ~0 imbalance, got {}",
+            imb
+        );
     }
 
     #[test]
@@ -690,7 +714,10 @@ mod tests {
         // Best bid should be the highest (closest to reference)
         let (best_price, _) = book.best_bid().unwrap();
         let expected = FixedPrice(5_000_000_000_000 - 10_000_000);
-        assert_eq!(best_price, expected, "Best bid should be reference - 1 tick");
+        assert_eq!(
+            best_price, expected,
+            "Best bid should be reference - 1 tick"
+        );
     }
 
     #[test]
