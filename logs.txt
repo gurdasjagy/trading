@@ -1,0 +1,469 @@
+root@ubuntu-s-4vcpu-8gb-sgp1-01:~/trading/trading/crypto_trading_bot# docker compose up -d
+ [+] Running 4/4
+ ✔ Container crypto_trading_bot-rust-engine-1      Healthy                        7.5s  ✔ Container crypto_trading_bot-python-services-1  Started                        8.0s  ✔ Container crypto_trading_bot-postgres-1         Started                        0.9s  ✔ Container crypto_trading_bot-redis-1            Started                        1.0s root@ubuntu-s-4vcpu-8gb-sgp1-01:~/trading/trading/crypto_trading_bot# docker compose logs -f rust_engine
+no such service: rust_engine
+root@ubuntu-s-4vcpu-8gb-sgp1-01:~/trading/trading/crypto_trading_bot# docker compose logs -f rust-engine
+rust-engine-1  | [dotenv] Loaded credentials from DOTENV_PATH=/app/.env
+rust-engine-1  | 2026-03-31T06:25:06.766939Z  INFO trading_engine: Trading engine v0.4.0 starting (Institutional Refactor)
+rust-engine-1  | 2026-03-31T06:25:06.767059Z  INFO trading_engine: System: 4 CPU cores
+detected
+rust-engine-1  | [config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY
+rust-engine-1  | [config] Gate.io credentials loaded: key=172d...43a7 (32chars), secret=***64chars
+rust-engine-1  | [config] TRADING_PAIRS override: ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+rust-engine-1  | [config] DEFAULT_LEVERAGE override: 5x
+rust-engine-1  | [config] MAX_OPEN_POSITIONS override: 5
+rust-engine-1  | [config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)rust-engine-1  | 2026-03-31T06:25:06.770856Z  INFO trading_engine: Loaded config from /etc/trading/engine_config.toml
+rust-engine-1  | 2026-03-31T06:25:06.771017Z  INFO trading_engine: THREAD_TOPOLOGY=auto — auto-detecting optimal layout for 4 cores
+rust-engine-1  | 2026-03-31T06:25:06.771035Z  INFO trading_engine: Thread topology validated: ws_gateio=1, book=1, strategy=2, exec=2, telemetry=3, micro=[3]
+rust-engine-1  | 2026-03-31T06:25:06.771044Z  INFO trading_engine: Config loaded: 3 exchanges, 3 symbols
+rust-engine-1  | 2026-03-31T06:25:06.771064Z  INFO trading_engine: Symbol registry: 6 symbols
+rust-engine-1  | 2026-03-31T06:25:06.771282Z  INFO trading_engine: Allocated FlatOrderBook for BTC_USDT (ID: 1)
+rust-engine-1  | 2026-03-31T06:25:06.771467Z  INFO trading_engine: Allocated FlatOrderBook for ETH_USDT (ID: 2)
+rust-engine-1  | 2026-03-31T06:25:06.771638Z  INFO trading_engine: Allocated FlatOrderBook for SOL_USDT (ID: 3)
+rust-engine-1  | 2026-03-31T06:25:06.771874Z  INFO trading_engine: Allocated FlatOrderBook for BTCUSDT (ID: 4)
+rust-engine-1  | 2026-03-31T06:25:06.772055Z  INFO trading_engine: Allocated FlatOrderBook for ETHUSDT (ID: 5)
+rust-engine-1  | 2026-03-31T06:25:06.772224Z  INFO trading_engine: Allocated FlatOrderBook for SOLUSDT (ID: 6)
+rust-engine-1  | 2026-03-31T06:25:06.792502Z  INFO trading_engine: SPSC ring buffers allocated: ws_to_book=0KB, book_to_strategy=0KB, strategy_to_exec=0KB
+rust-engine-1  | 2026-03-31T06:25:06.792645Z  INFO trading_engine: 🛡️ Circuit breaker
+initialized and armed
+rust-engine-1  | 2026-03-31T06:25:07.106612Z  INFO trading_engine::instrument_manager:
+InstrumentManager: loaded 650 Bybit linear specs
+rust-engine-1  | 2026-03-31T06:25:07.209578Z  INFO trading_engine::instrument_manager:
+InstrumentManager: loaded 569 Binance futures specs
+rust-engine-1  | 2026-03-31T06:25:07.306692Z  INFO trading_engine::instrument_manager:
+InstrumentManager: loaded 55 Gate.io futures specs
+rust-engine-1  | 2026-03-31T06:25:07.307219Z  INFO trading_engine::instrument_manager:
+InstrumentManager: loaded 1274 total contract specs
+rust-engine-1  | 2026-03-31T06:25:07.307274Z  INFO trading_engine: [startup] InstrumentManager initialized and specs refreshed from all exchanges
+rust-engine-1  | 2026-03-31T06:25:07.307290Z  INFO trading_engine: gateio: live gateway initialising (with circuit breaker, persistent runtime)
+rust-engine-1  | 2026-03-31T06:25:07.307325Z  INFO trading_engine::gateio_gateway: [gateio-ws] Initializing gateway: testnet=true, key_len=32, secret_len=64, key_prefix=172d58...
+rust-engine-1  |
+rust-engine-1  | ============================================================
+rust-engine-1  | [AUTH-DIAG] Gate.io TESTNET Authentication Diagnostic
+rust-engine-1  | ============================================================
+rust-engine-1  | [AUTH-DIAG] Step 1 — Key sanity:
+rust-engine-1  |   API Key length:  32
+rust-engine-1  |   API Key prefix:  172d585c...
+rust-engine-1  |   API Key suffix:  ...43a7
+rust-engine-1  |   Secret length:   64
+rust-engine-1  |   Has non-ASCII:   false ✅
+rust-engine-1  |   Has whitespace:  false ✅
+rust-engine-1  |   Testnet mode:    true
+rust-engine-1  |   Base URL:        https://api-testnet.gateapi.io/api/v4
+rust-engine-1  |
+rust-engine-1  | [AUTH-DIAG] Step 2 — Public endpoint test (no auth):
+rust-engine-1  |   URL: https://api-testnet.gateapi.io/api/v4/futures/usdt/contracts/BTC_USDT
+rust-engine-1  | 2026-03-31T06:25:07.307965Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+rust-engine-1  |   Status: 200
+rust-engine-1  |   ✅  Public endpoint reachable
+rust-engine-1  |
+rust-engine-1  | [AUTH-DIAG] Step 3 — Clock skew check:
+rust-engine-1  |   Local timestamp: 1774938307 (unix seconds)
+rust-engine-1  |   Server Date header: "Tue, 31 Mar 2026 06:25:07 GMT"
+rust-engine-1  |   ✅  Server responded (clock skew check via Date header)
+rust-engine-1  |
+rust-engine-1  | [AUTH-DIAG] Step 4 — Authenticated request test:
+rust-engine-1  |   Request URL:     https://api-testnet.gateapi.io/api/v4/futures/usdt/accounts
+rust-engine-1  |   Method:          GET
+rust-engine-1  |   Timestamp:       1774938307
+rust-engine-1  |   Signature path:  /api/v4/futures/usdt/accounts
+rust-engine-1  |   Body hash:       cf83e1357eefb8bd...f927da3e
+rust-engine-1  |   Sign payload:    "GET\n/api/v4/futures/usdt/accounts\n\ncf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\n1774938307"
+rust-engine-1  |   Signature:       57930b29f5570e95...22abcf95
+rust-engine-1  |   Headers:
+rust-engine-1  |     KEY:           172d585c4714cf6634aa7a53ae3343a7
+rust-engine-1  |     Timestamp:     1774938307
+rust-engine-1  |     SIGN:          57930b29f5570e95...22abcf95
+rust-engine-1  | 2026-03-31T06:25:07.951267Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+rust-engine-1  | 2026-03-31T06:25:07.951465Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending futures.login for WS trading API auth
+rust-engine-1  |
+rust-engine-1  |   Response status:  200
+rust-engine-1  |   Response body:    {"order_margin":"0","point":"0","bonus":"0","history":{"dnw":"1000","pnl":"72.759369999947","refr":"0","point_fee":"0","fund":"0.132234082115","bonus_dnw":"0","point_refr":"0","bonus_offset":"0","fee":"-138.668150685","point_dnw":"0","cross_settle":"-934.223453397062"},"unrealised_pnl":"0","total":"0","available":"934.22345","enable_credit":true,"in_dual_mode":false,"currency":"USDT","position_margin":"0","user":17500389,"update_time":1774634390,"update_id":1020,"position_initial_margin":"0","ma
+rust-engine-1  |
+rust-engine-1  |   ✅  AUTHENTICATION SUCCESSFUL!
+rust-engine-1  |   Available balance: $934.2234
+rust-engine-1  | 2026-03-31T06:25:08.076798Z  INFO trading_engine: [startup] ✅  Gate.io testnet auth verified — balance: $934.22
+rust-engine-1  | 2026-03-31T06:25:08.089255Z  INFO trading_engine: 📋 Order Lifecycle Tracker initialized (capacity=5000)
+rust-engine-1  | 2026-03-31T06:25:08.082699Z  INFO trading_engine::gateio_gateway: [gateio-ws] futures.login successful — WS trading API authenticated
+rust-engine-1  | 2026-03-31T06:25:08.092232Z  INFO trading_engine: ⏱️ Pipeline Latency
+Tracker initialized (6 histograms)
+rust-engine-1  | 2026-03-31T06:25:08.092472Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+rust-engine-1  | 2026-03-31T06:25:08.092486Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+rust-engine-1  | 2026-03-31T06:25:08.092491Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=5, lock-free AtomicU32)
+rust-engine-1  | 2026-03-31T06:25:08.092510Z  INFO trading_engine::correlation_limiter: [correlation-limiter] Initialized: max_single=2000.00, max_correlated_mult=1.50
+rust-engine-1  | 2026-03-31T06:25:08.092513Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+rust-engine-1  | 2026-03-31T06:25:08.092521Z  INFO trading_engine: 🔗 CorrelationLimiter initialized (BTC-ETH=0.85, BTC-SOL=0.75, ETH-SOL=0.70, max_correlated=150%)
+rust-engine-1  | 2026-03-31T06:25:08.092578Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+rust-engine-1  | 2026-03-31T06:25:08.092666Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://api.gateio.ws/api/v4/futures/usdt/contracts
+rust-engine-1  | 2026-03-31T06:25:08.176472Z  INFO trading_engine::gateio_gateway: [gateio-ws] Authenticated & subscribed to futures.orders
+rust-engine-1  | 2026-03-31T06:25:08.176511Z  INFO trading_engine::gateio_gateway: [gateio-ws] Ready — login confirmed, accepting orders
+rust-engine-1  | 2026-03-31T06:25:09.032878Z  INFO trading_engine::position_sizer: [sizer] Fetched 3 contract specs (651 total available)
+rust-engine-1  | 2026-03-31T06:25:09.040479Z  INFO trading_engine::position_sizer: [sizer] Registered ETH_USDT: quanto=0.01, min=0, max=3000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+rust-engine-1  | 2026-03-31T06:25:09.040555Z  INFO trading_engine::position_sizer: [sizer] Registered BTC_USDT: quanto=0.0001, min=1, max=15000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+rust-engine-1  | 2026-03-31T06:25:09.040564Z  INFO trading_engine::position_sizer: [sizer] Registered SOL_USDT: quanto=1, min=0, max=240000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+rust-engine-1  | 2026-03-31T06:25:09.041240Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+rust-engine-1  | 2026-03-31T06:25:09.041415Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes, 8192
+slots)
+rust-engine-1  | 2026-03-31T06:25:09.041439Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+rust-engine-1  | 2026-03-31T06:25:09.041511Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+rust-engine-1  | 2026-03-31T06:25:09.041562Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+rust-engine-1  | 2026-03-31T06:25:09.041574Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+rust-engine-1  | 2026-03-31T06:25:09.041605Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+rust-engine-1  | 2026-03-31T06:25:09.041611Z  INFO trading_engine: 📡 Bridge: Health monitor initialized
+rust-engine-1  | 2026-03-31T06:25:09.041614Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)
+rust-engine-1  | 2026-03-31T06:25:09.041645Z  INFO trading_engine: 📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)
+rust-engine-1  | 2026-03-31T06:25:09.041655Z  INFO trading_engine::ml_weight_receiver:
+Initializing ML Weight Reader at /dev/shm/ml_weights
+rust-engine-1  | 2026-03-31T06:25:09.042076Z  INFO trading_engine::ml_weight_receiver:
+ML weights SHM magic mismatch, waiting for writer — this is expected when the ML cold-path service is not running
+rust-engine-1  | 2026-03-31T06:25:09.042419Z  INFO trading_engine: Multi-Exchange mode
+DISABLED - Gate.io only
+rust-engine-1  | 2026-03-31T06:25:09.042564Z  INFO trading_engine: [main] Persistent state disabled (set [persistent_state] enabled=true to enable)
+rust-engine-1  | 2026-03-31T06:25:09.042669Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+rust-engine-1  | 2026-03-31T06:25:09.043186Z  INFO trading_engine: All 6 threads spawned. Engine running. Press Ctrl+C to stop.
+rust-engine-1  | 2026-03-31T06:25:09.047437Z  INFO trading_engine: [telemetry] Pinned to core 3 — Journal + SharedState + Health Monitor
+rust-engine-1  | 2026-03-31T06:25:09.047573Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+rust-engine-1  | 2026-03-31T06:25:09.047663Z  INFO trading_engine: [strategy] Starting
+strategy evaluator on dedicated core
+rust-engine-1  | 2026-03-31T06:25:09.047697Z  INFO trading_engine::telemetry: Journal writer initialized at /dev/shm/trading_journal (segment 0)
+rust-engine-1  | 2026-03-31T06:25:09.049528Z  INFO trading_engine: [strategy] 📊 CVD tracker initialized (5m/15m/1h windows)
+rust-engine-1  | 2026-03-31T06:25:09.049536Z  INFO trading_engine: [strategy] 📊 Volume Profile initialized (VPOC + Value Area)
+rust-engine-1  | 2026-03-31T06:25:09.049553Z  INFO trading_engine: [strategy] 🌊 Liquidation cascade detector initialized
+rust-engine-1  | 2026-03-31T06:25:09.049589Z  INFO trading_engine::gamma_shm: Gamma exposure SHM not available at /dev/shm/gamma_exposure: No such file or directory (os error 2) (will run without gamma data)
+rust-engine-1  | 2026-03-31T06:25:09.049636Z  INFO trading_engine: [strategy] 📊 Gamma
+exposure reader not available (SHM file missing, will run without gamma data)
+rust-engine-1  | 2026-03-31T06:25:09.049640Z  INFO trading_engine: [strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)
+rust-engine-1  | 2026-03-31T06:25:09.049644Z  INFO trading_engine: [strategy] 📈 Trend
+Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)
+rust-engine-1  | 2026-03-31T06:25:09.049642Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+rust-engine-1  | 2026-03-31T06:25:09.049657Z  INFO trading_engine: [strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)
+rust-engine-1  | 2026-03-31T06:25:09.048019Z  INFO trading_engine: [book-builder] Pinned to core 1
+rust-engine-1  | 2026-03-31T06:25:09.048246Z  INFO trading_engine: [ws-gateio] Pinned to core 1
+rust-engine-1  | 2026-03-31T06:25:09.050233Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on dedicated core
+rust-engine-1  | 2026-03-31T06:25:09.050457Z  INFO trading_engine: [strategy] 📊 Trade
+Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)
+rust-engine-1  | 2026-03-31T06:25:09.050488Z  INFO trading_engine: [strategy] 📊 Wyckoff detector initialized (100-period window)
+rust-engine-1  | 2026-03-31T06:25:09.050517Z  INFO trading_engine: [strategy] 📊 Fibonacci detector initialized (1h/4h swing detection)
+rust-engine-1  | 2026-03-31T06:25:09.050536Z  INFO trading_engine: [strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)
+rust-engine-1  | 2026-03-31T06:25:09.050560Z  INFO trading_engine: [strategy] 📊 Market Maker Inventory Model initialized (1000-period window)
+rust-engine-1  | 2026-03-31T06:25:09.050588Z  INFO trading_engine: [strategy] 📊 Cross-Asset Correlation Monitor initialized (60-period window)
+rust-engine-1  | 2026-03-31T06:25:09.050776Z  INFO trading_engine: [strategy] 🧮 DustTracker initialized (max_dust=5.0)
+rust-engine-1  | 2026-03-31T06:25:09.050784Z  INFO trading_engine: [strategy] 📊 VPIN calculator initialized (bucket=5k, depth=50)
+rust-engine-1  | 2026-03-31T06:25:09.050788Z  INFO trading_engine: [strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)
+rust-engine-1  | 2026-03-31T06:25:09.050797Z  INFO trading_engine: [strategy] 💰 Funding rate checks every ~1000 book snapshots
+rust-engine-1  | 2026-03-31T06:25:09.050801Z  INFO trading_engine: [strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)
+rust-engine-1  | 2026-03-31T06:25:09.050820Z  INFO trading_engine: [strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)
+rust-engine-1  | 2026-03-31T06:25:09.050824Z  INFO trading_engine: [strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)
+rust-engine-1  | 2026-03-31T06:25:09.050827Z  INFO trading_engine: [strategy] 📈 VolatilityTrailingStop initialized (ATR-based)
+rust-engine-1  | 2026-03-31T06:25:09.050830Z  INFO trading_engine: [strategy] ️ AdverseSelectionGuard initialized (spoofing detection)
+rust-engine-1  | 2026-03-31T06:25:09.048422Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+rust-engine-1  | 2026-03-31T06:25:09.049419Z  INFO trading_engine: [execution] Pinned to core 2 (with Lifecycle + Latency + Multi-Exchange SOR)
+rust-engine-1  | 2026-03-31T06:25:09.057163Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+rust-engine-1  | 2026-03-31T06:25:09.057769Z  INFO trading_engine: [execution] WsOrderManager mode: LIVE (TRADING_MODE=testnet)
+rust-engine-1  | 2026-03-31T06:25:09.059975Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+rust-engine-1  | 2026-03-31T06:25:09.060795Z  INFO trading_engine::signal_queue: [signal_queue] Initialized SHM at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+rust-engine-1  | 2026-03-31T06:25:09.070815Z  INFO trading_engine: [execution] ✅  SHM signal queue opened — Python Alpha Oracle signals ENABLED
+rust-engine-1  | 2026-03-31T06:25:09.070927Z  INFO trading_engine: [execution] Testing
+Gate.io authentication with balance check...
+rust-engine-1  | 2026-03-31T06:25:09.063355Z  INFO trading_engine: [book-builder] Starting orderbook builder on dedicated core
+rust-engine-1  | 2026-03-31T06:25:09.063431Z  INFO trading_engine: [ws-gateio] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+rust-engine-1  | 2026-03-31T06:25:09.136016Z  INFO trading_engine::dashboard_server: [dashboard] Loaded 14 templates from /app/templates: ["forex_trades.html", "forex_dashboard.html", "multi_exchange.html", "trades.html", "forex_risk.html", "settings.html", "dashboard.html", "logs.html", "advanced_features.html", "risk.html", "base.html", "forex_settings.html", "forex_performance.html", "performance.html"]
+rust-engine-1  | 2026-03-31T06:25:09.136161Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+rust-engine-1  | 2026-03-31T06:25:09.136267Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io market data: always mainnet for public data (trading_mode=testnet, pairs=["BTC_USDT", "ETH_USDT", "SOL_USDT"])
+rust-engine-1  | 2026-03-31T06:25:09.136372Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+rust-engine-1  | 2026-03-31T06:25:09.137578Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+rust-engine-1  | 2026-03-31T06:25:09.218925Z  INFO trading_engine: [execution] ✅  Auth
+OK — Initial balance: $934.22 USDT — circuit breaker armed — pre_trade_risk armed
+rust-engine-1  | 2026-03-31T06:25:09.218962Z  INFO trading_engine: [execution] Setting
+margin mode to cross-margin for all symbols...
+rust-engine-1  | 2026-03-31T06:25:09.218981Z  INFO trading_engine: [execution] 🔄 Starting position reconciliation with exchange...
+rust-engine-1  | 2026-03-31T06:25:09.315041Z  INFO trading_engine: [execution] Found 0
+open positions on exchange
+rust-engine-1  | 2026-03-31T06:25:09.315086Z  INFO trading_engine: [execution] 🔄 Position reconciliation complete (0 positions synced)
+rust-engine-1  | 2026-03-31T06:25:09.938821Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+rust-engine-1  | 2026-03-31T06:25:17.316450Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] REST reconciliation thread started (60s interval)
+rust-engine-1  | 2026-03-31T06:25:17.312269Z  INFO trading_engine::gateio_gateway: [gateio-liq] Liquidation monitoring thread started (30s interval)
+rust-engine-1  | 2026-03-31T06:25:38.913058Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-31T06:25:38.913158Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-31T06:25:38.913165Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-31T06:25:38.913175Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+rust-engine-1  | 2026-03-31T06:25:38.913180Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+root@ubuntu-s-4vcpu-8gb-sgp1-01:~/trading/trading/crypto_trading_bot# docker compose up [+] Running 4/4
+ ✔ Container crypto_trading_bot-rust-engine-1      Created                        0.2s  ✔ Container crypto_trading_bot-redis-1            Created                        0.2s  ✔ Container crypto_trading_bot-postgres-1         Created                        0.2s  ✔ Container crypto_trading_bot-python-services-1  Created                        0.1s Attaching to postgres-1, python-services-1, redis-1, rust-engine-1
+ rust-engine-1      | [dotenv] Loaded credentials from DOTENV_PATH=/app/.env
+ rust-engine-1      | 2026-03-31T06:27:08.143292Z  INFO trading_engine: Trading engine
+v0.4.0 starting (Institutional Refactor)
+ rust-engine-1      | 2026-03-31T06:27:08.143545Z  INFO trading_engine: System: 4 CPU cores detected
+ rust-engine-1      | 2026-03-31T06:27:08.147893Z  INFO trading_engine: Loaded config from /etc/trading/engine_config.toml
+ rust-engine-1      | [config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY
+ rust-engine-1      | 2026-03-31T06:27:08.149173Z  INFO trading_engine: THREAD_TOPOLOGY=auto — auto-detecting optimal layout for 4 cores
+ rust-engine-1      | 2026-03-31T06:27:08.149247Z  INFO trading_engine: Thread topology validated: ws_gateio=1, book=1, strategy=2, exec=2, telemetry=3, micro=[3]
+ rust-engine-1      | 2026-03-31T06:27:08.149292Z  INFO trading_engine: Config loaded:
+3 exchanges, 3 symbols
+ rust-engine-1      | 2026-03-31T06:27:08.149332Z  INFO trading_engine: Symbol registry: 6 symbols
+ rust-engine-1      | 2026-03-31T06:27:08.149697Z  INFO trading_engine: Allocated FlatOrderBook for BTC_USDT (ID: 1)
+ rust-engine-1      | 2026-03-31T06:27:08.149953Z  INFO trading_engine: Allocated FlatOrderBook for ETH_USDT (ID: 2)
+ rust-engine-1      | [config] Gate.io credentials loaded: key=172d...43a7 (32chars), secret=***64chars
+ rust-engine-1      | [config] TRADING_PAIRS override: ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+ rust-engine-1      | [config] DEFAULT_LEVERAGE override: 5x
+ rust-engine-1      | [config] MAX_OPEN_POSITIONS override: 5
+ rust-engine-1      | [config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io
+only)
+ rust-engine-1      | 2026-03-31T06:27:08.150621Z  INFO trading_engine: Allocated FlatOrderBook for SOL_USDT (ID: 3)
+ rust-engine-1      | 2026-03-31T06:27:08.150886Z  INFO trading_engine: Allocated FlatOrderBook for BTCUSDT (ID: 4)
+ rust-engine-1      | 2026-03-31T06:27:08.151847Z  INFO trading_engine: Allocated FlatOrderBook for ETHUSDT (ID: 5)
+ rust-engine-1      | 2026-03-31T06:27:08.152022Z  INFO trading_engine: Allocated FlatOrderBook for SOLUSDT (ID: 6)
+ rust-engine-1      | 2026-03-31T06:27:08.161996Z  INFO trading_engine: SPSC ring buffers allocated: ws_to_book=0KB, book_to_strategy=0KB, strategy_to_exec=0KB
+ rust-engine-1      | 2026-03-31T06:27:08.162109Z  INFO trading_engine: 🛡️ Circuit breaker initialized and armed
+ postgres-1         |
+ postgres-1         | PostgreSQL Database directory appears to contain a database; Skipping initialization
+ postgres-1         |
+ rust-engine-1      | 2026-03-31T06:27:08.332984Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 650 Bybit linear specs
+ rust-engine-1      | 2026-03-31T06:27:08.422886Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 569 Binance futures specs
+ postgres-1         | 2026-03-31 06:27:08.436 UTC [1] LOG:  starting PostgreSQL 16.13 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+ postgres-1         | 2026-03-31 06:27:08.436 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+ postgres-1         | 2026-03-31 06:27:08.436 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+ postgres-1         | 2026-03-31 06:27:08.495 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+ postgres-1         | 2026-03-31 06:27:08.513 UTC [29] LOG:  database system was shut down at 2026-03-31 06:26:47 UTC
+ postgres-1         | 2026-03-31 06:27:08.527 UTC [1] LOG:  database system is ready to accept connections
+ redis-1            | 1:C 31 Mar 2026 06:27:08.553 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+ redis-1            | 1:C 31 Mar 2026 06:27:08.553 * Redis version=7.4.8, bits=64, commit=00000000, modified=0, pid=1, just started
+ redis-1            | 1:C 31 Mar 2026 06:27:08.553 * Configuration loaded
+ redis-1            | 1:M 31 Mar 2026 06:27:08.554 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+ redis-1            | 1:M 31 Mar 2026 06:27:08.554 * monotonic clock: POSIX clock_gettime
+ redis-1            | 1:M 31 Mar 2026 06:27:08.650 * Running mode=standalone, port=6379.
+ redis-1            | 1:M 31 Mar 2026 06:27:08.651 * Server initialized
+ redis-1            | 1:M 31 Mar 2026 06:27:08.651 * Ready to accept connections tcp
+ rust-engine-1      | 2026-03-31T06:27:08.656007Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 55 Gate.io futures specs
+ rust-engine-1      |
+ rust-engine-1      | ============================================================
+ rust-engine-1      | [AUTH-DIAG] Gate.io TESTNET Authentication Diagnostic
+ rust-engine-1      | ============================================================
+ rust-engine-1      | [AUTH-DIAG] Step 1 — Key sanity:
+ rust-engine-1      |   API Key length:  32
+ rust-engine-1      |   API Key prefix:  172d585c...
+ rust-engine-1      |   API Key suffix:  ...43a7
+ rust-engine-1      |   Secret length:   64
+ rust-engine-1      |   Has non-ASCII:   false ✅
+ rust-engine-1      |   Has whitespace:  false ✅
+ rust-engine-1      |   Testnet mode:    true
+ rust-engine-1      |   Base URL:        https://api-testnet.gateapi.io/api/v4
+ rust-engine-1      |
+ rust-engine-1      | [AUTH-DIAG] Step 2 — Public endpoint test (no auth):
+ rust-engine-1      |   URL: https://api-testnet.gateapi.io/api/v4/futures/usdt/contracts/BTC_USDT
+ rust-engine-1      | 2026-03-31T06:27:08.659137Z  INFO trading_engine::instrument_manager: InstrumentManager: loaded 1274 total contract specs
+ rust-engine-1      | 2026-03-31T06:27:08.659180Z  INFO trading_engine: [startup] InstrumentManager initialized and specs refreshed from all exchanges
+ rust-engine-1      | 2026-03-31T06:27:08.659194Z  INFO trading_engine: gateio: live gateway initialising (with circuit breaker, persistent runtime)
+ rust-engine-1      | 2026-03-31T06:27:08.659208Z  INFO trading_engine::gateio_gateway: [gateio-ws] Initializing gateway: testnet=true, key_len=32, secret_len=64, key_prefix=172d58...
+ rust-engine-1      | 2026-03-31T06:27:08.660447Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+ rust-engine-1      |   Status: 200
+ rust-engine-1      |   ✅  Public endpoint reachable
+ rust-engine-1      |
+ rust-engine-1      | [AUTH-DIAG] Step 3 — Clock skew check:
+ rust-engine-1      |   Local timestamp: 1774938429 (unix seconds)
+ rust-engine-1      |   Server Date header: "Tue, 31 Mar 2026 06:27:09 GMT"
+ rust-engine-1      |   ✅  Server responded (clock skew check via Date header)
+ rust-engine-1      |
+ rust-engine-1      | [AUTH-DIAG] Step 4 — Authenticated request test:
+ rust-engine-1      |   Request URL:     https://api-testnet.gateapi.io/api/v4/futures/usdt/accounts
+ rust-engine-1      |   Method:          GET
+ rust-engine-1      |   Timestamp:       1774938429
+ rust-engine-1      |   Signature path:  /api/v4/futures/usdt/accounts
+ rust-engine-1      |   Body hash:       cf83e1357eefb8bd...f927da3e
+ rust-engine-1      |   Sign payload:    "GET\n/api/v4/futures/usdt/accounts\n\ncf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\n1774938429"
+ rust-engine-1      |   Signature:       9fda3e587b9c45e4...6cf6a13d
+ rust-engine-1      |   Headers:
+ rust-engine-1      |     KEY:           172d585c4714cf6634aa7a53ae3343a7
+ rust-engine-1      |     Timestamp:     1774938429
+ rust-engine-1      |     SIGN:          9fda3e587b9c45e4...6cf6a13d
+ rust-engine-1      | 2026-03-31T06:27:09.261428Z  INFO trading_engine::gateio_gateway: [gateio-ws] Connected
+ rust-engine-1      | 2026-03-31T06:27:09.261488Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending futures.login for WS trading API auth
+ rust-engine-1      |
+ rust-engine-1      |   Response status:  200
+ rust-engine-1      |   Response body:    {"order_margin":"0","point":"0","bonus":"0","history":{"dnw":"1000","pnl":"72.759369999947","refr":"0","point_fee":"0","fund":"0.132234082115","bonus_dnw":"0","point_refr":"0","bonus_offset":"0","fee":"-138.668150685","point_dnw":"0","cross_settle":"-934.223453397062"},"unrealised_pnl":"0","total":"0","available":"934.22345","enable_credit":true,"in_dual_mode":false,"currency":"USDT","position_margin":"0","user":17500389,"update_time":1774634390,"update_id":1020,"position_initial_margin":"0","ma
+ rust-engine-1      |
+ rust-engine-1      |   ✅  AUTHENTICATION SUCCESSFUL!
+ rust-engine-1      |   Available balance: $934.2234
+ rust-engine-1      | 2026-03-31T06:27:09.274028Z  INFO trading_engine: [startup] ✅  Gate.io testnet auth verified — balance: $934.22
+ rust-engine-1      | 2026-03-31T06:27:09.274082Z  INFO trading_engine: 📋 Order Lifecycle Tracker initialized (capacity=5000)
+ rust-engine-1      | 2026-03-31T06:27:09.274122Z  INFO trading_engine: ⏱️ Pipeline Latency Tracker initialized (6 histograms)
+ rust-engine-1      | 2026-03-31T06:27:09.274136Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+ rust-engine-1      | 2026-03-31T06:27:09.274143Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+ rust-engine-1      | 2026-03-31T06:27:09.274148Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=5, lock-free AtomicU32)
+ rust-engine-1      | 2026-03-31T06:27:09.274163Z  INFO trading_engine::correlation_limiter: [correlation-limiter] Initialized: max_single=2000.00, max_correlated_mult=1.50
+ rust-engine-1      | 2026-03-31T06:27:09.274179Z  INFO trading_engine: 🔗 CorrelationLimiter initialized (BTC-ETH=0.85, BTC-SOL=0.75, ETH-SOL=0.70, max_correlated=150%)
+ rust-engine-1      | 2026-03-31T06:27:09.274185Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+ rust-engine-1      | 2026-03-31T06:27:09.274246Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://api.gateio.ws/api/v4/futures/usdt/contracts
+ rust-engine-1      | 2026-03-31T06:27:09.361774Z  INFO trading_engine::gateio_gateway: [gateio-ws] futures.login successful — WS trading API authenticated
+ rust-engine-1      | 2026-03-31T06:27:09.361853Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+ rust-engine-1      | 2026-03-31T06:27:09.443524Z  INFO trading_engine::gateio_gateway: [gateio-ws] Authenticated & subscribed to futures.orders
+ rust-engine-1      | 2026-03-31T06:27:09.443556Z  INFO trading_engine::gateio_gateway: [gateio-ws] Ready — login confirmed, accepting orders
+ rust-engine-1      | 2026-03-31T06:27:10.332762Z  INFO trading_engine::position_sizer: [sizer] Fetched 3 contract specs (651 total available)
+ rust-engine-1      | 2026-03-31T06:27:10.341806Z  INFO trading_engine::position_sizer: [sizer] Registered ETH_USDT: quanto=0.01, min=0, max=3000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1      | 2026-03-31T06:27:10.347114Z  INFO trading_engine::position_sizer: [sizer] Registered BTC_USDT: quanto=0.0001, min=1, max=15000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1      | 2026-03-31T06:27:10.347144Z  INFO trading_engine::position_sizer: [sizer] Registered SOL_USDT: quanto=1, min=0, max=240000, lev=1-100x, maker=-0.0050%,
+taker=0.0750%
+ rust-engine-1      | 2026-03-31T06:27:10.347208Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+ rust-engine-1      | 2026-03-31T06:27:10.348089Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes,
+8192 slots)
+ rust-engine-1      | 2026-03-31T06:27:10.348110Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+ rust-engine-1      | 2026-03-31T06:27:10.348193Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+ rust-engine-1      | 2026-03-31T06:27:10.348223Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+ rust-engine-1      | 2026-03-31T06:27:10.348228Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+ rust-engine-1      | 2026-03-31T06:27:10.348247Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+ rust-engine-1      | 2026-03-31T06:27:10.348252Z  INFO trading_engine: 📡 Bridge: Health monitor initialized
+ rust-engine-1      | 2026-03-31T06:27:10.348255Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal +
+event_bus + health_monitor)
+ rust-engine-1      | 2026-03-31T06:27:10.348274Z  INFO trading_engine: 📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)
+ rust-engine-1      | 2026-03-31T06:27:10.348282Z  INFO trading_engine::ml_weight_receiver: Initializing ML Weight Reader at /dev/shm/ml_weights
+ rust-engine-1      | 2026-03-31T06:27:10.348328Z  INFO trading_engine::ml_weight_receiver: ML weights SHM magic mismatch, waiting for writer — this is expected when the ML cold-path service is not running
+ rust-engine-1      | 2026-03-31T06:27:10.348440Z  INFO trading_engine: Multi-Exchange
+mode DISABLED - Gate.io only
+ rust-engine-1      | 2026-03-31T06:27:10.348496Z  INFO trading_engine: [main] Persistent state disabled (set [persistent_state] enabled=true to enable)
+ rust-engine-1      | 2026-03-31T06:27:10.348592Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+ rust-engine-1      | 2026-03-31T06:27:10.348749Z  INFO trading_engine: All 6 threads spawned. Engine running. Press Ctrl+C to stop.
+ rust-engine-1      | 2026-03-31T06:27:10.348939Z  INFO trading_engine: [ws-gateio] Pinned to core 1
+ rust-engine-1      | 2026-03-31T06:27:10.348947Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on dedicated core
+ rust-engine-1      | 2026-03-31T06:27:10.349007Z  INFO trading_engine: [ws-gateio] Connecting to wss://ws-testnet.gate.com/v4/ws/futures/usdt
+ rust-engine-1      | 2026-03-31T06:27:10.349182Z  INFO trading_engine: [book-builder]
+Pinned to core 1
+ rust-engine-1      | 2026-03-31T06:27:10.349188Z  INFO trading_engine: [book-builder]
+Starting orderbook builder on dedicated core
+ rust-engine-1      | 2026-03-31T06:27:10.349997Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+ rust-engine-1      | 2026-03-31T06:27:10.350048Z  INFO trading_engine: [strategy] Starting strategy evaluator on dedicated core
+ rust-engine-1      | 2026-03-31T06:27:10.350097Z  INFO trading_engine: [strategy] 📊 CVD tracker initialized (5m/15m/1h windows)
+ rust-engine-1      | 2026-03-31T06:27:10.350102Z  INFO trading_engine: [strategy] 📊 Volume Profile initialized (VPOC + Value Area)
+ rust-engine-1      | 2026-03-31T06:27:10.350115Z  INFO trading_engine: [strategy] 🌊 Liquidation cascade detector initialized
+ rust-engine-1      | 2026-03-31T06:27:10.350139Z  INFO trading_engine::gamma_shm: Gamma exposure SHM not available at /dev/shm/gamma_exposure: No such file or directory (os
+error 2) (will run without gamma data)
+ rust-engine-1      | 2026-03-31T06:27:10.350162Z  INFO trading_engine: [strategy] 📊 Gamma exposure reader not available (SHM file missing, will run without gamma data)
+ rust-engine-1      | 2026-03-31T06:27:10.350166Z  INFO trading_engine: [strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)
+ rust-engine-1      | 2026-03-31T06:27:10.350170Z  INFO trading_engine: [strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)
+ rust-engine-1      | 2026-03-31T06:27:10.350180Z  INFO trading_engine: [strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)
+ rust-engine-1      | 2026-03-31T06:27:10.350197Z  INFO trading_engine: [strategy] 📊 Trade Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)
+ rust-engine-1      | 2026-03-31T06:27:10.350211Z  INFO trading_engine: [strategy] 📊 Wyckoff detector initialized (100-period window)
+ rust-engine-1      | 2026-03-31T06:27:10.350228Z  INFO trading_engine: [strategy] 📊 Fibonacci detector initialized (1h/4h swing detection)
+ rust-engine-1      | 2026-03-31T06:27:10.350241Z  INFO trading_engine: [strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)
+ rust-engine-1      | 2026-03-31T06:27:10.350267Z  INFO trading_engine: [strategy] 📊 Market Maker Inventory Model initialized (1000-period window)
+ rust-engine-1      | 2026-03-31T06:27:10.350287Z  INFO trading_engine: [strategy] 📊 Cross-Asset Correlation Monitor initialized (60-period window)
+ rust-engine-1      | 2026-03-31T06:27:10.350355Z  INFO trading_engine: [strategy] 🧮 DustTracker initialized (max_dust=5.0)
+ rust-engine-1      | 2026-03-31T06:27:10.350359Z  INFO trading_engine: [strategy] 📊 VPIN calculator initialized (bucket=5k, depth=50)
+ rust-engine-1      | 2026-03-31T06:27:10.350363Z  INFO trading_engine: [strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)
+ rust-engine-1      | 2026-03-31T06:27:10.350368Z  INFO trading_engine: [strategy] 💰 Funding rate checks every ~1000 book snapshots
+ rust-engine-1      | 2026-03-31T06:27:10.350371Z  INFO trading_engine: [strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)
+ rust-engine-1      | 2026-03-31T06:27:10.350378Z  INFO trading_engine: [strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)
+ rust-engine-1      | 2026-03-31T06:27:10.350382Z  INFO trading_engine: [strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)
+ rust-engine-1      | 2026-03-31T06:27:10.350386Z  INFO trading_engine: [strategy] 📈 VolatilityTrailingStop initialized (ATR-based)
+ rust-engine-1      | 2026-03-31T06:27:10.350390Z  INFO trading_engine: [strategy] ️ AdverseSelectionGuard initialized (spoofing detection)
+ rust-engine-1      | 2026-03-31T06:27:10.351876Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+ rust-engine-1      | 2026-03-31T06:27:10.366162Z  INFO trading_engine: [telemetry] Pinned to core 3 — Journal + SharedState + Health Monitor
+ rust-engine-1      | 2026-03-31T06:27:10.370116Z  INFO trading_engine::telemetry: Journal writer initialized at /dev/shm/trading_journal (segment 0)
+ rust-engine-1      | 2026-03-31T06:27:10.370234Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+ rust-engine-1      | 2026-03-31T06:27:10.379248Z  INFO trading_engine: [execution] Pinned to core 2 (with Lifecycle + Latency + Multi-Exchange SOR)
+ rust-engine-1      | 2026-03-31T06:27:10.379412Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+ rust-engine-1      | 2026-03-31T06:27:10.379728Z  INFO trading_engine: [execution] WsOrderManager mode: LIVE (TRADING_MODE=testnet)
+ rust-engine-1      | 2026-03-31T06:27:10.382824Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+ rust-engine-1      | 2026-03-31T06:27:10.383194Z  INFO trading_engine::signal_queue: [signal_queue] Initialized SHM at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+ rust-engine-1      | 2026-03-31T06:27:10.383217Z  INFO trading_engine: [execution] ✅
+SHM signal queue opened — Python Alpha Oracle signals ENABLED
+ rust-engine-1      | 2026-03-31T06:27:10.383258Z  INFO trading_engine: [execution] Testing Gate.io authentication with balance check...
+ rust-engine-1      | 2026-03-31T06:27:10.404409Z  INFO trading_engine::dashboard_server: [dashboard] Loaded 14 templates from /app/templates: ["forex_risk.html", "performance.html", "logs.html", "trades.html", "risk.html", "multi_exchange.html", "settings.html", "forex_settings.html", "forex_performance.html", "forex_trades.html", "forex_dashboard.html", "dashboard.html", "advanced_features.html", "base.html"]
+ rust-engine-1      | 2026-03-31T06:27:10.404757Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io market data: always mainnet for public data (trading_mode=testnet, pairs=["BTC_USDT", "ETH_USDT", "SOL_USDT"])
+ rust-engine-1      | 2026-03-31T06:27:10.404922Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+ rust-engine-1      | 2026-03-31T06:27:10.404850Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+ rust-engine-1      | 2026-03-31T06:27:10.406401Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+ rust-engine-1      | 2026-03-31T06:27:10.498857Z  INFO trading_engine: [execution] ✅
+Auth OK — Initial balance: $934.22 USDT — circuit breaker armed — pre_trade_risk armed
+ rust-engine-1      | 2026-03-31T06:27:10.498901Z  INFO trading_engine: [execution] Setting margin mode to cross-margin for all symbols...
+ rust-engine-1      | 2026-03-31T06:27:10.498916Z  INFO trading_engine: [execution] 🔄
+Starting position reconciliation with exchange...
+ rust-engine-1      | 2026-03-31T06:27:10.595131Z  INFO trading_engine: [execution] Found 0 open positions on exchange
+ rust-engine-1      | 2026-03-31T06:27:10.595177Z  INFO trading_engine: [execution] 🔄
+Position reconciliation complete (0 positions synced)
+ rust-engine-1      | 2026-03-31T06:27:11.193955Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+ python-services-1  | 2026-03-31 06:27:14.717 | INFO     | __main__:start:59 - ============================================================
+ python-services-1  | 2026-03-31 06:27:14.717 | INFO     | __main__:start:60 - Cold Path Orchestrator starting (4vCPU VPS mode)
+ python-services-1  | 2026-03-31 06:27:14.717 | INFO     | __main__:start:61 - ============================================================
+ python-services-1  | 2026-03-31 06:27:14.729 | INFO     | core.graceful_degradation:__init__:164 - GracefulDegradationManager initialized: check_interval=5.0s
+ python-services-1  | 2026-03-31 06:27:14.730 | INFO     | core.graceful_degradation:start:188 - GracefulDegradationManager started
+ python-services-1  | 2026-03-31 06:27:14.730 | INFO     | __main__:_start_degradation_manager:154 - Graceful Degradation Manager started
+ python-services-1  | 2026-03-31 06:27:15.899 | INFO     | __main__:_start_fallback_health_server:181 - Fallback health server listening on :8081
+ python-services-1  | 2026-03-31 06:27:15.915 | INFO     | analytics.pnl_attribution:__init__:197 - PnLAttributionEngine initialized
+ python-services-1  | 2026-03-31 06:27:15.915 | INFO     | __main__:_start_pnl_engine:190 - PnL Attribution Engine initialized
+ python-services-1  | 2026-03-31 06:27:15.916 | INFO     | __main__:_init_ai_brain:572
+- AI Brain disabled (USE_AI=off)
+ python-services-1  | 2026-03-31 06:27:15.999 | INFO     | core.alpha_oracle:open:201 - Signal queue initialized at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+ python-services-1  | 2026-03-31 06:27:15.999 | INFO     | core.alpha_oracle:start:518
+- Alpha Oracle started (confluence=75%, min_rr=2.0)
+ python-services-1  | 2026-03-31 06:27:16.000 | INFO     | __main__:_start_alpha_oracle:557 - Alpha Oracle initialized — ready to emit signals to SHM queue
+ python-services-1  | 2026-03-31 06:27:16.000 | INFO     | __main__:start:114 - All cold-path services started (5 tasks)
+ python-services-1  | 2026-03-31 06:27:16.000 | INFO     | __main__:_regime_detection_loop:259 - Regime detection loop starting (interval=300s)
+ python-services-1  | 2026-03-31 06:27:16.007 | INFO     | __main__:_sentiment_analysis_loop:292 - Sentiment analysis loop starting (interval=900s)
+ python-services-1  | 2026-03-31 06:27:16.008 | INFO     | __main__:_alert_dispatcher_loop:368 - Alert dispatcher starting
+ python-services-1  | 2026-03-31 06:27:16.300 | INFO     | __main__:_journal_sync_loop:423 - Trade journal sync starting (reading binary segment_*.dat files)
+ python-services-1  | 2026-03-31 06:27:16.301 | INFO     | __main__:_alpha_oracle_loop:722 - Alpha Oracle loop starting (60s evaluation cycle)
+ python-services-1  | 2026-03-31 06:27:16.301 | INFO     | __main__:_alpha_oracle_loop:725 - Alpha Oracle trading pairs: ['BTC_USDT', 'ETH_USDT', 'SOL_USDT']
+ rust-engine-1      | 2026-03-31T06:27:18.693929Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] REST reconciliation thread started (60s interval)
+ rust-engine-1      | 2026-03-31T06:27:18.693955Z  INFO trading_engine::gateio_gateway: [gateio-liq] Liquidation monitoring thread started (30s interval)
+ python-services-1  | 2026-03-31 06:27:27.343 | INFO     | __main__:_init_strategy_ensemble:857 - Strategy ensemble initialized: 37/39 strategies loaded
+ rust-engine-1      | 2026-03-31T06:27:39.928132Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928166Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928171Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928176Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928180Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928185Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:27:39.928190Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:27:40.393858Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 06:27:45.036 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=0, short=9)
+ python-services-1  | 2026-03-31 06:27:46.124 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=2, short=6)
+ python-services-1  | 2026-03-31 06:27:47.202 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=1, short=9)
+ rust-engine-1      | 2026-03-31T06:28:10.013815Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013851Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013857Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013862Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013867Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013875Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:10.013885Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:28:10.013900Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":59,"channels":[]} rust-engine-1      | 2026-03-31T06:28:10.595201Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T06:28:40.047943Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047974Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047978Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047983Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047987Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047991Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:28:40.047996Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:28:40.795964Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+wrust-engine-1      | 2026-03-31T06:29:40.170562Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170588Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170594Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170599Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170604Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170609Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:29:40.170615Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:29:41.194889Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 06:29:51.422 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 8 strategies fired for BTC_USDT (long=0, short=8)
+ python-services-1  | 2026-03-31 06:29:52.525 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=1, short=7)
+ python-services-1  | 2026-03-31 06:29:53.598 | INFO     | __main__:_evaluate_strategies_for_symbol:1008 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=2, short=8)
+ rust-engine-1      | 2026-03-31T06:30:10.218998Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219028Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219036Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219047Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219055Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219060Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:10.219065Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:30:10.219074Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":179,"channels":[]}
+ rust-engine-1      | 2026-03-31T06:30:11.440777Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T06:30:40.312407Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312452Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312458Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312462Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312467Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312472Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T06:30:40.312477Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T06:30:41.614263Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
