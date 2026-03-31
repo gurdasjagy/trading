@@ -1,0 +1,437 @@
+ rust-engine-1      | 2026-03-31T09:21:23.532815Z  INFO trading_engine: 📋 Order Lifecycle Tracker initialized (capacity=5000)
+ rust-engine-1      | 2026-03-31T09:21:23.532854Z  INFO trading_engine: ⏱️ Pipeline Latency Tracker initialized (6 histograms)
+ rust-engine-1      | 2026-03-31T09:21:23.532867Z  INFO trading_engine: 📊 Market Impact Model initialized (3 symbols calibrated)
+ rust-engine-1      | 2026-03-31T09:21:23.532872Z  INFO trading_engine: 🛡️ PreTradeRiskEngine initialized (max_leverage=125, max_positions=3)
+ rust-engine-1      | 2026-03-31T09:21:23.532877Z  INFO trading_engine: 📍 PositionSlotManager initialized (max_slots=5, lock-free AtomicU32)
+ rust-engine-1      | 2026-03-31T09:21:23.532886Z  INFO trading_engine::correlation_limiter: [correlation-limiter] Initialized: max_single=2000.00, max_correlated_mult=1.50
+ rust-engine-1      | 2026-03-31T09:21:23.532894Z  INFO trading_engine: 🔗 CorrelationLimiter initialized (BTC-ETH=0.85, BTC-SOL=0.75, ETH-SOL=0.70, max_correlated=150%)
+ rust-engine-1      | 2026-03-31T09:21:23.532899Z  INFO trading_engine::rate_limiter: [rate-limiter] Initialized TESTNET rate limits (public=100/s, private=150/s)
+ rust-engine-1      | 2026-03-31T09:21:23.532950Z  INFO trading_engine::position_sizer: [sizer] Fetching contract specs from https://api.gateio.ws/api/v4/futures/usdt/contracts
+ rust-engine-1      | 2026-03-31T09:21:23.595090Z  INFO trading_engine::gateio_gateway: [gateio-ws] futures.login successful — WS trading API authenticated
+ rust-engine-1      | 2026-03-31T09:21:23.595129Z  INFO trading_engine::gateio_gateway: [gateio-ws] Sending auth subscription for futures.orders
+ rust-engine-1      | 2026-03-31T09:21:23.676852Z  INFO trading_engine::gateio_gateway: [gateio-ws] Authenticated & subscribed to futures.orders
+ rust-engine-1      | 2026-03-31T09:21:23.676884Z  INFO trading_engine::gateio_gateway: [gateio-ws] Ready — login confirmed, accepting orders
+ postgres-1         | 2026-03-31 09:21:23.680 UTC [1] LOG:  database system is ready to accept connections
+ rust-engine-1      | 2026-03-31T09:21:24.838304Z  INFO trading_engine::position_sizer: [sizer] Fetched 3 contract specs (651 total available)
+ rust-engine-1      | 2026-03-31T09:21:24.842689Z  INFO trading_engine::position_sizer: [sizer] Registered ETH_USDT: quanto=0.01, min=0, max=3000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1      | 2026-03-31T09:21:24.842773Z  INFO trading_engine::position_sizer: [sizer] Registered BTC_USDT: quanto=0.0001, min=1, max=15000000, lev=1-100x, maker=-0.0050%, taker=0.0750%
+ rust-engine-1      | 2026-03-31T09:21:24.842781Z  INFO trading_engine::position_sizer: [sizer] Registered SOL_USDT: quanto=1, min=0, max=240000, lev=1-100x, maker=-0.0050%,
+taker=0.0750%
+ rust-engine-1      | 2026-03-31T09:21:24.842824Z  INFO trading_engine: 📏 PositionSizer initialized with contract specs
+ rust-engine-1      | 2026-03-31T09:21:24.843016Z  INFO trading_engine::bridge_ipc::tick_broadcast: [tick-broadcast] Initialized SHM at /dev/shm/bridge_ticks (1048640 bytes,
+8192 slots)
+ rust-engine-1      | 2026-03-31T09:21:24.843027Z  INFO trading_engine: 📡 Bridge: Tick broadcaster initialized
+ rust-engine-1      | 2026-03-31T09:21:24.843095Z  INFO trading_engine: 📡 Bridge: Portfolio receiver initialized
+ rust-engine-1      | 2026-03-31T09:21:24.843139Z  INFO trading_engine::bridge_ipc::exec_confirm_broadcast: [exec-broadcast] Initialized SHM at /dev/shm/bridge_exec (262208 bytes, 2048 slots)
+ rust-engine-1      | 2026-03-31T09:21:24.843147Z  INFO trading_engine: 📡 Bridge: Execution confirmation broadcaster initialized
+ rust-engine-1      | 2026-03-31T09:21:24.843153Z  INFO trading_engine: 🔌 Event bus initialized: market_data=4096, execution=1024, control=256
+ rust-engine-1      | 2026-03-31T09:21:24.843159Z  INFO trading_engine: 📡 Bridge: Health monitor initialized
+ rust-engine-1      | 2026-03-31T09:21:24.843163Z  INFO trading_engine: 📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal +
+event_bus + health_monitor)
+ rust-engine-1      | 2026-03-31T09:21:24.845891Z  INFO trading_engine: 📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)
+ rust-engine-1      | 2026-03-31T09:21:24.845924Z  INFO trading_engine::ml_weight_receiver: Initializing ML Weight Reader at /dev/shm/ml_weights
+ rust-engine-1      | 2026-03-31T09:21:24.846095Z  INFO trading_engine::ml_weight_receiver: ML weights SHM magic mismatch, waiting for writer — this is expected when the ML cold-path service is not running
+ rust-engine-1      | 2026-03-31T09:21:24.846266Z  INFO trading_engine: Multi-Exchange
+mode DISABLED - Gate.io only
+ rust-engine-1      | 2026-03-31T09:21:24.846470Z  INFO trading_engine: [main] Persistent state disabled (set [persistent_state] enabled=true to enable)
+ rust-engine-1      | 2026-03-31T09:21:24.846848Z  INFO trading_engine: [ws-gateio] Pinned to core 1
+ rust-engine-1      | 2026-03-31T09:21:24.847204Z  INFO trading_engine: [main] Forex gateway disabled — no credentials
+ rust-engine-1      | 2026-03-31T09:21:24.847229Z  INFO trading_engine: [strategy] Pinned to core 2 (with Market Impact + Overflow Monitor)
+ rust-engine-1      | 2026-03-31T09:21:24.847687Z  INFO trading_engine: [ws-gateio] Starting WS ingestion on dedicated core
+ rust-engine-1      | 2026-03-31T09:21:24.847878Z  INFO trading_engine: [strategy] Starting strategy evaluator on dedicated core
+ rust-engine-1      | 2026-03-31T09:21:24.848047Z  INFO trading_engine: [strategy] 📊 CVD tracker initialized (5m/15m/1h windows)
+ rust-engine-1      | 2026-03-31T09:21:24.848156Z  INFO trading_engine: [dashboard] Starting HTTP server on 0.0.0.0:8080
+ rust-engine-1      | 2026-03-31T09:21:24.848222Z  INFO trading_engine: [execution] Pinned to core 2 (with Lifecycle + Latency + Multi-Exchange SOR)
+ rust-engine-1      | 2026-03-31T09:21:24.847376Z  INFO trading_engine: [book-builder]
+Pinned to core 1
+ rust-engine-1      | 2026-03-31T09:21:24.848079Z  INFO trading_engine: [strategy] 📊 Volume Profile initialized (VPOC + Value Area)
+ rust-engine-1      | 2026-03-31T09:21:24.848308Z  INFO trading_engine: [strategy] 🌊 Liquidation cascade detector initialized
+ rust-engine-1      | 2026-03-31T09:21:24.848337Z  INFO trading_engine::gamma_shm: Gamma exposure SHM not available at /dev/shm/gamma_exposure: No such file or directory (os
+error 2) (will run without gamma data)
+ rust-engine-1      | 2026-03-31T09:21:24.848354Z  INFO trading_engine: [strategy] 📊 Gamma exposure reader not available (SHM file missing, will run without gamma data)
+ rust-engine-1      | 2026-03-31T09:21:24.848359Z  INFO trading_engine: [strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)
+ rust-engine-1      | 2026-03-31T09:21:24.848363Z  INFO trading_engine: [strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)
+ rust-engine-1      | 2026-03-31T09:21:24.848371Z  INFO trading_engine: [strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)
+ rust-engine-1      | 2026-03-31T09:21:24.848384Z  INFO trading_engine: [strategy] 📊 Trade Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)
+ rust-engine-1      | 2026-03-31T09:21:24.848395Z  INFO trading_engine: [strategy] 📊 Wyckoff detector initialized (100-period window)
+ rust-engine-1      | 2026-03-31T09:21:24.848405Z  INFO trading_engine: [strategy] 📊 Fibonacci detector initialized (1h/4h swing detection)
+ rust-engine-1      | 2026-03-31T09:21:24.848415Z  INFO trading_engine: [strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)
+ rust-engine-1      | 2026-03-31T09:21:24.848429Z  INFO trading_engine: [strategy] 📊 Market Maker Inventory Model initialized (1000-period window)
+ rust-engine-1      | 2026-03-31T09:21:24.848449Z  INFO trading_engine: [strategy] 📊 Cross-Asset Correlation Monitor initialized (60-period window)
+ rust-engine-1      | 2026-03-31T09:21:24.848239Z  INFO trading_engine: [book-builder]
+Starting orderbook builder on dedicated core
+ rust-engine-1      | 2026-03-31T09:21:24.848532Z  INFO trading_engine: [strategy] 🧮 DustTracker initialized (max_dust=5.0)
+ rust-engine-1      | 2026-03-31T09:21:24.848538Z  INFO trading_engine: [strategy] 📊 VPIN calculator initialized (bucket=5k, depth=50)
+ rust-engine-1      | 2026-03-31T09:21:24.848541Z  INFO trading_engine: [strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)
+ rust-engine-1      | 2026-03-31T09:21:24.848546Z  INFO trading_engine: [strategy] 💰 Funding rate checks every ~1000 book snapshots
+ rust-engine-1      | 2026-03-31T09:21:24.848550Z  INFO trading_engine: [strategy] 🚪 ExitEvaluator initialized (ParabolicSAR + ATR + Chandelier + HardSLTP)
+ rust-engine-1      | 2026-03-31T09:21:24.848554Z  INFO trading_engine: [strategy] 📊 PositionLifecycleManager initialized (reversal=30%, max_loss=2%)
+ rust-engine-1      | 2026-03-31T09:21:24.848559Z  INFO trading_engine: [strategy] 🎯 SmartEntryRouter initialized (maker-rebate optimization)
+ rust-engine-1      | 2026-03-31T09:21:24.848562Z  INFO trading_engine: [strategy] 📈 VolatilityTrailingStop initialized (ATR-based)
+ rust-engine-1      | 2026-03-31T09:21:24.848566Z  INFO trading_engine: [strategy] ️ AdverseSelectionGuard initialized (spoofing detection)
+ rust-engine-1      | 2026-03-31T09:21:24.848745Z  INFO trading_engine: [execution] Starting execution router on dedicated core (Institutional)
+ rust-engine-1      | 2026-03-31T09:21:24.848973Z  INFO trading_engine: [execution] WsOrderManager mode: LIVE (TRADING_MODE=testnet)
+ rust-engine-1      | 2026-03-31T09:21:24.849353Z  INFO trading_engine: [ws-gateio] Connecting to wss://fx-ws.gateio.ws/v4/ws/usdt
+ rust-engine-1      | 2026-03-31T09:21:24.849441Z  INFO trading_engine: [execution] TWAP/Iceberg executor initialized (max 5 concurrent)
+ rust-engine-1      | 2026-03-31T09:21:24.849680Z  INFO trading_engine::signal_queue: [signal_queue] Initialized SHM at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+ rust-engine-1      | 2026-03-31T09:21:24.849699Z  INFO trading_engine: [execution] ✅
+SHM signal queue opened — Python Alpha Oracle signals ENABLED
+ rust-engine-1      | 2026-03-31T09:21:24.849735Z  INFO trading_engine: [execution] Testing Gate.io authentication with balance check...
+ rust-engine-1      | 2026-03-31T09:21:24.849733Z  INFO trading_engine: All 6 threads spawned. Engine running. Press Ctrl+C to stop.
+ rust-engine-1      | 2026-03-31T09:21:24.850154Z  INFO trading_engine: [telemetry] Pinned to core 3 — Journal + SharedState + Health Monitor
+ rust-engine-1      | 2026-03-31T09:21:24.850483Z  INFO trading_engine::telemetry: Journal writer initialized at /dev/shm/trading_journal (segment 0)
+ rust-engine-1      | 2026-03-31T09:21:24.850555Z  INFO trading_engine::telemetry: Shared state writer initialized at /dev/shm/trading_state
+ rust-engine-1      | 2026-03-31T09:21:24.910951Z  INFO trading_engine::dashboard_server: [dashboard] Loaded 14 templates from /app/templates: ["risk.html", "performance.html", "advanced_features.html", "forex_settings.html", "forex_risk.html", "multi_exchange.html", "settings.html", "logs.html", "trades.html", "forex_dashboard.html", "dashboard.html", "forex_trades.html", "base.html", "forex_performance.html"]
+ rust-engine-1      | 2026-03-31T09:21:24.911043Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket broadcast task started (500ms interval)
+ rust-engine-1      | 2026-03-31T09:21:24.911181Z  INFO trading_engine::dashboard_server: [dashboard] Gate.io market data: always mainnet for public data (trading_mode=testnet, pairs=["BTC_USDT", "ETH_USDT", "SOL_USDT"])
+ rust-engine-1      | 2026-03-31T09:21:24.911292Z  INFO trading_engine::dashboard_server: [dashboard] Serving static files from /app/static
+ rust-engine-1      | 2026-03-31T09:21:24.912936Z  INFO trading_engine::dashboard_server: [dashboard] axum HTTP+WS server listening on 0.0.0.0:8080
+ rust-engine-1      | 2026-03-31T09:21:24.934977Z  INFO trading_engine: [execution] ✅
+Auth OK — Initial balance: $934.22 USDT — circuit breaker armed — pre_trade_risk armed
+ rust-engine-1      | 2026-03-31T09:21:24.935009Z  INFO trading_engine: [execution] Setting margin mode to cross-margin for all symbols...
+ rust-engine-1      | 2026-03-31T09:21:24.935578Z  INFO trading_engine: [execution] 🔄
+Starting position reconciliation with exchange...
+ rust-engine-1      | 2026-03-31T09:21:25.038500Z  INFO trading_engine: [execution] Found 0 open positions on exchange
+ rust-engine-1      | 2026-03-31T09:21:25.038527Z  INFO trading_engine: [execution] 🔄
+Position reconciliation complete (0 positions synced)
+ rust-engine-1      | 2026-03-31T09:21:25.693512Z  INFO trading_engine: [ws-gateio] Connected, subscribing to 3 symbols
+ python-services-1  | 2026-03-31 09:21:31.571 | INFO     | __main__:start:59 - ============================================================
+ python-services-1  | 2026-03-31 09:21:31.571 | INFO     | __main__:start:60 - Cold Path Orchestrator starting (4vCPU VPS mode)
+ python-services-1  | 2026-03-31 09:21:31.571 | INFO     | __main__:start:61 - ============================================================
+ python-services-1  | 2026-03-31 09:21:31.616 | INFO     | core.graceful_degradation:__init__:164 - GracefulDegradationManager initialized: check_interval=5.0s
+ python-services-1  | 2026-03-31 09:21:31.616 | INFO     | core.graceful_degradation:start:188 - GracefulDegradationManager started
+ python-services-1  | 2026-03-31 09:21:31.620 | INFO     | __main__:_start_degradation_manager:154 - Graceful Degradation Manager started
+ rust-engine-1      | 2026-03-31T09:21:32.899449Z  INFO trading_engine::gateio_gateway: [gateio-liq] Liquidation monitoring thread started (30s interval)
+ rust-engine-1      | 2026-03-31T09:21:32.899458Z  INFO trading_engine::gateio_gateway: [gateio-reconcile] REST reconciliation thread started (60s interval)
+ python-services-1  | 2026-03-31 09:21:33.003 | INFO     | __main__:_start_fallback_health_server:181 - Fallback health server listening on :8081
+ python-services-1  | 2026-03-31 09:21:33.067 | INFO     | analytics.pnl_attribution:__init__:197 - PnLAttributionEngine initialized
+ python-services-1  | 2026-03-31 09:21:33.067 | INFO     | __main__:_start_pnl_engine:190 - PnL Attribution Engine initialized
+ python-services-1  | 2026-03-31 09:21:33.067 | INFO     | __main__:_init_ai_brain:572
+- AI Brain disabled (USE_AI=off)
+ python-services-1  | 2026-03-31 09:21:33.259 | INFO     | core.alpha_oracle:open:201 - Signal queue initialized at /dev/shm/alpha_signal_queue (65568 bytes, 256 slots)
+ python-services-1  | 2026-03-31 09:21:33.260 | INFO     | core.alpha_oracle:start:518
+- Alpha Oracle started (confluence=75%, min_rr=1.8)
+ python-services-1  | 2026-03-31 09:21:33.261 | INFO     | __main__:_start_alpha_oracle:557 - Alpha Oracle initialized — ready to emit signals to SHM queue
+ python-services-1  | 2026-03-31 09:21:33.261 | INFO     | __main__:start:114 - All cold-path services started (5 tasks)
+ python-services-1  | 2026-03-31 09:21:33.261 | INFO     | __main__:_regime_detection_loop:259 - Regime detection loop starting (interval=300s)
+ python-services-1  | 2026-03-31 09:21:33.314 | INFO     | __main__:_sentiment_analysis_loop:292 - Sentiment analysis loop starting (interval=900s)
+ python-services-1  | 2026-03-31 09:21:33.315 | INFO     | __main__:_alert_dispatcher_loop:368 - Alert dispatcher starting
+ python-services-1  | 2026-03-31 09:21:33.758 | INFO     | __main__:_journal_sync_loop:423 - Trade journal sync starting (reading binary segment_*.dat files)
+ python-services-1  | 2026-03-31 09:21:33.759 | INFO     | __main__:_alpha_oracle_loop:722 - Alpha Oracle loop starting (60s evaluation cycle)
+ python-services-1  | 2026-03-31 09:21:33.759 | INFO     | __main__:_alpha_oracle_loop:725 - Alpha Oracle trading pairs: ['BTC_USDT', 'ETH_USDT', 'SOL_USDT']
+ python-services-1  | 2026-03-31 09:21:52.249 | INFO     | __main__:_init_strategy_ensemble:857 - Strategy ensemble initialized: 37/39 strategies loaded
+ rust-engine-1      | 2026-03-31T09:21:54.607937Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608035Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608060Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608079Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608098Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608116Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:21:54.608136Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:21:54.893201Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:22:09.039 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for BTC_USDT (long=0, short=10)
+ python-services-1  | 2026-03-31 09:22:09.039 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: BTC_USDT SHORT (R:R=2.67, conf=73%, 10/10 strategies)
+ python-services-1  | 2026-03-31 09:22:09.040 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed BTC_USDT SHORT OPEN (R:R=2.7, conf=73%, 10/10 strategies)
+ python-services-1  | 2026-03-31 09:22:09.040 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for BTC_USDT — AI=N/A, queue depth: 1
+ python-services-1  | 2026-03-31 09:22:10.095 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=2, short=7)
+ python-services-1  | 2026-03-31 09:22:10.096 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: ETH_USDT SHORT (R:R=2.67, conf=74%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:22:10.096 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed ETH_USDT SHORT OPEN (R:R=2.7, conf=74%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:22:10.096 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for ETH_USDT — AI=N/A, queue depth: 2
+ python-services-1  | 2026-03-31 09:22:11.122 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for SOL_USDT (long=2, short=7)
+ python-services-1  | 2026-03-31 09:22:11.123 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: SOL_USDT SHORT (R:R=2.67, conf=73%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:22:11.123 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed SOL_USDT SHORT OPEN (R:R=2.7, conf=73%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:22:11.123 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for SOL_USDT — AI=N/A, queue depth: 3
+ rust-engine-1      | 2026-03-31T09:22:24.698302Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698334Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698340Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698344Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698349Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698354Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:24.698359Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:22:24.698372Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":59,"channels":[]} rust-engine-1      | 2026-03-31T09:22:25.095414Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:22:54.729303Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729342Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729348Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729354Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729359Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729364Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:22:54.729373Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:22:55.294428Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:23:12.200 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 11 strategies fired for BTC_USDT (long=0, short=11)
+ python-services-1  | 2026-03-31 09:23:13.223 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 12 strategies fired for ETH_USDT (long=1, short=11)
+ python-services-1  | 2026-03-31 09:23:14.224 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 12 strategies fired for SOL_USDT (long=1, short=11)
+ rust-engine-1      | 2026-03-31T09:23:24.807808Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807846Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807855Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807863Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807870Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807877Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:24.807884Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:23:24.807895Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":119,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:23:25.494292Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:23:34.190286Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:37.663477Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:38.329944Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:39.552475Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:40.380754Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:41.851655Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:42.373679Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:43.741886Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:44.203145Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:45.561545Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:46.293900Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ rust-engine-1      | 2026-03-31T09:23:51.611596Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ rust-engine-1      | 2026-03-31T09:23:54.836305Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836342Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836347Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836351Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836356Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836361Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:23:54.836366Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:23:55.694346Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:24:15.297 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=4, short=5)
+ python-services-1  | 2026-03-31 09:24:16.332 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=4, short=5)
+ python-services-1  | 2026-03-31 09:24:17.325 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=5, short=5)
+ rust-engine-1      | 2026-03-31T09:24:25.073152Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073222Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073227Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073232Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073237Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073241Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:25.073247Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:24:25.073257Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":180,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:24:25.894350Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:24:55.136691Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136737Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136744Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136751Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136758Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136764Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:24:55.136772Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:24:56.094304Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:25:18.400 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for BTC_USDT (long=5, short=5)
+ python-services-1  | 2026-03-31 09:25:19.410 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=4, short=4)
+ python-services-1  | 2026-03-31 09:25:20.423 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 8 strategies fired for SOL_USDT (long=4, short=4)
+ rust-engine-1      | 2026-03-31T09:25:25.197948Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.197986Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.197994Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.198003Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.198012Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.198020Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:25.198030Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:25:25.198042Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":240,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:25:26.294310Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:25:55.403084Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403125Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403131Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403135Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403139Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403144Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:25:55.403150Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:25:56.494804Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:26:09.549677Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client connected
+ python-services-1  | 2026-03-31 09:26:21.535 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 11 strategies fired for BTC_USDT (long=1, short=10)
+ python-services-1  | 2026-03-31 09:26:22.655 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=0, short=9)
+ rust-engine-1      | 2026-03-31T09:26:23.500011Z  INFO trading_engine::dashboard_server: [dashboard] WebSocket client disconnected
+ postgres-1         | 2026-03-31 09:26:23.636 UTC [28] LOG:  checkpoint starting: time
+ python-services-1  | 2026-03-31 09:26:23.839 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for SOL_USDT (long=1, short=8)
+ postgres-1         | 2026-03-31 09:26:25.019 UTC [28] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.200 s, sync=0.424 s, total=1.384 s; sync files=2, longest=0.270 s, average=0.212 s; distance=0 kB, estimate=0 kB; lsn=0/19A5D20, redo lsn=0/19A5CE8
+ rust-engine-1      | 2026-03-31T09:26:25.528401Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528436Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528441Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528446Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528450Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528454Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:25.528459Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:26:25.528468Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":300,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:26:26.695289Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:26:55.615290Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615325Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615334Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615342Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615356Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615361Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:26:55.615366Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:26:56.898681Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:27:25.400 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=1, short=8)
+ python-services-1  | 2026-03-31 09:27:25.400 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: BTC_USDT SHORT (R:R=2.67, conf=76%, 8/9 strategies)
+ python-services-1  | 2026-03-31 09:27:25.401 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed BTC_USDT SHORT OPEN (R:R=2.7, conf=76%, 8/9 strategies)
+ python-services-1  | 2026-03-31 09:27:25.402 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for BTC_USDT — AI=N/A, queue depth: 4
+ rust-engine-1      | 2026-03-31T09:27:25.994958Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.994986Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.994994Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.995000Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.995007Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.995013Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:25.995021Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:27:25.995029Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":361,"channels":[]}
+ python-services-1  | 2026-03-31 09:27:26.606 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for ETH_USDT (long=1, short=9)
+ python-services-1  | 2026-03-31 09:27:26.607 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: ETH_USDT SHORT (R:R=2.67, conf=75%, 9/10 strategies)
+ python-services-1  | 2026-03-31 09:27:26.607 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed ETH_USDT SHORT OPEN (R:R=2.7, conf=75%, 9/10 strategies)
+ python-services-1  | 2026-03-31 09:27:26.607 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for ETH_USDT — AI=N/A, queue depth: 5
+ rust-engine-1      | 2026-03-31T09:27:27.094048Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:27:27.613 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=1, short=9)
+ python-services-1  | 2026-03-31 09:27:27.613 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: SOL_USDT SHORT (R:R=2.67, conf=76%, 9/10 strategies)
+ python-services-1  | 2026-03-31 09:27:27.613 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed SOL_USDT SHORT OPEN (R:R=2.7, conf=76%, 9/10 strategies)
+ python-services-1  | 2026-03-31 09:27:27.613 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for SOL_USDT — AI=N/A, queue depth: 6
+ rust-engine-1      | 2026-03-31T09:27:56.053874Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053914Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053919Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053923Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053927Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053931Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:27:56.053936Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:27:57.294398Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:28:26.114863Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114900Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114909Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114920Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114930Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114936Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:26.114941Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:28:26.114953Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":421,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:28:27.493665Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:28:28.835 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for BTC_USDT (long=1, short=9)
+ python-services-1  | 2026-03-31 09:28:29.908 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=1, short=8)
+ python-services-1  | 2026-03-31 09:28:31.039 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for SOL_USDT (long=1, short=8)
+ rust-engine-1      | 2026-03-31T09:28:56.234121Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234152Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234159Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234166Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234172Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234179Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:28:56.234186Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:28:57.694418Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:29:26.327377Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327421Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327428Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327440Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327445Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327450Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:26.327455Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:29:26.327464Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":481,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:29:27.899788Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:29:32.094 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for BTC_USDT (long=0, short=10)
+ python-services-1  | 2026-03-31 09:29:33.106 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 11 strategies fired for ETH_USDT (long=2, short=9)
+ python-services-1  | 2026-03-31 09:29:34.232 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 11 strategies fired for SOL_USDT (long=2, short=9)
+ rust-engine-1      | 2026-03-31T09:29:56.437374Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437432Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437438Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437443Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437447Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437454Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:29:56.437464Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:29:58.095478Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:30:26.544598Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544932Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544946Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544955Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544960Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544964Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:26.544969Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:30:26.545098Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":541,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:30:28.295226Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:30:35.306 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=0, short=9)
+ python-services-1  | 2026-03-31 09:30:36.240 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for ETH_USDT (long=0, short=10)
+ python-services-1  | 2026-03-31 09:30:37.302 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 12 strategies fired for SOL_USDT (long=3, short=9)
+ rust-engine-1      | 2026-03-31T09:30:56.798177Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798210Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798215Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798219Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798224Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798228Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:30:56.798233Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:30:58.513303Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:31:27.003311Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003448Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003457Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003463Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003469Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003474Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:27.003480Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:31:27.003490Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":602,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:31:28.694899Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:31:38.402 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=0, short=9)
+ python-services-1  | 2026-03-31 09:31:39.430 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 8 strategies fired for ETH_USDT (long=2, short=6)
+ python-services-1  | 2026-03-31 09:31:40.498 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 10 strategies fired for SOL_USDT (long=3, short=7)
+ rust-engine-1      | 2026-03-31T09:31:57.108729Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108766Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108771Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108775Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108779Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108784Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:31:57.108789Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:31:58.894463Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:32:27.182883Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182928Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182933Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182939Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182942Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182947Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:27.182952Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:32:27.182962Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":662,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:32:29.100286Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:32:41.594 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 8 strategies fired for BTC_USDT (long=1, short=7)
+ python-services-1  | 2026-03-31 09:32:41.595 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: BTC_USDT SHORT (R:R=2.67, conf=74%, 7/8 strategies)
+ python-services-1  | 2026-03-31 09:32:41.595 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed BTC_USDT SHORT OPEN (R:R=2.7, conf=74%, 7/8 strategies)
+ python-services-1  | 2026-03-31 09:32:41.595 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for BTC_USDT — AI=N/A, queue depth: 7
+ python-services-1  | 2026-03-31 09:32:42.829 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=3, short=6)
+ python-services-1  | 2026-03-31 09:32:43.935 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for SOL_USDT (long=3, short=6)
+ rust-engine-1      | 2026-03-31T09:32:57.253783Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253829Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253840Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253851Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253855Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253859Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:32:57.253864Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:32:59.324882Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ rust-engine-1      | 2026-03-31T09:33:27.397130Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397174Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397182Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397191Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397199Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397207Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:27.397218Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:33:27.397232Z  INFO trading_engine: [telemetry] Bridge Health: status=healthy, metrics={"status":"healthy","uptime_secs":722,"channels":[]}
+ rust-engine-1      | 2026-03-31T09:33:29.498830Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ python-services-1  | 2026-03-31 09:33:45.047 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for BTC_USDT (long=5, short=4)
+ python-services-1  | 2026-03-31 09:33:46.141 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 9 strategies fired for ETH_USDT (long=7, short=2)
+ python-services-1  | 2026-03-31 09:33:46.141 | INFO     | core.alpha_oracle:evaluate:457 - 🎯 GOLDEN SETUP: ETH_USDT LONG (R:R=2.67, conf=73%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:33:46.142 | INFO     | core.alpha_oracle:push:263 - Signal queue: pushed ETH_USDT LONG OPEN (R:R=2.7, conf=73%, 7/9 strategies)
+ python-services-1  | 2026-03-31 09:33:46.142 | INFO     | __main__:_alpha_oracle_loop:763 - Alpha Oracle: signal emitted for ETH_USDT — AI=N/A, queue depth: 8
+ python-services-1  | 2026-03-31 09:33:47.228 | INFO     | __main__:_evaluate_strategies_for_symbol:1010 - Alpha Oracle: 8 strategies fired for SOL_USDT (long=5, short=3)
+ rust-engine-1      | 2026-03-31T09:33:57.455604Z  INFO trading_engine::latency_tracker: [latency] tick_to_book:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456363Z  INFO trading_engine::latency_tracker: [latency] book_to_signal: n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456380Z  INFO trading_engine::latency_tracker: [latency] signal_to_order:n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456385Z  INFO trading_engine::latency_tracker: [latency] order_to_ack:   n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456390Z  INFO trading_engine::latency_tracker: [latency] end_to_end:     n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456398Z  INFO trading_engine::latency_tracker: [latency] ws_parse:       n=0 mean=0µs min=0µs p50=0µs p95=0µs p99=0µs p999=0µs max=0µs
+ rust-engine-1      | 2026-03-31T09:33:57.456404Z  INFO trading_engine: [telemetry] Lifecycle: orders=0, fills=0, rejections=0, active=0
+ rust-engine-1      | 2026-03-31T09:33:59.696999Z  INFO trading_engine: [execution] Health: submitted=0, rejected=0, total_pnl=0.0000, cb_halted=false, consecutive_losses=0,
+slots=0/5
+ Gracefully stopping... (press Ctrl+C again to force)
+ [+] Stopping 4/4
+ ✔ Container crypto_trading_bot-python-services-1  Stopped                        3.1s  ✔ Container crypto_trading_bot-rust-engine-1      Stopped                       10.9s  ✔ Container crypto_trading_bot-redis-1            Stopped                        1.2s  ✔ Container crypto_trading_bot-postgres-1         Stopped                        2.1s root@ubuntu-s-4vcpu-8gb-sgp1-01:~/trading/trading/crypto_trading_bot# ~~~~~~~~~~~~
