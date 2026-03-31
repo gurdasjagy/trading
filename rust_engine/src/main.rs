@@ -26,68 +26,68 @@
 //!   Core 6:     Telemetry/Journaling (append-only event log)
 //!   Core 7-10:  Microstructure Analytics (VPIN, Kyle Lambda, QPE)
 
+mod candle_aggregator;
 mod config;
 mod execution_gateway;
-mod gateio_gateway;
-mod forex_gateway;
-mod orderbook;
-mod tick_processor;
-mod regime;
-mod regime_shm;
-mod microstructure;
-mod strategy_engine;
-mod ml_weight_receiver;
-mod telemetry;
-mod ws_ingestion;
 mod fixed_point;
 mod flat_book;
-mod spsc;
+mod forex_gateway;
+mod gateio_gateway;
 mod journal;
+mod microstructure;
+mod ml_weight_receiver;
+mod orderbook;
+mod regime;
+mod regime_shm;
 mod shared_state;
-mod candle_aggregator;
+mod spsc;
+mod strategy_engine;
+mod telemetry;
+mod tick_processor;
+mod ws_ingestion;
 
 // Issue 3: Institutional execution modules
-mod execution_state;
-mod mbo_book;
 mod adverse_selection;
-mod smart_router;
-mod ws_order_manager;
-mod queue_position_estimator;
-mod fast_ws_parser;
-mod term_structure;
 mod calendar_spread_engine;
+mod execution_state;
+mod fast_ws_parser;
 mod matching_engine;
+mod mbo_book;
+mod queue_position_estimator;
+mod smart_router;
 mod synthetic_orders;
+mod term_structure;
+mod ws_order_manager;
 
 // Institutional upgrades: order lifecycle, latency tracking, market impact
-mod order_lifecycle;
 mod latency_tracker;
 mod market_impact;
+mod order_lifecycle;
 
 // Phase 4 Architecture: Decimal extension, event bus, bridge IPC, risk calculator
+mod bridge_ipc;
 mod decimal_ext;
 mod event_bus;
-mod bridge_ipc;
 mod risk_calculator;
 
 // Multi-Exchange Feature (USE_MULTI_EXCHANGE=on)
-mod multi_exchange;
 mod binance_gateway;
 mod bybit_gateway;
 mod instrument_manager;
+mod multi_exchange;
 
 // Feature 4: Persistent State (SQLite)
 mod state_store;
 
 // ── Institutional Gaps Implementation (prompt.txt) ──
-mod kelly_criterion;       // CAT 6: Kelly Criterion optimal bet sizing
-mod strategy_correlation;  // CAT 6: Strategy correlation matrix
-mod event_driven_signals;  // CAT 6: Event-driven signal generation
-mod tca;                   // CAT 8: Trade Cost Analysis
-mod session_detector;      // CAT 8: Session-aware trading
-mod spread_analytics;      // CAT 5: Spread analytics & imbalance decay
-mod kill_switch;           // CAT 8: Kill switch API endpoint
-mod pnl_attribution;      // CAT 8: PnL attribution by strategy
+mod event_driven_signals; // CAT 6: Event-driven signal generation
+mod kelly_criterion; // CAT 6: Kelly Criterion optimal bet sizing
+mod kill_switch; // CAT 8: Kill switch API endpoint
+mod pnl_attribution;
+mod session_detector; // CAT 8: Session-aware trading
+mod spread_analytics; // CAT 5: Spread analytics & imbalance decay
+mod strategy_correlation; // CAT 6: Strategy correlation matrix
+mod tca; // CAT 8: Trade Cost Analysis // CAT 8: PnL attribution by strategy
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -99,8 +99,8 @@ use futures_util::future;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{
-    EngineConfig, ExchangeConfig, SymbolRegistry, ThreadTopology,
-    build_symbol_registry, build_flat_book_configs,
+    build_flat_book_configs, build_symbol_registry, EngineConfig, ExchangeConfig, SymbolRegistry,
+    ThreadTopology,
 };
 use crate::execution_gateway::ExecutionGateway;
 use crate::fixed_point::FixedPrice;
@@ -138,30 +138,32 @@ struct FundingArbPosition {
     entry_timestamp_ns: u64,
     entry_net_rate: f64,
 }
-use crate::flat_book::FlatOrderBook;
-use crate::gateio_gateway::GateIoGateway;
-use crate::order_lifecycle::OrderLifecycleTracker;
-use crate::latency_tracker::PipelineLatencyTracker;
-use crate::market_impact::{MarketImpactModel, ImpactParams};
+use crate::candle_aggregator::Timeframe;
 use crate::circuit_breaker::CircuitBreaker;
-use crate::spsc::{SpscRingBuffer, SpscOverflowMonitor, RawBookUpdate, BookSnapshot, OrderCommand};
-use crate::strategy_engine::StrategyEngine;
-use crate::telemetry::TelemetryPublisher;
-use crate::pre_trade_risk::PreTradeRiskEngine;
-use crate::position_slot_manager::PositionSlotManager;
-use crate::position_lifecycle::PositionLifecycleManager;
-use crate::position_sizer::PositionSizer;
-use crate::rate_limiter::RateLimiterPool;
-use crate::smart_entry::{SmartEntryRouter as SmartEntryRouterV2, VolatilityTrailingStop, AdverseSelectionGuard};
-use crate::dashboard_server::DashboardState;
 use crate::correlation_limiter::CorrelationLimiter;
 use crate::cumulative_delta::CumulativeDeltaTracker;
-use crate::volume_profile::VolumeProfile;
-use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
-use crate::trend_strength::TrendStrengthIndex;
+use crate::dashboard_server::DashboardState;
 use crate::execution_analytics::ExecutionAnalytics;
+use crate::flat_book::FlatOrderBook;
+use crate::gateio_gateway::GateIoGateway;
+use crate::latency_tracker::PipelineLatencyTracker;
+use crate::liquidation_detector::{LiquidationCascadeDetector, LiquidationCascadeState};
+use crate::market_impact::{ImpactParams, MarketImpactModel};
+use crate::order_lifecycle::OrderLifecycleTracker;
+use crate::position_lifecycle::PositionLifecycleManager;
+use crate::position_sizer::PositionSizer;
+use crate::position_slot_manager::PositionSlotManager;
+use crate::pre_trade_risk::PreTradeRiskEngine;
+use crate::rate_limiter::RateLimiterPool;
 use crate::realized_vol::RealizedVolatilityCalculator; // Task 16
-use crate::candle_aggregator::Timeframe;
+use crate::smart_entry::{
+    AdverseSelectionGuard, SmartEntryRouter as SmartEntryRouterV2, VolatilityTrailingStop,
+};
+use crate::spsc::{BookSnapshot, OrderCommand, RawBookUpdate, SpscOverflowMonitor, SpscRingBuffer};
+use crate::strategy_engine::StrategyEngine;
+use crate::telemetry::TelemetryPublisher;
+use crate::trend_strength::TrendStrengthIndex;
+use crate::volume_profile::VolumeProfile;
 // use crate::event_sequencer::{EventSequencer, SequencedEventKind};
 
 // ---------------------------------------------------------------------------
@@ -212,15 +214,25 @@ fn load_dotenv() {
         if path.exists() {
             match dotenvy::from_path(&path) {
                 Ok(()) => {
-                    eprintln!("[dotenv] Loaded credentials from DOTENV_PATH={}", path.display());
+                    eprintln!(
+                        "[dotenv] Loaded credentials from DOTENV_PATH={}",
+                        path.display()
+                    );
                     return;
                 }
                 Err(e) => {
-                    eprintln!("[dotenv] Warning: DOTENV_PATH={} failed to parse: {}", path.display(), e);
+                    eprintln!(
+                        "[dotenv] Warning: DOTENV_PATH={} failed to parse: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         } else {
-            eprintln!("[dotenv] Warning: DOTENV_PATH={} does not exist", explicit_path);
+            eprintln!(
+                "[dotenv] Warning: DOTENV_PATH={} does not exist",
+                explicit_path
+            );
         }
     }
 
@@ -254,7 +266,11 @@ fn load_dotenv() {
                     return;
                 }
                 Err(e) => {
-                    eprintln!("[dotenv] Warning: found {} but failed to parse: {}", path.display(), e);
+                    eprintln!(
+                        "[dotenv] Warning: found {} but failed to parse: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -271,9 +287,18 @@ fn load_dotenv() {
     let has_test_key = std::env::var("GATEIO_TESTNET_API_KEY").is_ok();
     if !has_live_key && !has_test_key {
         eprintln!("[dotenv] WARNING: Neither GATEIO_API_KEY nor GATEIO_TESTNET_API_KEY found in environment!");
-        eprintln!("[dotenv] Ensure .env is placed at one of: {:?}", candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
+        eprintln!(
+            "[dotenv] Ensure .env is placed at one of: {:?}",
+            candidates
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+        );
     } else {
-        eprintln!("[dotenv] API keys detected: live={}, testnet={}", has_live_key, has_test_key);
+        eprintln!(
+            "[dotenv] API keys detected: live={}, testnet={}",
+            has_live_key, has_test_key
+        );
     }
 }
 
@@ -369,7 +394,9 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
                 ex.rest_url = Some("https://api-testnet.gateapi.io/api/v4".to_string());
             }
         }
-        eprintln!("[config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY");
+        eprintln!(
+            "[config] TRADING_MODE=testnet -> GATEIO_TESTNET_API_KEY / GATEIO_TESTNET_SECRET_KEY"
+        );
     } else {
         cfg.gateio_api_key = std::env::var("GATEIO_API_KEY")
             .ok()
@@ -378,7 +405,10 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             .or_else(|_| std::env::var("GATEIO_API_SECRET"))
             .ok()
             .map(|s| s.trim().to_string());
-        eprintln!("[config] TRADING_MODE={} -> GATEIO_API_KEY / GATEIO_SECRET_KEY", trading_mode);
+        eprintln!(
+            "[config] TRADING_MODE={} -> GATEIO_API_KEY / GATEIO_SECRET_KEY",
+            trading_mode
+        );
     }
 
     // Propagate API keys into the exchange config
@@ -390,10 +420,17 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             let ak = ex.api_key.as_deref().unwrap_or("");
             let sk = ex.secret_key.as_deref().unwrap_or("");
             if ak.is_empty() || sk.is_empty() {
-                eprintln!("[config] WARNING: Gate.io API key or secret is empty — signal-only mode");
+                eprintln!(
+                    "[config] WARNING: Gate.io API key or secret is empty — signal-only mode"
+                );
             } else {
-                eprintln!("[config] Gate.io credentials loaded: key={}...{} ({}chars), secret=***{}chars",
-                    &ak[..ak.len().min(4)], &ak[ak.len().saturating_sub(4)..], ak.len(), sk.len());
+                eprintln!(
+                    "[config] Gate.io credentials loaded: key={}...{} ({}chars), secret=***{}chars",
+                    &ak[..ak.len().min(4)],
+                    &ak[ak.len().saturating_sub(4)..],
+                    ak.len(),
+                    sk.len()
+                );
             }
         }
     }
@@ -422,7 +459,8 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
 
     // ── FIX 10: Trading pairs override (TRADING_PAIRS env var) ──
     if let Ok(pairs_str) = std::env::var("TRADING_PAIRS") {
-        let pairs: Vec<String> = pairs_str.split(',')
+        let pairs: Vec<String> = pairs_str
+            .split(',')
             .map(|s| {
                 // Convert slashes to underscores: BTC/USDT -> BTC_USDT
                 s.trim().replace('/', "_").to_uppercase()
@@ -480,25 +518,29 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
     if use_multi {
         // Binance credentials
         cfg.multi_exchange.binance_api_key = std::env::var("BINANCE_API_KEY")
-            .ok().map(|s| s.trim().to_string());
+            .ok()
+            .map(|s| s.trim().to_string());
         cfg.multi_exchange.binance_secret_key = std::env::var("BINANCE_SECRET_KEY")
-            .ok().map(|s| s.trim().to_string());
+            .ok()
+            .map(|s| s.trim().to_string());
         cfg.multi_exchange.binance_testnet = std::env::var("BINANCE_TESTNET")
             .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false);
 
         // Bybit credentials
         cfg.multi_exchange.bybit_api_key = std::env::var("BYBIT_API_KEY")
-            .ok().map(|s| s.trim().to_string());
+            .ok()
+            .map(|s| s.trim().to_string());
         cfg.multi_exchange.bybit_secret_key = std::env::var("BYBIT_SECRET_KEY")
-            .ok().map(|s| s.trim().to_string());
+            .ok()
+            .map(|s| s.trim().to_string());
         cfg.multi_exchange.bybit_testnet = std::env::var("BYBIT_TESTNET")
             .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false);
 
         // Override max open positions to 5 when multi-exchange is on
         cfg.risk.max_open_positions = cfg.multi_exchange.max_open_positions as usize;
-        
+
         // SOR configuration
         if let Ok(min_split) = std::env::var("SOR_MIN_SPLIT_SIZE_USDT") {
             if let Ok(val) = min_split.parse::<f64>() {
@@ -524,7 +566,8 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
         }
         if let Ok(min_apr) = std::env::var("FUNDING_ARB_MIN_APR") {
             if let Ok(val) = min_apr.parse::<f64>() {
-                cfg.multi_exchange.funding_arb.min_annualized_apr = val / 100.0; // Convert percentage
+                cfg.multi_exchange.funding_arb.min_annualized_apr = val / 100.0;
+                // Convert percentage
             }
         }
 
@@ -597,24 +640,35 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             }
         }
         if cfg.multi_exchange.spot_futures.enabled {
-            eprintln!("[config] SPOT_FUTURES_ENABLED=true: leverage={}x, min_apr={}%, max_hold={}h",
+            eprintln!(
+                "[config] SPOT_FUTURES_ENABLED=true: leverage={}x, min_apr={}%, max_hold={}h",
                 cfg.multi_exchange.spot_futures.short_leverage,
                 cfg.multi_exchange.spot_futures.min_apr_pct,
-                cfg.multi_exchange.spot_futures.max_hold_hours);
+                cfg.multi_exchange.spot_futures.max_hold_hours
+            );
         }
 
-        eprintln!("[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}", cfg.risk.max_open_positions);
+        eprintln!(
+            "[config] USE_MULTI_EXCHANGE=on -> max_open_positions={}",
+            cfg.risk.max_open_positions
+        );
 
         // BUG 3 FIX: Validate Binance API keys and warn clearly if missing/invalid.
         // Previously the bot silently dropped Binance from the gateway pool when keys
         // were missing, causing the margin monitor to never query Binance, which in turn
         // contributed to the "Insufficient Margin: 0.0%" error (BUG 2).
         let binance_key = cfg.multi_exchange.binance_api_key.as_deref().unwrap_or("");
-        let binance_secret = cfg.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+        let binance_secret = cfg
+            .multi_exchange
+            .binance_secret_key
+            .as_deref()
+            .unwrap_or("");
         let binance_key_valid = is_valid_key(binance_key) && is_valid_key(binance_secret);
         if !binance_key_valid {
             eprintln!("[config] WARNING: Binance API keys are MISSING or INVALID!");
-            eprintln!("[config]   -> Set BINANCE_API_KEY and BINANCE_SECRET_KEY environment variables");
+            eprintln!(
+                "[config]   -> Set BINANCE_API_KEY and BINANCE_SECRET_KEY environment variables"
+            );
             eprintln!("[config]   -> Or add them to your config.toml [multi_exchange] section");
             eprintln!("[config]   -> Binance will run in SIGNAL-ONLY mode (no margin monitoring, no execution)");
             eprintln!("[config]   -> This may cause funding arb to reject with 'Insufficient Margin: 0.0%%'");
@@ -630,16 +684,28 @@ fn apply_env_overrides(cfg: &mut EngineConfig) {
             eprintln!("[config]   -> Bybit will run in SIGNAL-ONLY mode (no margin monitoring, no execution)");
         }
 
-        eprintln!("[config] Binance: testnet={}, endpoint={}, has_key={}, key_valid={}",
+        eprintln!(
+            "[config] Binance: testnet={}, endpoint={}, has_key={}, key_valid={}",
             cfg.multi_exchange.binance_testnet,
-            if cfg.multi_exchange.binance_testnet { "https://testnet.binancefuture.com" } else { "https://fapi.binance.com" },
+            if cfg.multi_exchange.binance_testnet {
+                "https://testnet.binancefuture.com"
+            } else {
+                "https://fapi.binance.com"
+            },
             cfg.multi_exchange.binance_api_key.is_some(),
-            binance_key_valid);
-        eprintln!("[config] Bybit: testnet={}, endpoint={}, has_key={}, key_valid={}",
+            binance_key_valid
+        );
+        eprintln!(
+            "[config] Bybit: testnet={}, endpoint={}, has_key={}, key_valid={}",
             cfg.multi_exchange.bybit_testnet,
-            if cfg.multi_exchange.bybit_testnet { "https://api-demo.bybit.com" } else { "https://api.bybit.com" },
+            if cfg.multi_exchange.bybit_testnet {
+                "https://api-demo.bybit.com"
+            } else {
+                "https://api.bybit.com"
+            },
             cfg.multi_exchange.bybit_api_key.is_some(),
-            bybit_key_valid);
+            bybit_key_valid
+        );
     } else {
         eprintln!("[config] USE_MULTI_EXCHANGE=off -> single-exchange mode (Gate.io only)");
     }
@@ -711,7 +777,7 @@ fn is_valid_key(k: &str) -> bool {
         && k != "PLACEHOLDER"
         && k != "placeholder"
         && k != "xxx"
-        && k.len() >= 8  // Gate.io API keys are at least 8 characters
+        && k.len() >= 8 // Gate.io API keys are at least 8 characters
 }
 
 /// Build a live execution gateway for an exchange.
@@ -732,7 +798,10 @@ fn build_gateway(cfg: &ExchangeConfig) -> Option<Arc<dyn ExecutionGateway + Send
             )))
         }
         other => {
-            warn!("{}: no execution gateway implementation — signal-only mode", other);
+            warn!(
+                "{}: no execution gateway implementation — signal-only mode",
+                other
+            );
             None
         }
     }
@@ -745,25 +814,25 @@ mod ws_parser;
 
 // Institutional Upgrade modules — pre-trade risk, slot limiting, native exits,
 // deterministic event sourcing, and dust-tracking for fractional contracts.
-mod pre_trade_risk;
-mod position_slot_manager;
-mod exit_evaluator;
-mod event_sequencer;
-mod dust_tracker;
-mod trade_flow_analyzer;
 mod correlation_limiter;
-mod telegram_alert;
+mod cross_asset_correlation;
 mod cumulative_delta;
-mod volume_profile;
-mod liquidation_detector;
-mod trend_strength;
+mod dust_tracker;
+mod event_sequencer;
 mod execution_analytics;
-mod realized_vol; // Task 16: Phase 2 Feature 9
-mod wyckoff_detector; // Phase 3 Feature 11
+mod exit_evaluator;
 mod fibonacci_detector; // Phase 3 Feature 12
 mod ichimoku_cloud; // Phase 3 Feature 13
+mod liquidation_detector;
 mod market_maker_inventory; // Phase 3 Feature 14
-mod cross_asset_correlation; // Phase 3 Feature 15
+mod position_slot_manager;
+mod pre_trade_risk;
+mod realized_vol; // Task 16: Phase 2 Feature 9
+mod telegram_alert;
+mod trade_flow_analyzer;
+mod trend_strength;
+mod volume_profile;
+mod wyckoff_detector; // Phase 3 Feature 11 // Phase 3 Feature 15
 
 // Directive 1: Rust-native position lifecycle (replaces Python TradeTracker)
 mod position_lifecycle;
@@ -778,25 +847,25 @@ mod dashboard_server;
 // Phase 2: Event-sourced order state machine for institutional-grade reconciliation
 mod order_state_machine;
 // Phase 4: SHM signal queue for Alpha Oracle architecture
+mod funding_rate; // Upgrade 1: Funding Rate Arbitrage
+mod gamma_shm;
 mod signal_queue;
-mod funding_rate;    // Upgrade 1: Funding Rate Arbitrage
-#[allow(dead_code)]  // TWAP engine fully implemented, wiring pending
-mod twap_executor;   // Upgrade 3: TWAP/Iceberg Order Execution
-mod gamma_shm;       // Phase 2 Feature 4: Options-Derived Gamma Exposure
+#[allow(dead_code)] // TWAP engine fully implemented, wiring pending
+mod twap_executor; // Upgrade 3: TWAP/Iceberg Order Execution // Phase 2 Feature 4: Options-Derived Gamma Exposure
 
 // ── Institutional Features (from update.txt) ──
-mod hw_timestamp;    // Feature 1: Hardware Timestamp Support
-mod tick_store;      // Feature 2: Tick Database with Replay
-mod var_engine;      // Feature 3: Real-Time VaR Engine
-mod options_greeks;  // Feature 4: Options Greeks (Black-Scholes)
+mod alert_manager;
 mod arbitrage_engine; // Feature 5: Multi-Exchange Arbitrage
-mod fee_optimizer;   // Feature 6: Maker Rebate Optimization
-mod alert_manager;   // Feature 8: Enhanced Monitoring & Alerting
+mod fee_optimizer; // Feature 6: Maker Rebate Optimization
+mod hw_timestamp; // Feature 1: Hardware Timestamp Support
+mod options_greeks; // Feature 4: Options Greeks (Black-Scholes)
+mod tick_store; // Feature 2: Tick Database with Replay
+mod var_engine; // Feature 3: Real-Time VaR Engine // Feature 8: Enhanced Monitoring & Alerting
 
 // ── Comprehensive Upgrade: New modules ──
-mod size_normalizer;    // BUG 3: USDT-to-contracts conversion
-mod funding_timing;     // FEAT 1: Funding rate timestamp-aware entry/exit
-mod ws_fill_receiver;   // FEAT 4: Binance & Bybit WebSocket fill updates
+mod funding_timing; // FEAT 1: Funding rate timestamp-aware entry/exit
+mod size_normalizer; // BUG 3: USDT-to-contracts conversion
+mod ws_fill_receiver; // FEAT 4: Binance & Bybit WebSocket fill updates
 
 // ---------------------------------------------------------------------------
 // Thread Loops — Real Implementations
@@ -823,7 +892,8 @@ fn now_secs() -> u64 {
 /// Parse a numeric value from a JSON field (handles both Number and String).
 #[inline]
 fn json_to_f64(v: &serde_json::Value) -> Option<f64> {
-    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
 }
 
 /// WS ingestion loop for Gate.io. Runs on a dedicated core.
@@ -853,7 +923,16 @@ fn ws_ingestion_loop_gateio(
         loop {
             info!("[ws-gateio] Connecting to {}", config.ws_url);
 
-            match ws_connect_and_ingest_gateio(ring, trades_ring, &config, &registry, &mut drop_count, &mut msg_count).await {
+            match ws_connect_and_ingest_gateio(
+                ring,
+                trades_ring,
+                &config,
+                &registry,
+                &mut drop_count,
+                &mut msg_count,
+            )
+            .await
+            {
                 Ok(()) => {
                     info!("[ws-gateio] Connection closed normally, reconnecting in 1s");
                     backoff_secs = 1;
@@ -861,8 +940,10 @@ fn ws_ingestion_loop_gateio(
                 Err(e) => {
                     let jitter = (backoff_secs as f64 * 0.2) as u64;
                     let sleep_secs = backoff_secs.saturating_add(jitter);
-                    warn!("[ws-gateio] Error: {}. Reconnecting in {}s (drops={}, msgs={})",
-                        e, sleep_secs, drop_count, msg_count);
+                    warn!(
+                        "[ws-gateio] Error: {}. Reconnecting in {}s (drops={}, msgs={})",
+                        e, sleep_secs, drop_count, msg_count
+                    );
                     backoff_secs = (backoff_secs * 2).min(60);
                 }
             }
@@ -891,13 +972,13 @@ async fn ws_connect_and_ingest_gateio(
 
     let (ws_stream, _) = connect_async(config.ws_url.as_str()).await?;
     let (write, mut read) = ws_stream.split();
-
-    // Wrap write in Arc<Mutex> for shared access between read loop and ping timer
     let write = Arc::new(tokio::sync::Mutex::new(write));
 
-    info!("[ws-gateio] Connected, subscribing to {} symbols", config.symbols.len());
+    info!(
+        "[ws-gateio] Connected, subscribing to {} symbols",
+        config.symbols.len()
+    );
 
-    // Subscribe to orderbook and trade channels for each symbol
     {
         let mut w = write.lock().await;
         for symbol in &config.symbols {
@@ -916,14 +997,20 @@ async fn ws_connect_and_ingest_gateio(
                 "payload": [symbol]
             });
             w.send(Message::Text(sub_trades.to_string())).await?;
+
+            let sub_ticker = serde_json::json!({
+                "time": now_secs(),
+                "channel": "futures.tickers",
+                "event": "subscribe",
+                "payload": [symbol]
+            });
+            w.send(Message::Text(sub_ticker.to_string())).await?;
         }
     }
 
-    // Periodic ping to keep connection alive (Gate.io drops idle connections after ~30s)
     let mut ping_interval = tokio::time::interval(Duration::from_secs(15));
-    ping_interval.tick().await; // consume the immediate first tick
+    ping_interval.tick().await;
 
-    // Process incoming messages with concurrent ping keepalive
     loop {
         tokio::select! {
             msg = read.next() => {
@@ -934,7 +1021,6 @@ async fn ws_connect_and_ingest_gateio(
                                 let recv_ns = now_ns();
                                 *msg_count += 1;
 
-                                // Parse JSON — skip subscription confirmations
                                 let parsed: serde_json::Value = match serde_json::from_str(&text) {
                                     Ok(v) => v,
                                     Err(_) => continue,
@@ -943,18 +1029,24 @@ async fn ws_connect_and_ingest_gateio(
                                 let channel = parsed.get("channel").and_then(|v| v.as_str()).unwrap_or("");
                                 let event = parsed.get("event").and_then(|v| v.as_str()).unwrap_or("");
 
-                                if event == "subscribe" || event == "unsubscribe" {
+                                if event == "subscribe" || event == "unsubscribe" || event == "pong" {
+                                    debug!("[ws-gateio] Confirmed: channel={}", channel);
+                                    continue;
+                                }
+                                if event == "error" {
+                                    warn!("[ws-gateio] WS error msg: {}", &text[..text.len().min(300)]);
                                     continue;
                                 }
 
                                 let result = match parsed.get("result") {
-                                    Some(r) => r,
-                                    None => continue,
+                                    Some(r) if !r.is_null() => r,
+                                    _ => continue,
                                 };
 
                                 match channel {
                                     "futures.order_book" => {
-                                        // Parse orderbook update/snapshot
+                                        let is_snapshot = event == "all";
+
                                         let contract = result.get("contract")
                                             .or_else(|| result.get("s"))
                                             .and_then(|v| v.as_str())
@@ -962,90 +1054,200 @@ async fn ws_connect_and_ingest_gateio(
                                         let sym_id = registry.get_id(contract);
                                         if sym_id == 0 { continue; }
 
-                                        // Parse bids
+                                        if is_snapshot {
+                                            let sentinel = RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::BID,
+                                                update_type: spsc::update_type::SNAPSHOT_START,
+                                                _pad: [0; 4],
+                                                price: 0,
+                                                qty: 0,
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            };
+                                            let _ = ring.try_push(sentinel);
+                                        }
+
                                         if let Some(bids) = result.get("bids").and_then(|v| v.as_array()) {
                                             for level in bids {
-                                                if let Some(arr) = level.as_array() {
-                                                    if arr.len() >= 2 {
-                                                        let price = json_to_f64(&arr[0]).unwrap_or(0.0);
-                                                        let qty = json_to_f64(&arr[1]).unwrap_or(0.0);
-                                                        let update = RawBookUpdate {
-                                                            symbol_id: sym_id,
-                                                            side: spsc::side::BID,
-                                                            update_type: spsc::update_type::DELTA,
-                                                            _pad: [0; 4],
-                                                            price: FixedPrice::from_f64(price).raw(),
-                                                            qty: fixed_point::FixedQty::from_f64(qty).raw(),
-                                                            sequence: *msg_count,
-                                                            recv_ns,
-                                                            snapshot_count: 0,
-                                                            _pad2: [0; 4],
-                                                        };
-                                                        if !ring.try_push(update) {
-                                                            *drop_count += 1;
-                                                        }
-                                                    }
-                                                }
+                                                let price = level.get("p")
+                                                    .and_then(|v| v.as_str()
+                                                        .and_then(|s| s.parse::<f64>().ok())
+                                                        .or_else(|| v.as_f64()))
+                                                    .unwrap_or(0.0);
+                                                let qty = level.get("s")
+                                                    .and_then(|v| v.as_f64()
+                                                        .or_else(|| v.as_str()
+                                                            .and_then(|s| s.parse::<f64>().ok())))
+                                                    .unwrap_or(0.0);
+                                                if price <= 0.0 { continue; }
+                                                let update = RawBookUpdate {
+                                                    symbol_id: sym_id,
+                                                    side: spsc::side::BID,
+                                                    update_type: spsc::update_type::DELTA,
+                                                    _pad: [0; 4],
+                                                    price: FixedPrice::from_f64(price).raw(),
+                                                    qty: fixed_point::FixedQty::from_f64(qty).raw(),
+                                                    sequence: *msg_count,
+                                                    recv_ns,
+                                                    snapshot_count: 0,
+                                                    _pad2: [0; 4],
+                                                };
+                                                if !ring.try_push(update) { *drop_count += 1; }
                                             }
                                         }
 
-                                        // Parse asks
                                         if let Some(asks) = result.get("asks").and_then(|v| v.as_array()) {
                                             for level in asks {
-                                                if let Some(arr) = level.as_array() {
-                                                    if arr.len() >= 2 {
-                                                        let price = json_to_f64(&arr[0]).unwrap_or(0.0);
-                                                        let qty = json_to_f64(&arr[1]).unwrap_or(0.0);
-                                                        let update = RawBookUpdate {
-                                                            symbol_id: sym_id,
-                                                            side: spsc::side::ASK,
-                                                            update_type: spsc::update_type::DELTA,
-                                                            _pad: [0; 4],
-                                                            price: FixedPrice::from_f64(price).raw(),
-                                                            qty: fixed_point::FixedQty::from_f64(qty).raw(),
-                                                            sequence: *msg_count,
-                                                            recv_ns,
-                                                            snapshot_count: 0,
-                                                            _pad2: [0; 4],
-                                                        };
-                                                        if !ring.try_push(update) {
-                                                            *drop_count += 1;
-                                                        }
-                                                    }
-                                                }
+                                                let price = level.get("p")
+                                                    .and_then(|v| v.as_str()
+                                                        .and_then(|s| s.parse::<f64>().ok())
+                                                        .or_else(|| v.as_f64()))
+                                                    .unwrap_or(0.0);
+                                                let qty = level.get("s")
+                                                    .and_then(|v| v.as_f64()
+                                                        .or_else(|| v.as_str()
+                                                            .and_then(|s| s.parse::<f64>().ok())))
+                                                    .unwrap_or(0.0);
+                                                if price <= 0.0 { continue; }
+                                                let update = RawBookUpdate {
+                                                    symbol_id: sym_id,
+                                                    side: spsc::side::ASK,
+                                                    update_type: spsc::update_type::DELTA,
+                                                    _pad: [0; 4],
+                                                    price: FixedPrice::from_f64(price).raw(),
+                                                    qty: fixed_point::FixedQty::from_f64(qty).raw(),
+                                                    sequence: *msg_count,
+                                                    recv_ns,
+                                                    snapshot_count: 0,
+                                                    _pad2: [0; 4],
+                                                };
+                                                if !ring.try_push(update) { *drop_count += 1; }
                                             }
+                                        }
+
+                                        if is_snapshot {
+                                            let sentinel = RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::ASK,
+                                                update_type: spsc::update_type::SNAPSHOT_END,
+                                                _pad: [0; 4],
+                                                price: 0,
+                                                qty: 0,
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            };
+                                            let _ = ring.try_push(sentinel);
+                                            info!("[ws-gateio] Full snapshot received for {}", contract);
+                                        }
+                                    }
+                                    "futures.tickers" => {
+                                        let contract = result.get("contract")
+                                            .and_then(|v| v.as_str()).unwrap_or("");
+                                        let sym_id = registry.get_id(contract);
+                                        if sym_id == 0 { continue; }
+
+                                        let parse_price = |field: &str| -> f64 {
+                                            result.get(field)
+                                                .and_then(|v| v.as_str()
+                                                    .and_then(|s| s.parse::<f64>().ok())
+                                                    .or_else(|| v.as_f64()))
+                                                .unwrap_or(0.0)
+                                        };
+
+                                        let bid1 = parse_price("bid1").max(parse_price("highest_bid"));
+                                        let ask1 = parse_price("ask1").max(parse_price("lowest_ask"));
+                                        let last = parse_price("last");
+
+                                        if bid1 > 0.0 {
+                                            let _ = ring.try_push(RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::BID,
+                                                update_type: spsc::update_type::DELTA,
+                                                _pad: [0; 4],
+                                                price: FixedPrice::from_f64(bid1).raw(),
+                                                qty: fixed_point::FixedQty::from_f64(1.0).raw(),
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            });
+                                        }
+                                        if ask1 > 0.0 {
+                                            let _ = ring.try_push(RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::ASK,
+                                                update_type: spsc::update_type::DELTA,
+                                                _pad: [0; 4],
+                                                price: FixedPrice::from_f64(ask1).raw(),
+                                                qty: fixed_point::FixedQty::from_f64(1.0).raw(),
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            });
+                                        }
+                                        if bid1 == 0.0 && ask1 == 0.0 && last > 0.0 {
+                                            let _ = ring.try_push(RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::BID,
+                                                update_type: spsc::update_type::DELTA,
+                                                _pad: [0; 4],
+                                                price: FixedPrice::from_f64(last * 0.9999).raw(),
+                                                qty: fixed_point::FixedQty::from_f64(1.0).raw(),
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            });
+                                            let _ = ring.try_push(RawBookUpdate {
+                                                symbol_id: sym_id,
+                                                side: spsc::side::ASK,
+                                                update_type: spsc::update_type::DELTA,
+                                                _pad: [0; 4],
+                                                price: FixedPrice::from_f64(last * 1.0001).raw(),
+                                                qty: fixed_point::FixedQty::from_f64(1.0).raw(),
+                                                sequence: *msg_count,
+                                                recv_ns,
+                                                snapshot_count: 0,
+                                                _pad2: [0; 4],
+                                            });
                                         }
                                     }
                                     "futures.trades" => {
-                                        // Parse trade events (for VPIN / adverse selection)
-                                        if let Some(trades) = result.as_array() {
+                                        let trades_arr = if result.is_array() {
+                                            result.as_array()
+                                        } else {
+                                            result.get("data").and_then(|v| v.as_array())
+                                        };
+                                        if let Some(trades) = trades_arr {
                                             for trade in trades {
                                                 let price = trade.get("price")
-                                                    .and_then(json_to_f64)
+                                                    .and_then(|v| v.as_str()
+                                                        .and_then(|s| s.parse::<f64>().ok())
+                                                        .or_else(|| v.as_f64()))
                                                     .unwrap_or(0.0);
                                                 let size = trade.get("size")
-                                                    .and_then(|v| v.as_i64())
-                                                    .unwrap_or(0);
+                                                    .and_then(|v| v.as_i64()).unwrap_or(0);
                                                 let contract = trade.get("contract")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
+                                                    .and_then(|v| v.as_str()).unwrap_or("");
                                                 let sym_id = registry.get_id(contract);
-                                                if sym_id == 0 || price == 0.0 { continue; }
-
-                                                // Route trade events to dedicated trades ring for VPIN
-                                                let side = if size > 0 { 0u8 } else { 1u8 }; // 0=buy, 1=sell
-                                                let trade_event = spsc::TradeEvent {
+                                                if sym_id == 0 || price <= 0.0 { continue; }
+                                                let side = if size >= 0 { 0u8 } else { 1u8 };
+                                                let event = spsc::TradeEvent {
                                                     symbol_id: sym_id,
                                                     side,
                                                     _pad: [0; 5],
                                                     price: FixedPrice::from_f64(price).raw(),
-                                                    qty: fixed_point::FixedQty::from_f64(size.abs() as f64).raw(),
+                                                    qty: fixed_point::FixedQty::from_f64(size.unsigned_abs() as f64).raw(),
                                                     recv_ns,
                                                     sequence: *msg_count,
                                                 };
-                                                if !trades_ring.try_push(trade_event) {
-                                                    *drop_count += 1;
-                                                }
+                                                if !trades_ring.try_push(event) { *drop_count += 1; }
                                             }
                                         }
                                     }
@@ -1068,22 +1270,16 @@ async fn ws_connect_and_ingest_gateio(
                 }
             }
             _ = ping_interval.tick() => {
-                // Send Gate.io futures ping to keep connection alive
-                let ping_msg = serde_json::json!({
-                    "time": now_secs(),
-                    "channel": "futures.ping"
-                });
+                let ping_msg = serde_json::json!({"time": now_secs(), "channel": "futures.ping"});
                 let mut w = write.lock().await;
                 if let Err(e) = w.send(Message::Text(ping_msg.to_string())).await {
-                    warn!("[ws-gateio] Ping send failed: {}", e);
+                    warn!("[ws-gateio] Ping failed: {}", e);
                     return Err(Box::new(e));
                 }
             }
         }
     }
 }
-
-
 
 /// Orderbook builder loop. Reads RawBookUpdate from WS ingestion rings,
 /// applies them to FlatOrderBooks, and pushes BookSnapshots to the strategy ring.
@@ -1105,20 +1301,30 @@ fn orderbook_builder_loop(
             let sym_idx = update.symbol_id as usize;
             if sym_idx > 0 && sym_idx <= books.len() {
                 let book = &mut books[sym_idx - 1];
-                let price = FixedPrice(update.price);
-                let qty = fixed_point::FixedQty(update.qty);
-                let is_bid = update.side == spsc::side::BID;
-                book.apply_delta_tracked(price, qty, is_bid);
-                book.set_timestamp_ns(update.recv_ns);
-                
-                // Update shared price
+
+                match update.update_type {
+                    spsc::update_type::SNAPSHOT_START => {
+                        book.clear();
+                        continue;
+                    }
+                    spsc::update_type::SNAPSHOT_END => {
+                        book.set_timestamp_ns(update.recv_ns);
+                    }
+                    _ => {
+                        let price = FixedPrice(update.price);
+                        let qty = fixed_point::FixedQty(update.qty);
+                        let is_bid = update.side == spsc::side::BID;
+                        book.apply_delta_tracked(price, qty, is_bid);
+                        book.set_timestamp_ns(update.recv_ns);
+                    }
+                }
+
                 let mid = book.mid_price().to_f64();
-                if sym_idx - 1 < shared_prices.len() {
+                if sym_idx - 1 < shared_prices.len() && mid > 0.0 {
                     shared_prices[sym_idx - 1].store(mid.to_bits(), Ordering::Relaxed);
                 }
-                
-                // Push snapshot to strategy
-                if let (Some((bid, _bid_qty)), Some((ask, _ask_qty))) = (book.best_bid(), book.best_ask()) {
+
+                if let (Some((bid, _)), Some((ask, _))) = (book.best_bid(), book.best_ask()) {
                     let snapshot = BookSnapshot {
                         symbol_id: update.symbol_id,
                         bid_levels: 10,
@@ -1129,41 +1335,31 @@ fn orderbook_builder_loop(
                         mid_price: book.mid_price().raw(),
                         spread_bps: book.spread_bps() as i32,
                         imbalance_bps: (book.imbalance(10) * 10000.0) as i32,
-                        bid_depth_usdt: (book.bid_depth_usdt(10) * FixedPrice::PRECISION as f64) as i64,
-                        ask_depth_usdt: (book.ask_depth_usdt(10) * FixedPrice::PRECISION as f64) as i64,
+                        bid_depth_usdt: (book.bid_depth_usdt(10) * FixedPrice::PRECISION as f64)
+                            as i64,
+                        ask_depth_usdt: (book.ask_depth_usdt(10) * FixedPrice::PRECISION as f64)
+                            as i64,
                         sequence: book.sequence(),
                         timestamp_ns: update.recv_ns,
                     };
                     let _ = strategy_ring.try_push(snapshot);
-                    
-                    // TASK 8: Update GlobalBookRegistry with Gate.io's book data
-                    // This ensures the global book has a complete view of liquidity
+
                     if let Some(ref gbr) = global_book_registry {
-                        // Extract top 20 levels from FlatOrderBook for complete liquidity picture
                         let top_bids = book.get_bids(20);
                         let top_asks = book.get_asks(20);
-                        
-                        let bid_levels: Vec<(i64, i64)> = top_bids.iter()
-                            .map(|(p, q)| (p.raw(), q.raw()))
-                            .collect();
-                        let ask_levels: Vec<(i64, i64)> = top_asks.iter()
-                            .map(|(p, q)| (p.raw(), q.raw()))
-                            .collect();
-                        
-                        let gateio_snapshot = multi_exchange::global_book::ExchangeBookSnapshot {
+                        let gateio_snap = multi_exchange::global_book::ExchangeBookSnapshot {
                             exchange: multi_exchange::ExchangeId::GateIo,
                             symbol_id: update.symbol_id,
                             best_bid_fp: bid.raw(),
                             best_ask_fp: ask.raw(),
-                            bid_levels,
-                            ask_levels,
+                            bid_levels: top_bids.iter().map(|(p, q)| (p.raw(), q.raw())).collect(),
+                            ask_levels: top_asks.iter().map(|(p, q)| (p.raw(), q.raw())).collect(),
                             sequence: book.sequence(),
                             timestamp_ns: update.recv_ns,
                         };
-                        
                         let sym_name = registry.get_name(update.symbol_id);
                         let gbook = gbr.get_or_create_named(update.symbol_id, sym_name);
-                        gbook.write().update_exchange_snapshot(gateio_snapshot);
+                        gbook.write().update_exchange_snapshot(gateio_snap);
                     }
                 }
             }
@@ -1228,8 +1424,8 @@ fn strategy_evaluator_loop(
     let mut vol_trailing = VolatilityTrailingStop::default();
     let mut adverse_guard = AdverseSelectionGuard::default();
     // FIX 9: Initialize VPIN calculator to replace the always-zero stub
-    let mut vpin_calculator = microstructure::EnhancedVpin::new(100_000.0, 50); // 100k USDT bucket size, 50 buckets
-    // Phase 2 Feature 1: CVD tracker initialization
+    let mut vpin_calculator = microstructure::EnhancedVpin::new(5_000.0, 50); // 5k USDT bucket size, 50 buckets for faster testnet warmup
+                                                                              // Phase 2 Feature 1: CVD tracker initialization
     let mut cvd_tracker = CumulativeDeltaTracker::new();
     info!("[strategy] 📊 CVD tracker initialized (5m/15m/1h windows)");
     // Phase 2 Feature 2: Volume Profile initialization
@@ -1246,7 +1442,7 @@ fn strategy_evaluator_loop(
     } else {
         info!("[strategy] 📊 Gamma exposure reader not available (SHM file missing, will run without gamma data)");
     }
-    
+
     // Phase 2 Feature 7: Execution Analytics initialization
     // let exec_analytics = exec_analytics.lock();
     info!("[strategy] 📊 Execution Analytics initialized (slippage + shortfall + impact tracking)");
@@ -1255,29 +1451,31 @@ fn strategy_evaluator_loop(
     info!("[strategy] 📈 Trend Strength Index initialized (M1=10%, M5=20%, M15=30%, H1=40%)");
     // Task 17: Phase 2 Feature 9 - Realized Volatility Calculator initialization
     let mut realized_vol_calc = RealizedVolatilityCalculator::new(300); // 5-minute window (300 seconds)
-    info!("[strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)");
+    info!(
+        "[strategy] 📊 Realized Volatility Calculator initialized (5-minute Parkinson estimator)"
+    );
     // Task 25: Phase 2 Feature 10 - Trade Flow Analyzer initialization
     let mut trade_flow_analyzer = trade_flow_analyzer::TradeFlowAnalyzer::new(100, 10.0);
     info!("[strategy] 📊 Trade Flow Analyzer initialized (toxicity scoring: VPIN + CVD + large trades)");
-    
+
     // Phase 3 Feature 11: Wyckoff Accumulation/Distribution Detector initialization
     let mut wyckoff_detector = wyckoff_detector::WyckoffDetector::new(100);
     info!("[strategy] 📊 Wyckoff detector initialized (100-period window)");
-    
+
     // Phase 3 Feature 12: Fibonacci Retracement Auto-Detection initialization
     let mut fibonacci_detector = fibonacci_detector::FibonacciDetector::new();
     info!("[strategy] 📊 Fibonacci detector initialized (1h/4h swing detection)");
-    
+
     // Phase 3 Feature 13: Ichimoku Cloud initialization
     let mut ichimoku_cloud = ichimoku_cloud::IchimokuCloud::new();
     info!("[strategy] 📊 Ichimoku Cloud initialized (9/26/52 periods)");
     // FIX 2: Track last Ichimoku candle timestamp to avoid duplicate updates
     let mut last_ichimoku_candle_ts: u64 = 0;
-    
+
     // Phase 3 Feature 14: Market Maker Inventory Model initialization
     let mut mm_inventory = market_maker_inventory::MarketMakerInventoryModel::new(1000);
     info!("[strategy] 📊 Market Maker Inventory Model initialized (1000-period window)");
-    
+
     // Phase 3 Feature 15: Cross-Asset Correlation Monitor initialization
     let mut correlation_monitor = cross_asset_correlation::CrossAssetCorrelationMonitor::new(60);
     info!("[strategy] 📊 Cross-Asset Correlation Monitor initialized (60-period window)");
@@ -1297,16 +1495,14 @@ fn strategy_evaluator_loop(
         .unwrap_or_default();
     let funding_testnet = std::env::var("TRADING_MODE")
         .unwrap_or_default()
-        .to_lowercase() == "testnet";
-    let mut funding_monitor = funding_rate::FundingRateMonitor::new(
-        funding_api_key,
-        funding_secret,
-        funding_testnet,
-    );
+        .to_lowercase()
+        == "testnet";
+    let mut funding_monitor =
+        funding_rate::FundingRateMonitor::new(funding_api_key, funding_secret, funding_testnet);
     // FIX 3: Track funding arb positions for exit logic (symbol_id -> (open_timestamp_ns, entry_price))
     let mut funding_arb_positions: HashMap<u16, (u64, f64)> = HashMap::new();
     info!("[strategy] 🧮 DustTracker initialized (max_dust=5.0)");
-    info!("[strategy] 📊 VPIN calculator initialized (bucket=100k, depth=50)");
+    info!("[strategy] 📊 VPIN calculator initialized (bucket=5k, depth=50)");
     info!("[strategy] 📈 Trailing stop tracking initialized (break-even + partial TP)");
     info!("[strategy] 💰 Funding rate checks every ~1000 book snapshots");
 
@@ -1400,7 +1596,11 @@ fn strategy_evaluator_loop(
                 if let Some(candle_1h) = candle_agg.get_latest_completed(Timeframe::H1) {
                     // Only update if this is a new candle (timestamp changed)
                     if candle_1h.timestamp_ns != last_ichimoku_candle_ts {
-                        ichimoku_cloud.update_candle(candle_1h.high, candle_1h.low, candle_1h.close);
+                        ichimoku_cloud.update_candle(
+                            candle_1h.high,
+                            candle_1h.low,
+                            candle_1h.close,
+                        );
                         last_ichimoku_candle_ts = candle_1h.timestamp_ns;
                         debug!("[strategy] 📊 Ichimoku updated with 1h candle: H={:.2} L={:.2} C={:.2}",
                                candle_1h.high, candle_1h.low, candle_1h.close);
@@ -1412,7 +1612,11 @@ fn strategy_evaluator_loop(
             while let Some(trade) = trades_ring.try_pop() {
                 let price = FixedPrice(trade.price).to_f64();
                 let volume = fixed_point::FixedQty(trade.qty).to_f64();
-                let side = if trade.side == 0 { Some("buy") } else { Some("sell") };
+                let side = if trade.side == 0 {
+                    Some("buy")
+                } else {
+                    Some("sell")
+                };
                 let mid = FixedPrice(snapshot.mid_price).to_f64();
                 let is_buy = trade.side == 0;
                 let volume_usdt = price * volume;
@@ -1423,20 +1627,20 @@ fn strategy_evaluator_loop(
                 strategy.update_candles(trade.recv_ns, price, volume);
                 // Task 26: Feed trade events to TradeFlowAnalyzer
                 trade_flow_analyzer.on_trade(price, volume, trade.side, trade.recv_ns);
-                
+
                 // Phase 3: Update Wyckoff detector with price and volume
                 wyckoff_detector.update(price, volume);
-                
+
                 // Phase 3: Update Fibonacci detector with price history
                 fibonacci_detector.update(trade.recv_ns, price);
-                
+
                 // FIX 2: Update Ichimoku cloud with proper 1h candle data
                 // Only update when a new 1h candle completes (not on every trade)
                 // This is handled separately below after draining the trade ring
-                
+
                 // Phase 3: Update Market Maker Inventory with trade flow
                 mm_inventory.on_trade(volume, is_buy);
-                
+
                 // Phase 3: Update Cross-Asset Correlation with price data
                 correlation_monitor.update_price(symbol_name, trade.recv_ns, price);
             }
@@ -1445,17 +1649,21 @@ fn strategy_evaluator_loop(
             funding_check_counter += 1;
             if funding_check_counter % 1000 == 0 {
                 let mid_price = FixedPrice(snapshot.mid_price).to_f64();
-                
+
                 // Update funding rate monitor with real funding rate from shared storage
-                let rate = funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001);
+                let rate = funding_rates
+                    .read()
+                    .get(symbol_name)
+                    .copied()
+                    .unwrap_or(0.0001);
                 funding_monitor.update_funding_rate(symbol_name, rate);
-                
+
                 // FIX 3: Check existing funding arb positions for exit conditions
                 let mut positions_to_close = Vec::new();
                 for (&sym_id, &(open_ts, entry_price)) in funding_arb_positions.iter() {
                     let time_open_secs = (snapshot.timestamp_ns - open_ts) / 1_000_000_000;
                     let unrealized_loss_pct = ((mid_price - entry_price) / entry_price).abs();
-                    
+
                     // Exit if position open > 8 hours (28800 seconds) OR unrealized loss > 1.5%
                     if time_open_secs > 28800 || unrealized_loss_pct > 0.015 {
                         positions_to_close.push(sym_id);
@@ -1466,10 +1674,12 @@ fn strategy_evaluator_loop(
                         };
                         info!(
                             "[strategy] 💰 Funding arb exit: {} after {:.1}h, loss={:.2}% — {}",
-                            registry.get_name(sym_id), time_open_secs as f64 / 3600.0,
-                            unrealized_loss_pct * 100.0, reason
+                            registry.get_name(sym_id),
+                            time_open_secs as f64 / 3600.0,
+                            unrealized_loss_pct * 100.0,
+                            reason
                         );
-                        
+
                         // Generate market close order
                         let close_cmd = OrderCommand {
                             symbol_id: sym_id,
@@ -1490,20 +1700,23 @@ fn strategy_evaluator_loop(
                             is_close: 1,
                             _pad2: [0; 5],
                         };
-                        
+
                         if exec_ring.try_push(close_cmd) {
-                            info!("[strategy] 💰 Funding arb close order submitted: {}", registry.get_name(sym_id));
+                            info!(
+                                "[strategy] 💰 Funding arb close order submitted: {}",
+                                registry.get_name(sym_id)
+                            );
                         } else {
                             warn!("[strategy] Funding arb close dropped — execution ring full");
                         }
                     }
                 }
-                
+
                 // Remove closed positions from tracking
                 for sym_id in positions_to_close {
                     funding_arb_positions.remove(&sym_id);
                 }
-                
+
                 // Check for arbitrage opportunities (funding rate > 0.01%)
                 {
                     let opportunities = funding_monitor.check_all_opportunities();
@@ -1513,7 +1726,7 @@ fn strategy_evaluator_loop(
                                 "[strategy] 💰 Funding rate arbitrage: {} funding={:.4}% APR={:.2}% — opening SHORT position",
                                 opp.symbol, opp.rate_pct, opp.annualized_pct
                             );
-                            
+
                             // Generate SHORT order to capture funding rate
                             let arb_cmd = OrderCommand {
                                 symbol_id: snapshot.symbol_id,
@@ -1534,27 +1747,31 @@ fn strategy_evaluator_loop(
                                 is_close: 0,
                                 _pad2: [0; 5],
                             };
-                            
+
                             // Pre-trade risk check
                             if let Err(rejection) = pre_trade_risk.check(&arb_cmd) {
                                 warn!("[strategy] Funding arb rejected by risk: {:?}", rejection);
                                 continue;
                             }
-                            
+
                             // Acquire position slot
                             if !position_slots.try_acquire() {
                                 warn!("[strategy] Funding arb skipped — position slots full");
                                 continue;
                             }
-                            
+
                             // Push to execution ring
                             if !exec_ring.try_push(arb_cmd) {
                                 warn!("[strategy] Funding arb dropped — execution ring full");
                                 position_slots.release();
                             } else {
                                 // FIX 3: Track this funding arb position for exit logic
-                                funding_arb_positions.insert(snapshot.symbol_id, (snapshot.timestamp_ns, mid_price));
-                                info!("[strategy] 💰 Funding arb order submitted: {} @ {:.4}", symbol_name, mid_price);
+                                funding_arb_positions
+                                    .insert(snapshot.symbol_id, (snapshot.timestamp_ns, mid_price));
+                                info!(
+                                    "[strategy] 💰 Funding arb order submitted: {} @ {:.4}",
+                                    symbol_name, mid_price
+                                );
                             }
                         }
                     }
@@ -1574,36 +1791,42 @@ fn strategy_evaluator_loop(
                 if mid > 0.0 && total_depth > 0.0 {
                     // Estimate trade volume as a fraction of visible depth per tick
                     let synthetic_vol = total_depth * 0.01; // ~1% of visible depth
-                    let side = if snapshot.imbalance_bps > 0 { Some("buy") } else { Some("sell") };
+                    let side = if snapshot.imbalance_bps > 0 {
+                        Some("buy")
+                    } else {
+                        Some("sell")
+                    };
                     vpin_calculator.on_trade(mid, synthetic_vol, side, mid);
                 }
             }
 
             // Phase 3: Detect Wyckoff phase
             let (wyckoff_phase, _wyckoff_confidence) = wyckoff_detector.detect_phase();
-            
+
             // Phase 3: Get nearest Fibonacci level
             let current_price = FixedPrice(snapshot.mid_price).to_f64();
             let (fib_level_pct, fib_distance_bps, fib_is_approaching) = fibonacci_detector
                 .get_nearest_level(current_price)
                 .unwrap_or((0.0, 9999.0, false));
-            
+
             // Phase 3: Get Ichimoku cloud position
             let ichimoku_position = ichimoku_cloud.get_cloud_position(current_price);
-            
+
             // Phase 3: Get Market Maker inventory pressure
             let mm_inventory_pressure = mm_inventory.get_inventory_pressure();
-            
+
             // Phase 3: Get BTC-ETH correlation
-            let btc_eth_corr = correlation_monitor.get_correlation("BTC_USDT", "ETH_USDT").unwrap_or(0.0);
-            
+            let btc_eth_corr = correlation_monitor
+                .get_correlation("BTC_USDT", "ETH_USDT")
+                .unwrap_or(0.0);
+
             // Build microstructure metrics from the snapshot
             let current_price = FixedPrice(snapshot.mid_price).to_f64();
-            
+
             // Task 8: Calculate CVD divergence signals
             let bearish_divergence = cvd_tracker.detect_bearish_divergence(&recent_highs);
             let bullish_divergence = cvd_tracker.detect_bullish_divergence(&recent_lows);
-            
+
             let metrics = strategy_engine::MicrostructureMetrics {
                 mid_price: current_price,
                 spread_bps: snapshot.spread_bps as f64,
@@ -1615,8 +1838,12 @@ fn strategy_evaluator_loop(
                 cvd_5m: cvd_tracker.get_cvd_5m(),
                 cvd_15m: cvd_tracker.get_cvd_15m(),
                 cvd_1h: cvd_tracker.get_cvd_1h(),
-                gamma_flip_btc: gamma_reader.as_ref().and_then(|r| r.get_gamma_flip_level("BTC")),
-                gamma_flip_eth: gamma_reader.as_ref().and_then(|r| r.get_gamma_flip_level("ETH")),
+                gamma_flip_btc: gamma_reader
+                    .as_ref()
+                    .and_then(|r| r.get_gamma_flip_level("BTC")),
+                gamma_flip_eth: gamma_reader
+                    .as_ref()
+                    .and_then(|r| r.get_gamma_flip_level("ETH")),
                 wyckoff_phase: format!("{:?}", wyckoff_phase),
                 fib_nearest_level: fib_level_pct,
                 ichimoku_cloud_position: format!("{:?}", ichimoku_position),
@@ -1625,18 +1852,27 @@ fn strategy_evaluator_loop(
                 // Task 8: Add new FEATURE 1 fields
                 cvd_divergence_bearish: bearish_divergence,
                 cvd_divergence_bullish: bullish_divergence,
-                funding_rate: funding_rates.read().get(symbol_name).copied().unwrap_or(0.0001),
-                vpoc_distance_pct: volume_profile.get_vpoc().map(|vpoc| ((current_price - vpoc) / vpoc).abs()).unwrap_or(1.0),
+                funding_rate: funding_rates
+                    .read()
+                    .get(symbol_name)
+                    .copied()
+                    .unwrap_or(0.0001),
+                vpoc_distance_pct: volume_profile
+                    .get_vpoc()
+                    .map(|vpoc| ((current_price - vpoc) / vpoc).abs())
+                    .unwrap_or(1.0),
                 realized_vol_regime: format!("{:?}", realized_vol_calc.get_regime()),
-                cascade_active: liq_detector.get_state() == LiquidationCascadeState::Active || liq_detector.get_state() == LiquidationCascadeState::Extreme,
+                cascade_active: liq_detector.get_state() == LiquidationCascadeState::Active
+                    || liq_detector.get_state() == LiquidationCascadeState::Extreme,
             };
 
             // Evaluate strategy
-            
+
             // Task 24: Calculate order flow toxicity score before signal generation
             let cvd_divergence_score = 0.0; // Placeholder - would need actual divergence calculation
-            let toxicity = trade_flow_analyzer.calculate_toxicity_score(metrics.vpin, cvd_divergence_score);
-            
+            let toxicity =
+                trade_flow_analyzer.calculate_toxicity_score(metrics.vpin, cvd_divergence_score);
+
             // TASK 2d FIX: Halt trading if toxicity > 0.85 with info-level logging
             // Raised from 0.7 to 0.85: synthetic VPIN (from depth proxy, not real trades)
             // can produce noisy toxicity values that block trading on testnet.
@@ -1648,12 +1884,12 @@ fn strategy_evaluator_loop(
             // ── Phase 2 Feature 1: CVD Divergence Detection ──
             // Track recent price highs/lows for divergence detection
             // For simplicity, we use a rolling window approach
-            
+
             // Add current price point (simplified - in production would track actual swing highs/lows)
             let current_price = FixedPrice(snapshot.mid_price).to_f64();
             recent_highs.push((snapshot.timestamp_ns, current_price));
             recent_lows.push((snapshot.timestamp_ns, current_price));
-            
+
             // Implement rolling window with max 100 entries
             if recent_highs.len() > 100 {
                 recent_highs.remove(0);
@@ -1661,7 +1897,7 @@ fn strategy_evaluator_loop(
             if recent_lows.len() > 100 {
                 recent_lows.remove(0);
             }
-            
+
             // Check for bearish divergence (price makes new high, CVD makes lower high)
             let bearish_divergence = cvd_tracker.detect_bearish_divergence(&recent_highs);
             // Check for bullish divergence (price makes new low, CVD makes higher low)
@@ -1678,7 +1914,7 @@ fn strategy_evaluator_loop(
             let tick_low = FixedPrice(snapshot.best_bid).to_f64();
             let tick_close = FixedPrice(snapshot.mid_price).to_f64();
             vol_trailing.update_tick(tick_high, tick_low, tick_close, 0.0);
-            
+
             // Task 18: Update realized volatility calculator with tick data
             realized_vol_calc.on_tick(snapshot.timestamp_ns, tick_high, tick_low, tick_close);
 
@@ -1688,10 +1924,8 @@ fn strategy_evaluator_loop(
             if lifecycle_mgr.active_count() > 0 {
                 let mid = FixedPrice(snapshot.mid_price).to_f64();
                 // Clone the keys to avoid borrow conflict
-                let tracked_symbols: Vec<u16> = lifecycle_mgr
-                    .all_positions()
-                    .map(|p| p.symbol_id)
-                    .collect();
+                let tracked_symbols: Vec<u16> =
+                    lifecycle_mgr.all_positions().map(|p| p.symbol_id).collect();
                 for sym_id in tracked_symbols {
                     if let Some(close_action) = lifecycle_mgr.on_tick(sym_id, mid) {
                         // Generate market close order
@@ -1700,7 +1934,10 @@ fn strategy_evaluator_loop(
                             Some(p) if p.is_long => spsc::side::SELL,
                             _ => spsc::side::BUY,
                         };
-                        let pos_size = lifecycle_mgr.get_position(sym_id).map(|p| p.size.abs()).unwrap_or(1);
+                        let pos_size = lifecycle_mgr
+                            .get_position(sym_id)
+                            .map(|p| p.size.abs())
+                            .unwrap_or(1);
                         let exit_cmd = OrderCommand {
                             symbol_id: sym_id,
                             side: exit_side,
@@ -1730,7 +1967,7 @@ fn strategy_evaluator_loop(
                                 close_action.trigger_pnl_pct,
                                 close_action.peak_pnl_pct,
                             );
-                            
+
                             // Task 1: Record fill in ExecutionAnalytics
                             exec_analytics.lock().record_fill(
                                 mid,
@@ -1754,7 +1991,11 @@ fn strategy_evaluator_loop(
                 let exit_close = FixedPrice(snapshot.mid_price).to_f64();
                 let exit_mid = exit_close;
                 let exits = exit_evaluator.evaluate_all(
-                    snapshot.symbol_id, exit_high, exit_low, exit_close, exit_mid,
+                    snapshot.symbol_id,
+                    exit_high,
+                    exit_low,
+                    exit_close,
+                    exit_mid,
                 );
                 for exit_signal in &exits {
                     if exit_signal.urgency >= 2 {
@@ -1764,7 +2005,9 @@ fn strategy_evaluator_loop(
                         } else {
                             spsc::side::SELL
                         };
-                        let pos_size = exit_evaluator.get_position_size(exit_signal.symbol_id).unwrap_or(1);
+                        let pos_size = exit_evaluator
+                            .get_position_size(exit_signal.symbol_id)
+                            .unwrap_or(1);
                         let exit_cmd = OrderCommand {
                             symbol_id: exit_signal.symbol_id,
                             side: exit_side,
@@ -1791,11 +2034,14 @@ fn strategy_evaluator_loop(
                             info!(
                                 "[strategy] 🚨 EXIT fired: sym={} reason={:?} urgency={}",
                                 registry.get_name(exit_signal.symbol_id),
-                                exit_signal.reason, exit_signal.urgency
+                                exit_signal.reason,
+                                exit_signal.urgency
                             );
                         } else {
-                            warn!("[strategy] Exit ring full — critical exit lost for sym={}",
-                                registry.get_name(exit_signal.symbol_id));
+                            warn!(
+                                "[strategy] Exit ring full — critical exit lost for sym={}",
+                                registry.get_name(exit_signal.symbol_id)
+                            );
                         }
                     }
                 }
@@ -1810,11 +2056,16 @@ fn strategy_evaluator_loop(
                             exit_evaluator.update_sl_tp(snapshot.symbol_id, new_sl, 0.0);
                             info!(
                                 "[strategy] 🔒 Break-even SL set for {}: SL moved to {:.4}",
-                                registry.get_name(snapshot.symbol_id), new_sl
+                                registry.get_name(snapshot.symbol_id),
+                                new_sl
                             );
                             // Feature 5: Update exchange-side conditional order via channel
-                            let pos_size = exit_evaluator.get_position_size(snapshot.symbol_id).unwrap_or(0);
-                            let is_long = exit_evaluator.is_position_long(snapshot.symbol_id).unwrap_or(true);
+                            let pos_size = exit_evaluator
+                                .get_position_size(snapshot.symbol_id)
+                                .unwrap_or(0);
+                            let is_long = exit_evaluator
+                                .is_position_long(snapshot.symbol_id)
+                                .unwrap_or(true);
                             let parent_side = if is_long {
                                 execution_gateway::OrderSide::Buy
                             } else {
@@ -1830,19 +2081,28 @@ fn strategy_evaluator_loop(
                                 is_update: true,
                             };
                             if let Err(e) = sl_tp_update_tx.try_send(update_req) {
-                                warn!("[strategy] Failed to send break-even SL update for {}: {}", registry.get_name(snapshot.symbol_id), e);
+                                warn!(
+                                    "[strategy] Failed to send break-even SL update for {}: {}",
+                                    registry.get_name(snapshot.symbol_id),
+                                    e
+                                );
                             }
                         }
                         exit_evaluator::TrailingStopUpdate::TrailStop { new_sl } => {
                             exit_evaluator.update_sl_tp(snapshot.symbol_id, new_sl, 0.0);
                             info!(
                                 "[strategy] 📈 Trailing SL updated for {}: new SL={:.4}",
-                                registry.get_name(snapshot.symbol_id), new_sl
+                                registry.get_name(snapshot.symbol_id),
+                                new_sl
                             );
                             // Feature 5: Update exchange-side conditional order via channel
                             // Gate.io requires canceling the old SL and submitting a new one
-                            let pos_size = exit_evaluator.get_position_size(snapshot.symbol_id).unwrap_or(0);
-                            let is_long = exit_evaluator.is_position_long(snapshot.symbol_id).unwrap_or(true);
+                            let pos_size = exit_evaluator
+                                .get_position_size(snapshot.symbol_id)
+                                .unwrap_or(0);
+                            let is_long = exit_evaluator
+                                .is_position_long(snapshot.symbol_id)
+                                .unwrap_or(true);
                             let parent_side = if is_long {
                                 execution_gateway::OrderSide::Buy
                             } else {
@@ -1858,15 +2118,27 @@ fn strategy_evaluator_loop(
                                 is_update: true,
                             };
                             if let Err(e) = sl_tp_update_tx.try_send(update_req) {
-                                warn!("[strategy] Failed to send trailing SL update for {}: {}", registry.get_name(snapshot.symbol_id), e);
+                                warn!(
+                                    "[strategy] Failed to send trailing SL update for {}: {}",
+                                    registry.get_name(snapshot.symbol_id),
+                                    e
+                                );
                             }
                         }
                         exit_evaluator::TrailingStopUpdate::PartialClose { fraction, reason } => {
                             // Generate a partial close order
-                            if let Some(pos_size) = exit_evaluator.get_position_size(snapshot.symbol_id) {
+                            if let Some(pos_size) =
+                                exit_evaluator.get_position_size(snapshot.symbol_id)
+                            {
                                 let close_size = (pos_size as f64 * fraction).ceil() as i64;
-                                let is_long = exit_evaluator.is_position_long(snapshot.symbol_id).unwrap_or(true);
-                                let exit_side = if is_long { spsc::side::SELL } else { spsc::side::BUY };
+                                let is_long = exit_evaluator
+                                    .is_position_long(snapshot.symbol_id)
+                                    .unwrap_or(true);
+                                let exit_side = if is_long {
+                                    spsc::side::SELL
+                                } else {
+                                    spsc::side::BUY
+                                };
                                 let partial_cmd = OrderCommand {
                                     symbol_id: snapshot.symbol_id,
                                     side: exit_side,
@@ -1923,10 +2195,18 @@ fn strategy_evaluator_loop(
                                     }
                                 } else {
                                     // Fallback to percentage-based if ATR not available
-                                    if *is_long { entry_price * (1.0 - sl_pct) } else { entry_price * (1.0 + sl_pct) }
+                                    if *is_long {
+                                        entry_price * (1.0 - sl_pct)
+                                    } else {
+                                        entry_price * (1.0 + sl_pct)
+                                    }
                                 }
                             } else {
-                                if *is_long { entry_price * (1.0 - sl_pct) } else { entry_price * (1.0 + sl_pct) }
+                                if *is_long {
+                                    entry_price * (1.0 - sl_pct)
+                                } else {
+                                    entry_price * (1.0 + sl_pct)
+                                }
                             }
                         } else {
                             0.0
@@ -1943,10 +2223,18 @@ fn strategy_evaluator_loop(
                                         entry_price - atr * auto_protection_config.atr_tp_multiplier
                                     }
                                 } else {
-                                    if *is_long { entry_price * (1.0 + tp_pct) } else { entry_price * (1.0 - tp_pct) }
+                                    if *is_long {
+                                        entry_price * (1.0 + tp_pct)
+                                    } else {
+                                        entry_price * (1.0 - tp_pct)
+                                    }
                                 }
                             } else {
-                                if *is_long { entry_price * (1.0 + tp_pct) } else { entry_price * (1.0 - tp_pct) }
+                                if *is_long {
+                                    entry_price * (1.0 + tp_pct)
+                                } else {
+                                    entry_price * (1.0 - tp_pct)
+                                }
                             }
                         } else {
                             0.0
@@ -1981,9 +2269,16 @@ fn strategy_evaluator_loop(
                                 is_update: false,
                             };
                             if let Err(e) = sl_tp_update_tx.try_send(update_req) {
-                                warn!("[strategy] Failed to send SL/TP update request for {}: {}", registry.get_name(*sym_id), e);
+                                warn!(
+                                    "[strategy] Failed to send SL/TP update request for {}: {}",
+                                    registry.get_name(*sym_id),
+                                    e
+                                );
                             } else {
-                                info!("[strategy] 📡 Exchange-side SL/TP request sent for {}", registry.get_name(*sym_id));
+                                info!(
+                                    "[strategy] 📡 Exchange-side SL/TP request sent for {}",
+                                    registry.get_name(*sym_id)
+                                );
                             }
                         }
                     }
@@ -1998,7 +2293,7 @@ fn strategy_evaluator_loop(
                     let exec_analytics_guard = exec_analytics.lock();
                     let vol_regime = realized_vol_calc.get_regime();
                     let vol_pct = realized_vol_calc.get_volatility();
-                    
+
                     // Phase 3: Log all Phase 3 metrics
                     info!(
                         "[strategy] 📊 Phase 2 Metrics: slippage={:.2}bps impact={:.2}bps vol={:.1}%({}) toxicity={:.2}",
@@ -2008,7 +2303,7 @@ fn strategy_evaluator_loop(
                         vol_regime.to_string(),
                         toxicity
                     );
-                    
+
                     info!(
                         "[strategy] 📊 Phase 3 Metrics: wyckoff={} fib_level={:.1}% fib_dist={:.0}bps ichimoku={} mm_inv={:.2} btc_eth_corr={:.2}",
                         wyckoff_phase.to_string(),
@@ -2020,8 +2315,14 @@ fn strategy_evaluator_loop(
                     );
                 }
             }
-            
-            if let Some(mut intent) = strategy.evaluate(&metrics, &current_regime, symbol_name, ml_weights, snapshot.symbol_id) {
+
+            if let Some(mut intent) = strategy.evaluate(
+                &metrics,
+                &current_regime,
+                symbol_name,
+                ml_weights,
+                snapshot.symbol_id,
+            ) {
                 let entry_price = intent.price.unwrap_or(metrics.mid_price);
                 let is_buy = matches!(intent.side, execution_gateway::OrderSide::Buy);
 
@@ -2033,7 +2334,10 @@ fn strategy_evaluator_loop(
                         symbol_name, intent.confidence);
                     // Skip signal if confidence drops too low
                     if intent.confidence < 0.3 {
-                        info!("[strategy] 🔻 CVD bearish divergence — skipping long signal for {}", symbol_name);
+                        info!(
+                            "[strategy] 🔻 CVD bearish divergence — skipping long signal for {}",
+                            symbol_name
+                        );
                         continue;
                     }
                 } else if bullish_divergence && !is_buy {
@@ -2043,11 +2347,14 @@ fn strategy_evaluator_loop(
                         symbol_name, intent.confidence);
                     // Skip signal if confidence drops too low
                     if intent.confidence < 0.3 {
-                        info!("[strategy] 🔺 CVD bullish divergence — skipping short signal for {}", symbol_name);
+                        info!(
+                            "[strategy] 🔺 CVD bullish divergence — skipping short signal for {}",
+                            symbol_name
+                        );
                         continue;
                     }
                 }
-                
+
                 // ── Phase 3 Feature 11: Wyckoff Phase Filtering ──
                 // Bias long signals during Accumulation phase, short signals during Distribution phase
                 match wyckoff_phase {
@@ -2077,7 +2384,7 @@ fn strategy_evaluator_loop(
                 // ── Phase 2 Feature 2: VPOC-Based Bias ──
                 if let Some(vpoc) = volume_profile.get_vpoc() {
                     let price_to_vpoc_pct = ((current_price - vpoc) / vpoc).abs();
-                    
+
                     // If price is within 1% of VPOC, apply bias
                     if price_to_vpoc_pct < 0.01 {
                         if current_price < vpoc && is_buy {
@@ -2093,7 +2400,7 @@ fn strategy_evaluator_loop(
                         }
                     }
                 }
-                
+
                 // ── Phase 3 Feature 12: Fibonacci Level Confluence Boost ──
                 // Increase confidence by 15% when price is within 1% of a Fibonacci level
                 if fib_is_approaching && fib_distance_bps < 100.0 {
@@ -2101,7 +2408,9 @@ fn strategy_evaluator_loop(
                     // Approaching from below = support for long, from above = resistance for short
                     let fib_levels = fibonacci_detector.calculate_fib_levels();
                     if let Some(levels) = fib_levels {
-                        let nearest_fib_price = levels.levels.iter()
+                        let nearest_fib_price = levels
+                            .levels
+                            .iter()
                             .min_by(|a, b| {
                                 let dist_a = (current_price - *a).abs();
                                 let dist_b = (current_price - *b).abs();
@@ -2109,10 +2418,12 @@ fn strategy_evaluator_loop(
                             })
                             .copied()
                             .unwrap_or(current_price);
-                        
+
                         let approaching_from_below = current_price < nearest_fib_price;
-                        
-                        if (approaching_from_below && is_buy) || (!approaching_from_below && !is_buy) {
+
+                        if (approaching_from_below && is_buy)
+                            || (!approaching_from_below && !is_buy)
+                        {
                             intent.confidence = (intent.confidence * 1.15).min(1.0);
                             info!("[strategy] 📐 Fibonacci {:.1}% level confluence — boosting confidence to {:.2}",
                                 fib_level_pct * 100.0, intent.confidence);
@@ -2122,7 +2433,7 @@ fn strategy_evaluator_loop(
 
                 // ── Phase 2 Feature 5: TSI Calculation ──
                 let tsi_score = tsi_calculator.calculate_tsi(&strategy.candle_aggregator.lock());
-                
+
                 // ── Phase 3 Feature 13: Ichimoku Cloud Trend Filter ──
                 // Skip long signals when price is below cloud, short signals when above cloud
                 // FIX: Only apply filter when Ichimoku cloud has warmed up (needs ~52 candles).
@@ -2130,7 +2441,9 @@ fn strategy_evaluator_loop(
                 match ichimoku_position {
                     ichimoku_cloud::CloudPosition::BelowCloud if is_buy => {
                         if ichimoku_cloud.is_warmed_up() {
-                            info!("[strategy] ☁️ Ichimoku: price below cloud — skipping long signal");
+                            info!(
+                                "[strategy] ☁️ Ichimoku: price below cloud — skipping long signal"
+                            );
                             continue;
                         } else {
                             debug!("[strategy] ☁️ Ichimoku cloud not warmed up — allowing long signal through");
@@ -2138,7 +2451,9 @@ fn strategy_evaluator_loop(
                     }
                     ichimoku_cloud::CloudPosition::AboveCloud if !is_buy => {
                         if ichimoku_cloud.is_warmed_up() {
-                            info!("[strategy] ☁️ Ichimoku: price above cloud — skipping short signal");
+                            info!(
+                                "[strategy] ☁️ Ichimoku: price above cloud — skipping short signal"
+                            );
                             continue;
                         } else {
                             debug!("[strategy] ☁️ Ichimoku cloud not warmed up — allowing short signal through");
@@ -2146,25 +2461,27 @@ fn strategy_evaluator_loop(
                     }
                     _ => {}
                 }
-                
+
                 // ── Phase 2 Feature 3: Liquidation Cascade Response ──
                 let liq_state = liq_detector.get_state();
                 let (imb_mult, trail_mult) = liq_detector.get_adjusted_thresholds();
-                
-                if liq_state == LiquidationCascadeState::Active || liq_state == LiquidationCascadeState::Extreme {
+
+                if liq_state == LiquidationCascadeState::Active
+                    || liq_state == LiquidationCascadeState::Extreme
+                {
                     warn!("[strategy] 🌊 Liquidation cascade {:?} detected — adjusting thresholds (imb_mult={:.1}x, trail_mult={:.1}x)",
                         liq_state, imb_mult, trail_mult);
-                    
+
                     // Reduce position size during cascades
                     let cascade_size_reduction = match liq_state {
-                        LiquidationCascadeState::Active => 0.5,  // 50% reduction
+                        LiquidationCascadeState::Active => 0.5,   // 50% reduction
                         LiquidationCascadeState::Extreme => 0.25, // 75% reduction
                         _ => 1.0,
                     };
-                    
+
                     // Apply size reduction (will be applied later in position sizing)
                     intent.confidence *= cascade_size_reduction;
-                    
+
                     if intent.confidence < 0.2 {
                         warn!("[strategy] 🌊 Liquidation cascade — skipping signal due to low confidence");
                         continue;
@@ -2183,8 +2500,9 @@ fn strategy_evaluator_loop(
                 };
 
                 if let Some(gamma_flip_level) = gamma_flip {
-                    let distance_pct = ((current_price - gamma_flip_level) / gamma_flip_level).abs();
-                    
+                    let distance_pct =
+                        ((current_price - gamma_flip_level) / gamma_flip_level).abs();
+
                     if distance_pct < 0.01 {
                         // Price is within 1% of gamma flip level
                         if current_price < gamma_flip_level * 0.99 && is_buy {
@@ -2204,7 +2522,7 @@ fn strategy_evaluator_loop(
                         }
                     }
                 }
-                
+
                 // ── Phase 3 Feature 14: Market Maker Inventory Contrarian Signal ──
                 // Reduce confidence when MM inventory pressure is extreme and signal aligns with MM position
                 let (mm_direction, mm_pressure_score) = mm_inventory.get_inventory_signal();
@@ -2231,7 +2549,10 @@ fn strategy_evaluator_loop(
                     if peak_equity > 0.0 && current_equity > 0.0 {
                         let drawdown_pct = (peak_equity - current_equity) / peak_equity;
                         if drawdown_pct >= 0.08 {
-                            error!("[strategy] HALT: Drawdown {:.1}% >= 8% — all trading suspended", drawdown_pct * 100.0);
+                            error!(
+                                "[strategy] HALT: Drawdown {:.1}% >= 8% — all trading suspended",
+                                drawdown_pct * 100.0
+                            );
                             (0.0, true)
                         } else if drawdown_pct >= 0.05 {
                             warn!("[strategy] DD {:.1}%: sizing at 25%", drawdown_pct * 100.0);
@@ -2260,16 +2581,15 @@ fn strategy_evaluator_loop(
                 // ── Directive 4: Smart Entry Decision ──
                 // Decide whether to post maker or cross spread based on microstructure.
                 // FEATURE 12: Fetch tick_size from position_sizer ContractSpec
-                let tick_size = position_sizer.get_spec(symbol_name)
-                    .map(|spec| {
-                        // Calculate tick size from price precision
-                        // e.g., precision=2 → tick_size=0.01
-                        10.0_f64.powi(-(spec.order_price_precision as i32))
-                    });
-                
+                let tick_size = position_sizer.get_spec(symbol_name).map(|spec| {
+                    // Calculate tick size from price precision
+                    // e.g., precision=2 → tick_size=0.01
+                    10.0_f64.powi(-(spec.order_price_precision as i32))
+                });
+
                 // Task 2: Check ExecutionAnalytics for order type override
                 let should_use_limit = exec_analytics.lock().should_use_limit_orders();
-                
+
                 let (entry_decision, smart_price) = smart_entry.decide(
                     is_buy,
                     FixedPrice(snapshot.best_bid).to_f64(),
@@ -2282,19 +2602,21 @@ fn strategy_evaluator_loop(
 
                 // Skip entry if adverse selection guard paused it
                 if entry_decision == smart_entry::EntryDecision::PauseEntry {
-                    info!("[strategy] ⏸️ Entry paused by adverse selection guard for {}",
-                        registry.get_name(snapshot.symbol_id));
+                    info!(
+                        "[strategy] ⏸️ Entry paused by adverse selection guard for {}",
+                        registry.get_name(snapshot.symbol_id)
+                    );
                     continue;
                 }
 
                 // ── Directive 4: Volatility-adjusted SL/TP ──
                 // Use real-time ATR to size stops instead of fixed percentages.
                 let mut trail_distance = vol_trailing.calculate_trail_distance(entry_price, 0.0);
-                
+
                 // Task 20: Apply realized volatility regime scaling to trailing stop distance
                 let vol_regime_scale = realized_vol_calc.get_regime().get_scale_factor();
                 trail_distance *= vol_regime_scale;
-                
+
                 // ENHANCEMENT #3: Asset-class calibrated ATR stop distances.
                 // BTC/ETH/SOL have very different volatility profiles.
                 let symbol_name_for_sl = registry.get_name(snapshot.symbol_id);
@@ -2304,7 +2626,8 @@ fn strategy_evaluator_loop(
                     (0.004, 0.030, 2.2) // ETH: slightly wider (0.4%-3%), 2.2:1 RR
                 } else if symbol_name_for_sl.contains("SOL") {
                     (0.006, 0.040, 2.0) // SOL: wider stops (0.6%-4%), 2:1 RR
-                } else if symbol_name_for_sl.contains("XAU") || symbol_name_for_sl.contains("XAUT") {
+                } else if symbol_name_for_sl.contains("XAU") || symbol_name_for_sl.contains("XAUT")
+                {
                     (0.002, 0.015, 3.0) // Gold: tight stops, 3:1 RR
                 } else {
                     (0.005, 0.035, 2.0) // Default
@@ -2315,11 +2638,11 @@ fn strategy_evaluator_loop(
                     let atr_pct = trail_distance / entry_price;
                     // Vol-regime scaling: wider stops in high-vol, tighter in low-vol
                     let vol_multiplier = match metrics.realized_vol_regime.as_str() {
-                        "Low"     => 0.7,
-                        "Normal"  => 1.0,
-                        "High"    => 1.3,
+                        "Low" => 0.7,
+                        "Normal" => 1.0,
+                        "High" => 1.3,
                         "Extreme" => 1.6,
-                        _         => 1.0,
+                        _ => 1.0,
                     };
                     (atr_pct * vol_multiplier).max(min_sl_pct).min(max_sl_pct)
                 } else {
@@ -2355,9 +2678,7 @@ fn strategy_evaluator_loop(
                         smart_entry::EntryDecision::ChaseBook => {
                             (spsc::order_cmd_type::LIMIT, 1u8, smart_price)
                         }
-                        _ => {
-                            (spsc::order_cmd_type::LIMIT, 0u8, entry_price)
-                        }
+                        _ => (spsc::order_cmd_type::LIMIT, 0u8, entry_price),
                     }
                 };
 
@@ -2369,29 +2690,34 @@ fn strategy_evaluator_loop(
                 } else {
                     1.0
                 };
-                
+
                 // Task 24: Reduce size by 50% if toxicity > 0.7
                 // Raised from 0.5 to 0.7: synthetic VPIN proxy can produce elevated
                 // toxicity readings that over-reduce position sizes on testnet.
                 if toxicity > 0.7 {
                     impact_scalar *= 0.5;
-                    info!("[strategy] 🚫 Order flow toxicity {:.2} > 0.7 — reducing size by 50%", toxicity);
+                    info!(
+                        "[strategy] 🚫 Order flow toxicity {:.2} > 0.7 — reducing size by 50%",
+                        toxicity
+                    );
                 }
-                
+
                 // ── Phase 3 Feature 15: Cross-Asset Correlation Check ──
                 // Reduce position size when BTC-ETH correlation drops below 0.7 for ETH trades
                 if symbol_name.contains("ETH") && btc_eth_corr < 0.7 {
                     impact_scalar *= 0.5;
                     info!("[strategy] 🔗 BTC-ETH correlation {:.2} < 0.7 — reducing ETH position size by 50%", btc_eth_corr);
                 }
-                
+
                 // Apply equity market risk-off rules when BTC-SPX correlation spikes above 0.8
-                let btc_spx_corr = correlation_monitor.get_correlation("BTC_USDT", "SPX").unwrap_or(0.0);
+                let btc_spx_corr = correlation_monitor
+                    .get_correlation("BTC_USDT", "SPX")
+                    .unwrap_or(0.0);
                 if btc_spx_corr > 0.8 {
                     impact_scalar *= 0.7;
                     info!("[strategy] 📉 BTC-SPX correlation {:.2} > 0.8 — reducing all position sizes by 30%", btc_spx_corr);
                 }
-                
+
                 // ── FEATURE 3: Kelly Criterion Position Sizing ──
                 // Calculate position size using Kelly criterion with ATR-based stop distance
                 let base_qty = intent.size as f64;
@@ -2400,21 +2726,21 @@ fn strategy_evaluator_loop(
                     let current_equity = cb_state.current_equity as f64 / 1e8;
                     let win_rate = intent.confidence.clamp(0.4, 0.7); // Use signal confidence as win rate proxy
                     let atr_stop_distance = exit_evaluator.get_position_atr(snapshot.symbol_id);
-                    
+
                     if current_equity > 0.0 && atr_stop_distance > 0.0 {
                         let stop_price = if is_buy {
                             effective_price - atr_stop_distance
                         } else {
                             effective_price + atr_stop_distance
                         };
-                        
+
                         let kelly_size_fp = risk_calculator::risk_based_position_size(
                             current_equity,
                             win_rate * 0.02, // 2% base risk scaled by confidence
                             FixedPrice::from_f64(effective_price).raw(),
                             FixedPrice::from_f64(stop_price).raw(),
                         );
-                        
+
                         let kelly_contracts = fixed_point::FixedQty(kelly_size_fp).to_f64();
                         if kelly_contracts > 0.0 {
                             // FEATURE 13: Apply drawdown scalar to Kelly-sized position
@@ -2438,18 +2764,18 @@ fn strategy_evaluator_loop(
                     1.0 // Moderate trend: normal size
                 };
                 kelly_qty *= tsi_scale;
-                
+
                 if tsi_scale != 1.0 {
                     info!(
                         "[strategy] 📈 TSI={:.2} → size scaled by {:.1}x (final_qty={:.1})",
                         tsi_score, tsi_scale, kelly_qty
                     );
                 }
-                
+
                 // Task 19: Apply realized volatility regime scaling to position size
                 let vol_scale = realized_vol_calc.get_position_scale();
                 kelly_qty *= vol_scale;
-                
+
                 if vol_scale != 1.0 {
                     let vol_regime = realized_vol_calc.get_regime();
                     let vol_pct = realized_vol_calc.get_volatility();
@@ -2470,7 +2796,11 @@ fn strategy_evaluator_loop(
 
                 let cmd = OrderCommand {
                     symbol_id: snapshot.symbol_id,
-                    side: if is_buy { spsc::side::BUY } else { spsc::side::SELL },
+                    side: if is_buy {
+                        spsc::side::BUY
+                    } else {
+                        spsc::side::SELL
+                    },
                     order_type: cmd_order_type,
                     leverage: adaptive_leverage.clamp(1, 125) as u8,
                     _pad: [0; 3],
@@ -2478,9 +2808,8 @@ fn strategy_evaluator_loop(
                     qty: {
                         // Institutional: Use DustTracker for fractional contract handling.
                         // Carries sub-contract remainders across trades to prevent drift.
-                        let contracts = dust_tracker.float_to_contracts(
-                            snapshot.symbol_id, kelly_qty, is_buy,
-                        );
+                        let contracts =
+                            dust_tracker.float_to_contracts(snapshot.symbol_id, kelly_qty, is_buy);
                         fixed_point::FixedQty::from_f64(contracts as f64).raw()
                     },
                     order_id: snapshot.sequence,
@@ -2496,8 +2825,8 @@ fn strategy_evaluator_loop(
                 };
 
                 // ── Market Impact Pre-Trade Check ──
-                let order_size_usdt = FixedPrice(cmd.price).to_f64()
-                    * fixed_point::FixedQty(cmd.qty).to_f64();
+                let order_size_usdt =
+                    FixedPrice(cmd.price).to_f64() * fixed_point::FixedQty(cmd.qty).to_f64();
                 let mid = FixedPrice(snapshot.mid_price).to_f64();
                 let bid_depth = snapshot.bid_depth_usdt as f64 / FixedPrice::PRECISION as f64;
                 let ask_depth = snapshot.ask_depth_usdt as f64 / FixedPrice::PRECISION as f64;
@@ -2512,11 +2841,16 @@ fn strategy_evaluator_loop(
                 );
 
                 if impact.total_bps > 50.0 {
-                    warn!("[strategy] 🚫 Order rejected: market impact {:.1}bps exceeds 50bps cap", impact.total_bps);
+                    warn!(
+                        "[strategy] 🚫 Order rejected: market impact {:.1}bps exceeds 50bps cap",
+                        impact.total_bps
+                    );
                 } else {
                     if impact.should_split {
-                        info!("[strategy] ⚠️ High impact {:.1}bps — recommend TWAP {} slices",
-                            impact.total_bps, impact.recommended_slices);
+                        info!(
+                            "[strategy] ⚠️ High impact {:.1}bps — recommend TWAP {} slices",
+                            impact.total_bps, impact.recommended_slices
+                        );
                     }
 
                     // CHECK #1: Spread quality gate — skip if spread is abnormally wide
@@ -2531,8 +2865,10 @@ fn strategy_evaluator_loop(
 
                     // CHECK #4: Block duplicate positions per symbol.
                     if exit_evaluator.has_position(snapshot.symbol_id) {
-                        debug!("[strategy] Duplicate position block: {} already has open position",
-                            registry.get_name(snapshot.symbol_id));
+                        debug!(
+                            "[strategy] Duplicate position block: {} already has open position",
+                            registry.get_name(snapshot.symbol_id)
+                        );
                         continue;
                     }
 
@@ -2549,7 +2885,10 @@ fn strategy_evaluator_loop(
                         }
                         let max_daily_trades: u32 = 20;
                         if daily_trade_count >= max_daily_trades {
-                            debug!("[strategy] Daily trade limit reached ({}/{})", daily_trade_count, max_daily_trades);
+                            debug!(
+                                "[strategy] Daily trade limit reached ({}/{})",
+                                daily_trade_count, max_daily_trades
+                            );
                             continue;
                         }
                     }
@@ -2570,16 +2909,23 @@ fn strategy_evaluator_loop(
                             let position_notional = FixedPrice(cmd.price).to_f64()
                                 * fixed_point::FixedQty(cmd.qty).to_f64();
                             let mut cmd = cmd; // Make cmd mutable for potential resizing
-                            if let Err(reason) = correlation_limiter.check_position_limit(symbol_name, position_notional) {
+                            if let Err(reason) = correlation_limiter
+                                .check_position_limit(symbol_name, position_notional)
+                            {
                                 warn!("[strategy] 🔗 Correlation limit rejection: {}", reason);
                                 // Try to reduce position size to fit within limit
-                                let max_allowed = correlation_limiter.max_allowed_position_size(symbol_name);
+                                let max_allowed =
+                                    correlation_limiter.max_allowed_position_size(symbol_name);
                                 if max_allowed > 0.0 {
                                     let scale_factor = max_allowed / position_notional;
-                                    let reduced_qty = (fixed_point::FixedQty(cmd.qty).to_f64() * scale_factor).floor() as i64;
+                                    let reduced_qty =
+                                        (fixed_point::FixedQty(cmd.qty).to_f64() * scale_factor)
+                                            .floor() as i64;
                                     if reduced_qty >= 1 {
                                         let mut cmd_resized = cmd;
-                                        cmd_resized.qty = fixed_point::FixedQty::from_f64(reduced_qty as f64).raw();
+                                        cmd_resized.qty =
+                                            fixed_point::FixedQty::from_f64(reduced_qty as f64)
+                                                .raw();
                                         warn!(
                                             "[strategy] 🔗 Correlation limit: resized from {} to {} contracts",
                                             fixed_point::FixedQty(cmd.qty).to_f64(), reduced_qty
@@ -2624,7 +2970,9 @@ fn strategy_evaluator_loop(
                             if sl_f64 > 0.0 {
                                 trailing_stops.insert(
                                     snapshot.symbol_id,
-                                    exit_evaluator::TrailingStopState::new(entry_f64, sl_f64, is_buy),
+                                    exit_evaluator::TrailingStopState::new(
+                                        entry_f64, sl_f64, is_buy,
+                                    ),
                                 );
                             }
 
@@ -2652,7 +3000,9 @@ fn strategy_evaluator_loop(
                                 // Record the drop in the overflow monitor
                                 if overflow_monitor.record_drop() {
                                     if let Some(ref cb) = circuit_breaker {
-                                        cb.trip(crate::circuit_breaker::TripReason::OrderRateAnomaly);
+                                        cb.trip(
+                                            crate::circuit_breaker::TripReason::OrderRateAnomaly,
+                                        );
                                         error!("[strategy] 🚨 Circuit breaker tripped: SPSC overflow rate anomaly");
                                     }
                                 }
@@ -2700,9 +3050,7 @@ fn normalize_notional_to_contracts(
             // (e.g. BTC_USDT=0.0001, ETH_USDT=0.01). Using a hardcoded value
             // would produce wildly wrong contract counts for non-BTC symbols.
             let (quanto, step, min_q) = if let Some(mgr) = inst_mgr {
-                let spec = mgr.get_or_default(
-                    instrument_manager::Exchange::GateIo, symbol,
-                );
+                let spec = mgr.get_or_default(instrument_manager::Exchange::GateIo, symbol);
                 (spec.contract_multiplier, spec.step_size, spec.min_qty)
             } else {
                 // Conservative fallback when InstrumentManager is unavailable.
@@ -2711,7 +3059,12 @@ fn normalize_notional_to_contracts(
                 (0.0001_f64, 1.0_f64, 1.0_f64)
             };
             size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
-                exchange, notional_usdt, mid_price, quanto, step, min_q,
+                exchange,
+                notional_usdt,
+                mid_price,
+                quanto,
+                step,
+                min_q,
             )
             .unwrap_or_else(|_| (notional_usdt / (quanto * mid_price)).max(1.0))
         }
@@ -2730,7 +3083,12 @@ fn normalize_notional_to_contracts(
                 (0.001_f64, 0.001_f64)
             };
             size_normalizer::SizeNormalizer::usdt_to_exchange_qty(
-                exchange, notional_usdt, mid_price, 1.0, step, min_q,
+                exchange,
+                notional_usdt,
+                mid_price,
+                1.0,
+                step,
+                min_q,
             )
             .unwrap_or_else(|_| notional_usdt / mid_price)
         }
@@ -2780,7 +3138,9 @@ fn execution_router_loop(
     // Feature 2: Auto-protection config (for reconciled positions)
     auto_protection_config: config::AutoProtectionConfig,
     // FIX 1: Shared margin monitor instance — same Arc passed to funding arb engine
-    shared_margin_monitor: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>>,
+    shared_margin_monitor: Arc<
+        parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>,
+    >,
     // FEAT 4: Shared WebSocket fill event sink for Binance/Bybit fill receivers.
     ws_fill_sink: ws_fill_receiver::FillUpdateSink,
     // Gate.io USDT contract fix: InstrumentManager for dynamic quanto_multiplier lookup
@@ -2793,7 +3153,7 @@ fn execution_router_loop(
     // Initialize execution context
     let mbo_book = mbo_book::MboBook::new();
     let adverse_detector = adverse_selection::AdverseSelectionDetector::with_defaults();
-    
+
     // TASK 6: Build legacy SmartOrderRouter with multi-exchange venues when enabled
     let smart_router_inst = if multi_exchange_enabled {
         let venues = vec![
@@ -2837,12 +3197,15 @@ fn execution_router_loop(
                 enabled: true,
             },
         ];
-        info!("[execution] Legacy SmartOrderRouter initialized with {} venues (multi-exchange mode)", venues.len());
+        info!(
+            "[execution] Legacy SmartOrderRouter initialized with {} venues (multi-exchange mode)",
+            venues.len()
+        );
         smart_router::SmartOrderRouter::new(venues)
     } else {
         smart_router::SmartOrderRouter::default_venues()
     };
-    
+
     // BUG #5 FIX: Use live WS order manager when TRADING_MODE is live or testnet.
     // new_paper() simulates all order confirmations locally without hitting the exchange.
     let trading_mode_for_ws = std::env::var("TRADING_MODE")
@@ -2853,9 +3216,15 @@ fn execution_router_loop(
     } else {
         ws_order_manager::WsOrderManager::new_paper()
     };
-    info!("[execution] WsOrderManager mode: {} (TRADING_MODE={})",
-        if trading_mode_for_ws == "live" || trading_mode_for_ws == "testnet" { "LIVE" } else { "PAPER" },
-        trading_mode_for_ws);
+    info!(
+        "[execution] WsOrderManager mode: {} (TRADING_MODE={})",
+        if trading_mode_for_ws == "live" || trading_mode_for_ws == "testnet" {
+            "LIVE"
+        } else {
+            "PAPER"
+        },
+        trading_mode_for_ws
+    );
     let mut exec_ctx = execution_gateway::ExecutionContext::new(
         mbo_book,
         adverse_detector,
@@ -2881,11 +3250,14 @@ fn execution_router_loop(
                 monitor.set_gateway_ready(*exchange_id, true);
             }
         }
-        info!("[execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)");
+        info!(
+            "[execution] Multi-exchange margin monitor initialized (min_ratio=30%, critical=15%)"
+        );
     }
-    
+
     // TASK 2: Initialize CrossExchangeFundingArb for funding rate arbitrage
-    let mut cross_funding_arb = multi_exchange::funding_arb::CrossExchangeFundingArb::with_defaults();
+    let mut cross_funding_arb =
+        multi_exchange::funding_arb::CrossExchangeFundingArb::with_defaults();
     let mut last_funding_arb_check = std::time::Instant::now();
     let mut funding_arb_positions: HashMap<String, FundingArbPosition> = HashMap::new();
     if multi_exchange_enabled {
@@ -2915,21 +3287,26 @@ fn execution_router_loop(
         telegram_alert::TelegramAlertSender::new(bot_token, chat_id)
     };
     if multi_exchange_enabled {
-        info!("[execution] Telegram alert sender initialized (enabled={})", telegram.is_enabled());
+        info!(
+            "[execution] Telegram alert sender initialized (enabled={})",
+            telegram.is_enabled()
+        );
     }
-    
+
     // TASK 3: Initialize CrossExchangeMarketMaker for hedged market making
     let mut cross_mm = multi_exchange::cross_exchange_mm::CrossExchangeMarketMaker::with_defaults();
     let mut last_mm_check = std::time::Instant::now();
     if multi_exchange_enabled {
         info!("[execution] Cross-exchange market maker initialized (Gate.io maker, Binance hedge)");
     }
-    
+
     // TASK 4: Initialize StatArbEngine for statistical arbitrage
     let mut stat_arb_engine = multi_exchange::stat_arb::StatArbEngine::with_defaults();
     let mut last_stat_arb_check = std::time::Instant::now();
     if multi_exchange_enabled {
-        info!("[execution] Statistical arbitrage engine initialized (2-sigma entry, 0.5-sigma exit)");
+        info!(
+            "[execution] Statistical arbitrage engine initialized (2-sigma entry, 0.5-sigma exit)"
+        );
     }
 
     // Initialize event-sourced order state machine
@@ -2946,8 +3323,25 @@ fn execution_router_loop(
         .enable_all()
         .build()
         .expect("Failed to build tokio runtime for execution");
-        
+
     let http_client = reqwest::Client::new();
+
+    let mut shm_signal_consumer: Option<signal_queue::SignalQueueConsumer> =
+        match signal_queue::SignalQueueConsumer::open() {
+            Ok(c) => {
+                info!(
+                    "[execution] ✅ SHM signal queue opened — Python Alpha Oracle signals ENABLED"
+                );
+                Some(c)
+            }
+            Err(e) => {
+                warn!(
+                    "[execution] SHM signal queue unavailable: {} — Python signals disabled",
+                    e
+                );
+                None
+            }
+        };
 
     rt.block_on(async {
         let mut last_queue_check = std::time::Instant::now();
@@ -3393,6 +3787,100 @@ fn execution_router_loop(
                     }
                 } else {
                     warn!("[execution] Manual trade: no gateway available for exchange {:?}", manual_req.exchange);
+                }
+            }
+
+            if let Some(ref mut sq) = shm_signal_consumer {
+                while let Some(intent) = sq.try_pop() {
+                    if intent.symbol.is_empty() || intent.size_contracts <= 0 {
+                        continue;
+                    }
+
+                    let sym_id = registry.get_id(&intent.symbol);
+                    if sym_id == 0 {
+                        warn!("[execution] Python signal: unknown symbol '{}' — skipping", intent.symbol);
+                        continue;
+                    }
+
+                    if circuit_breaker.is_trading_halted() {
+                        info!("[execution] Python signal for {} ignored — circuit breaker halted", intent.symbol);
+                        continue;
+                    }
+
+                    if !position_slots.try_acquire() {
+                        warn!("[execution] Python signal for {} dropped — slots full", intent.symbol);
+                        continue;
+                    }
+
+                    let current_price = {
+                        let idx = (sym_id as usize).saturating_sub(1);
+                        if idx < shared_prices.len() {
+                            let bits = shared_prices[idx].load(Ordering::Relaxed);
+                            if bits != 0 { f64::from_bits(bits) } else { intent.entry_price }
+                        } else {
+                            intent.entry_price
+                        }
+                    };
+
+                    if current_price <= 0.0 {
+                        warn!("[execution] Python signal for {}: no price available — skipping", intent.symbol);
+                        position_slots.release();
+                        continue;
+                    }
+
+                    let sl = intent.stop_loss.filter(|&v| v > 0.0).unwrap_or_else(|| {
+                        if intent.side == 0 { current_price * 0.98 } else { current_price * 1.02 }
+                    });
+                    let tp = intent.take_profit.filter(|&v| v > 0.0).unwrap_or_else(|| {
+                        if intent.side == 0 { current_price * 1.04 } else { current_price * 0.96 }
+                    });
+                    let leverage_clamped = intent.leverage.clamp(1, 20) as u8;
+
+                    let cmd = OrderCommand {
+                        symbol_id: sym_id,
+                        side: intent.side,
+                        order_type: spsc::order_cmd_type::LIMIT,
+                        leverage: leverage_clamped,
+                        _pad: [0; 3],
+                        price: FixedPrice::from_f64(current_price).raw(),
+                        qty: fixed_point::FixedQty::from_f64(intent.size_contracts as f64).raw(),
+                        order_id: 0,
+                        signal_ns: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos() as u64,
+                        max_slippage_bps: 30,
+                        ttl_ms: 15_000,
+                        stop_loss_fp: FixedPrice::from_f64(sl).raw(),
+                        take_profit_fp: FixedPrice::from_f64(tp).raw(),
+                        placement_type: 0,
+                        post_only: 0,
+                        is_close: 0,
+                        _pad2: [0; 5],
+                    };
+
+                    if let Err(reason) = pre_trade_risk_engine.check(&cmd) {
+                        warn!("[execution] Python signal for {} failed risk check: {}", intent.symbol, reason);
+                        position_slots.release();
+                        continue;
+                    }
+
+                    if exec_ring.try_push(cmd) {
+                        info!(
+                            "[execution] 🐍 Python signal queued: {} {} {}x {}contracts @ {:.4} (conf={:.0}%, {}/{})",
+                            if intent.side == 0 { "LONG" } else { "SHORT" },
+                            intent.symbol,
+                            intent.leverage,
+                            intent.size_contracts,
+                            current_price,
+                            intent.confidence * 100.0,
+                            intent.confluence_count,
+                            intent.total_strategies,
+                        );
+                    } else {
+                        warn!("[execution] Python signal for {} dropped — exec_ring full", intent.symbol);
+                        position_slots.release();
+                    }
                 }
             }
 
@@ -5322,7 +5810,10 @@ fn main() {
         )
         .init();
 
-    info!("Trading engine v{} starting (Institutional Refactor)", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Trading engine v{} starting (Institutional Refactor)",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Report available system resources
     let cpu_count = core_affinity::get_core_ids()
@@ -5341,7 +5832,10 @@ fn main() {
             .unwrap_or(false);
 
         let topo = if use_auto {
-            info!("THREAD_TOPOLOGY=auto — auto-detecting optimal layout for {} cores", cpu_count);
+            info!(
+                "THREAD_TOPOLOGY=auto — auto-detecting optimal layout for {} cores",
+                cpu_count
+            );
             ThreadTopology::auto_detect()
         } else {
             config.thread_topology.clone()
@@ -5357,7 +5851,10 @@ fn main() {
                 topo
             }
             Err(e) => {
-                warn!("Thread topology invalid: {} — falling back to auto-detect", e);
+                warn!(
+                    "Thread topology invalid: {} — falling back to auto-detect",
+                    e
+                );
                 let auto_topo = ThreadTopology::auto_detect();
                 info!("Auto-detected topology: ws_gateio={}, book={}, strategy={}, exec={}, telemetry={}, micro={:?}",
                     auto_topo.ws_gateio_core, auto_topo.book_builder_core,
@@ -5368,8 +5865,11 @@ fn main() {
         }
     };
 
-    info!("Config loaded: {} exchanges, {} symbols",
-          config.exchanges.len(), config.symbols.len());
+    info!(
+        "Config loaded: {} exchanges, {} symbols",
+        config.exchanges.len(),
+        config.symbols.len()
+    );
 
     // 2. Build symbol registry
     let registry = Arc::new(build_symbol_registry(&config));
@@ -5380,9 +5880,7 @@ fn main() {
     let mut books: Vec<FlatOrderBook> = Vec::new();
     for id in registry.all_ids() {
         let name = registry.get_name(id);
-        let book_config = flat_configs.get(&id)
-            .copied()
-            .unwrap_or_default();
+        let book_config = flat_configs.get(&id).copied().unwrap_or_default();
         books.push(FlatOrderBook::new(book_config, name));
         info!("Allocated FlatOrderBook for {} (ID: {})", name, id);
     }
@@ -5395,8 +5893,10 @@ fn main() {
         Box::leak(Box::new(SpscRingBuffer::new()));
     let strategy_to_exec: &'static SpscRingBuffer<OrderCommand, STRATEGY_TO_EXEC_CAPACITY> =
         Box::leak(Box::new(SpscRingBuffer::new()));
-    let ws_to_strategy_trades: &'static SpscRingBuffer<spsc::TradeEvent, WS_TO_STRATEGY_TRADES_CAPACITY> =
-        Box::leak(Box::new(SpscRingBuffer::new()));
+    let ws_to_strategy_trades: &'static SpscRingBuffer<
+        spsc::TradeEvent,
+        WS_TO_STRATEGY_TRADES_CAPACITY,
+    > = Box::leak(Box::new(SpscRingBuffer::new()));
 
     info!("SPSC ring buffers allocated: ws_to_book={}KB, book_to_strategy={}KB, strategy_to_exec={}KB",
           std::mem::size_of::<SpscRingBuffer<RawBookUpdate, WS_TO_BOOK_CAPACITY>>() / 1024,
@@ -5422,7 +5922,8 @@ fn main() {
         cooldown_seconds: 0, // manual reset required for safety
         flatten_on_trip: false,
         max_single_loss_usdt_fp: (config.risk.max_single_loss_usdt.unwrap_or(500.0) * 1e8) as i64,
-        max_total_exposure_usdt_fp: (config.risk.max_position_usdt.unwrap_or(10_000.0) * 1e8) as i64,
+        max_total_exposure_usdt_fp: (config.risk.max_position_usdt.unwrap_or(10_000.0) * 1e8)
+            as i64,
     };
     let circuit_breaker_arc = Arc::new(CircuitBreaker::new(cb_config));
     // Leak a clone so hot-path threads get a zero-cost &'static reference.
@@ -5454,7 +5955,9 @@ fn main() {
     // 7b-pre. Initialize InstrumentManager — fetches contract specs (tick size,
     // step size, contract multiplier) from all three exchanges at startup.
     // This replaces ALL hardcoded precision values throughout the engine.
-    let is_testnet = config.exchanges.iter()
+    let is_testnet = config
+        .exchanges
+        .iter()
         .find(|e| e.name == "gateio")
         .map(|e| e.testnet)
         .unwrap_or(false);
@@ -5516,10 +6019,16 @@ fn main() {
         error!("[startup] GATEIO_API_KEY / GATEIO_SECRET_KEY check:");
         let key = std::env::var("GATEIO_API_KEY").unwrap_or_else(|_| "<NOT SET>".into());
         let sec = std::env::var("GATEIO_SECRET_KEY").unwrap_or_else(|_| "<NOT SET>".into());
-        error!("[startup]   GATEIO_API_KEY = '{}...' (len={})",
-            &key[..key.len().min(6)], key.len());
-        error!("[startup]   GATEIO_SECRET_KEY = '{}...' (len={})",
-            &sec[..sec.len().min(6)], sec.len());
+        error!(
+            "[startup]   GATEIO_API_KEY = '{}...' (len={})",
+            &key[..key.len().min(6)],
+            key.len()
+        );
+        error!(
+            "[startup]   GATEIO_SECRET_KEY = '{}...' (len={})",
+            &sec[..sec.len().min(6)],
+            sec.len()
+        );
         error!("[startup] Possible causes:");
         error!("[startup]   1. .env file not found or not loaded");
         error!("[startup]   2. Keys still set to placeholder values");
@@ -5554,7 +6063,10 @@ fn main() {
         }
         Box::leak(Box::new(model))
     };
-    info!("📊 Market Impact Model initialized ({} symbols calibrated)", config.symbols.len());
+    info!(
+        "📊 Market Impact Model initialized ({} symbols calibrated)",
+        config.symbols.len()
+    );
 
     // 7f. Initialize Pre-Trade Risk Engine (Institutional Feature)
     // Shared across strategy thread (check) and execution thread (update_balance,
@@ -5568,9 +6080,13 @@ fn main() {
     // Lock-free semaphore using AtomicU32. Strategy thread acquires slots before
     // pushing OrderCommand; execution thread releases on position close.
     // FIX 12: Use cfg.risk.max_open_positions instead of hardcoded 3
-    let position_slot_manager: &'static PositionSlotManager =
-        Box::leak(Box::new(PositionSlotManager::new(config.risk.max_open_positions as u32)));
-    info!("📍 PositionSlotManager initialized (max_slots={}, lock-free AtomicU32)", config.risk.max_open_positions);
+    let position_slot_manager: &'static PositionSlotManager = Box::leak(Box::new(
+        PositionSlotManager::new(config.risk.max_open_positions as u32),
+    ));
+    info!(
+        "📍 PositionSlotManager initialized (max_slots={}, lock-free AtomicU32)",
+        config.risk.max_open_positions
+    );
 
     // 7g2. Initialize Correlation Limiter (FEATURE 6)
     let correlation_limiter: &'static CorrelationLimiter =
@@ -5578,14 +6094,19 @@ fn main() {
     info!("🔗 CorrelationLimiter initialized (BTC-ETH=0.85, BTC-SOL=0.75, ETH-SOL=0.70, max_correlated=150%)");
 
     // 7h. Initialize Rate Limiter Pool (Directive 5)
-    let is_testnet = config.exchanges.iter().any(|e| e.name == "gateio" && e.testnet);
-    let _rate_limiter: &'static RateLimiterPool = Box::leak(Box::new(RateLimiterPool::new(is_testnet)));
+    let is_testnet = config
+        .exchanges
+        .iter()
+        .any(|e| e.name == "gateio" && e.testnet);
+    let _rate_limiter: &'static RateLimiterPool =
+        Box::leak(Box::new(RateLimiterPool::new(is_testnet)));
 
     // 7i. Initialize Dashboard State (shared between hot-path and HTTP server)
     let dashboard_state = Arc::new(DashboardState::new());
 
     // 7i2. Initialize funding rates storage (shared between strategy and execution)
-    let funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>> = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    let funding_rates: Arc<parking_lot::RwLock<HashMap<String, f64>>> =
+        Arc::new(parking_lot::RwLock::new(HashMap::new()));
 
     // 7j. Initialize Position Sizer (Directive 2) — fetch contract specs at startup
     let position_sizer: &'static PositionSizer = {
@@ -5602,7 +6123,11 @@ fn main() {
                 let client = reqwest::Client::new();
                 // Reuse the gateway runtime instead of creating a temporary one
                 let specs = gateway_runtime.block_on(position_sizer::fetch_contract_specs(
-                    &client, base_url, ak, sk.as_bytes(), &config.symbols,
+                    &client,
+                    base_url,
+                    ak,
+                    sk.as_bytes(),
+                    &config.symbols,
                 ));
                 for spec in specs {
                     sizer.register_spec(spec);
@@ -5620,53 +6145,66 @@ fn main() {
         Ok(()) => info!("📡 Bridge: Tick broadcaster initialized"),
         Err(e) => warn!("📡 Bridge: Tick broadcaster init failed (non-fatal): {}", e),
     }
-    let _tick_broadcaster: &'static parking_lot::Mutex<bridge_ipc::tick_broadcast::TickBroadcaster> =
-        Box::leak(Box::new(parking_lot::Mutex::new(tick_broadcaster)));
+    let _tick_broadcaster: &'static parking_lot::Mutex<
+        bridge_ipc::tick_broadcast::TickBroadcaster,
+    > = Box::leak(Box::new(parking_lot::Mutex::new(tick_broadcaster)));
 
     // Portfolio receiver: Python → Rust (portfolio weight targets via SHM)
     let mut portfolio_rx = bridge_ipc::portfolio_receiver::PortfolioReceiver::with_defaults();
     match portfolio_rx.init() {
         Ok(()) => info!("📡 Bridge: Portfolio receiver initialized"),
-        Err(e) => warn!("📡 Bridge: Portfolio receiver init failed (non-fatal): {}", e),
+        Err(e) => warn!(
+            "📡 Bridge: Portfolio receiver init failed (non-fatal): {}",
+            e
+        ),
     }
-    let _portfolio_rx: &'static parking_lot::Mutex<bridge_ipc::portfolio_receiver::PortfolioReceiver> =
-        Box::leak(Box::new(parking_lot::Mutex::new(portfolio_rx)));
+    let _portfolio_rx: &'static parking_lot::Mutex<
+        bridge_ipc::portfolio_receiver::PortfolioReceiver,
+    > = Box::leak(Box::new(parking_lot::Mutex::new(portfolio_rx)));
 
     // Execution confirmation broadcast: Rust → Python (fill/cancel notifications)
-    let mut exec_broadcaster = bridge_ipc::exec_confirm_broadcast::ExecConfirmBroadcaster::with_defaults();
+    let mut exec_broadcaster =
+        bridge_ipc::exec_confirm_broadcast::ExecConfirmBroadcaster::with_defaults();
     match exec_broadcaster.init() {
         Ok(()) => info!("📡 Bridge: Execution confirmation broadcaster initialized"),
-        Err(e) => warn!("📡 Bridge: Exec confirmation init failed (non-fatal): {}", e),
+        Err(e) => warn!(
+            "📡 Bridge: Exec confirmation init failed (non-fatal): {}",
+            e
+        ),
     }
-    let _exec_broadcaster: &'static parking_lot::Mutex<bridge_ipc::exec_confirm_broadcast::ExecConfirmBroadcaster> =
-        Box::leak(Box::new(parking_lot::Mutex::new(exec_broadcaster)));
+    let _exec_broadcaster: &'static parking_lot::Mutex<
+        bridge_ipc::exec_confirm_broadcast::ExecConfirmBroadcaster,
+    > = Box::leak(Box::new(parking_lot::Mutex::new(exec_broadcaster)));
 
     // Regime adapter: wraps regime_shm with typed interface
     let _regime_adapter: &'static parking_lot::Mutex<bridge_ipc::regime_adapter::RegimeAdapter> =
         Box::leak(Box::new(parking_lot::Mutex::new(
-            bridge_ipc::regime_adapter::RegimeAdapter::with_defaults()
+            bridge_ipc::regime_adapter::RegimeAdapter::with_defaults(),
         )));
 
     // Signal adapter: wraps signal_queue with validation
     let _signal_adapter: &'static parking_lot::Mutex<bridge_ipc::signal_adapter::SignalAdapter> =
         Box::leak(Box::new(parking_lot::Mutex::new(
-            bridge_ipc::signal_adapter::SignalAdapter::with_defaults()
+            bridge_ipc::signal_adapter::SignalAdapter::with_defaults(),
         )));
 
     // Event bus: Internal MPMC event distribution (flume-based)
     let event_buses: &'static event_bus::EngineEventBuses =
         Box::leak(Box::new(event_bus::EngineEventBuses::new()));
-    info!("🔌 Event bus initialized: market_data={}, execution={}, control={}",
+    info!(
+        "🔌 Event bus initialized: market_data={}, execution={}, control={}",
         event_buses.market_data.capacity(),
         event_buses.execution.capacity(),
-        event_buses.control.capacity());
+        event_buses.control.capacity()
+    );
 
     // Bridge health monitor: tracks IPC health metrics and exposes /health endpoint
     let health_monitor = bridge_ipc::health_monitor::BridgeHealthMonitor::new();
     // BridgeHealthMonitor is ready after new() — no separate init needed
     info!("📡 Bridge: Health monitor initialized");
-    let health_monitor: &'static parking_lot::Mutex<bridge_ipc::health_monitor::BridgeHealthMonitor> =
-        Box::leak(Box::new(parking_lot::Mutex::new(health_monitor)));
+    let health_monitor: &'static parking_lot::Mutex<
+        bridge_ipc::health_monitor::BridgeHealthMonitor,
+    > = Box::leak(Box::new(parking_lot::Mutex::new(health_monitor)));
 
     info!("📡 Bridge IPC subsystem initialized (tick_broadcast + portfolio_rx + exec_confirm + regime + signal + event_bus + health_monitor)");
 
@@ -5675,7 +6213,9 @@ fn main() {
     let leaked_arc = exec_analytics_arc.clone();
     let exec_analytics: &'static parking_lot::Mutex<ExecutionAnalytics> =
         unsafe { &*Arc::into_raw(leaked_arc) };
-    info!("📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)");
+    info!(
+        "📊 Execution Analytics initialized (slippage + shortfall + impact tracking, window=1000)"
+    );
 
     // Shared prices array for execution thread
     let num_symbols = registry.len();
@@ -5686,8 +6226,11 @@ fn main() {
     let shared_prices = Arc::new(prices_vec);
 
     // Initialize ML Weight Reader
-    let ml_weights_path = std::env::var("ML_WEIGHT_SHM_PATH").unwrap_or_else(|_| "/dev/shm/ml_weights".to_string());
-    let ml_weights: &'static ml_weight_receiver::MlWeightReader = Box::leak(Box::new(ml_weight_receiver::MlWeightReader::new(&ml_weights_path)));
+    let ml_weights_path =
+        std::env::var("ML_WEIGHT_SHM_PATH").unwrap_or_else(|_| "/dev/shm/ml_weights".to_string());
+    let ml_weights: &'static ml_weight_receiver::MlWeightReader = Box::leak(Box::new(
+        ml_weight_receiver::MlWeightReader::new(&ml_weights_path),
+    ));
 
     // 8. Spawn OS threads with core affinity pinning
     let mut thread_handles = Vec::new();
@@ -5698,7 +6241,12 @@ fn main() {
     let fill_update_sink = ws_fill_receiver::FillUpdateSink::new();
 
     // ── Core 2: WS Ingestion (Gate.io) ──
-    if let Some(gateio_cfg) = config.exchanges.iter().find(|e| e.name == "gateio").cloned() {
+    if let Some(gateio_cfg) = config
+        .exchanges
+        .iter()
+        .find(|e| e.name == "gateio")
+        .cloned()
+    {
         let ws_ring = ws_gateio_to_book;
         let trades_ring = ws_to_strategy_trades;
         let reg = registry.clone();
@@ -5718,27 +6266,41 @@ fn main() {
     // Both the execution router and the funding arb engine will share this same instance
     // via Arc<RwLock<>>. Previously, each created their own instance, so balances fetched
     // by the execution router were invisible to the funding arb engine's pre-trade checks.
-    let shared_margin_monitor_arc: Arc<parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>> = Arc::new(
-        parking_lot::RwLock::new(
-            multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults()
-        )
-    );
+    let shared_margin_monitor_arc: Arc<
+        parking_lot::RwLock<multi_exchange::margin_monitor::CrossVenueMarginMonitor>,
+    > = Arc::new(parking_lot::RwLock::new(
+        multi_exchange::margin_monitor::CrossVenueMarginMonitor::with_defaults(),
+    ));
 
     // ── Multi-Exchange Initialization (gated by USE_MULTI_EXCHANGE) ──────────────
-    let global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> = if config.multi_exchange_enabled {
+    let global_book_registry: Option<Arc<multi_exchange::GlobalBookRegistry>> = if config
+        .multi_exchange_enabled
+    {
         info!("Multi-Exchange mode ENABLED - initializing Binance + Bybit");
-        
+
         // Build global book registry
         let registry_me = Arc::new(multi_exchange::GlobalBookRegistry::new());
-        
+
         // Build Binance gateway
         let binance_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
-            let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
-            let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
+            let ak = config
+                .multi_exchange
+                .binance_api_key
+                .as_deref()
+                .unwrap_or("");
+            let sk = config
+                .multi_exchange
+                .binance_secret_key
+                .as_deref()
+                .unwrap_or("");
             if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                info!("Binance: live execution gateway initialised (testnet={})", config.multi_exchange.binance_testnet);
+                info!(
+                    "Binance: live execution gateway initialised (testnet={})",
+                    config.multi_exchange.binance_testnet
+                );
                 let mut bgw = binance_gateway::BinanceGateway::new(
-                    ak.to_string(), sk.to_string(),
+                    ak.to_string(),
+                    sk.to_string(),
                     config.multi_exchange.binance_testnet,
                 );
                 bgw.set_instrument_manager(instrument_mgr.clone());
@@ -5748,15 +6310,23 @@ fn main() {
                 None
             }
         };
-        
+
         // Build Bybit gateway
         let bybit_gateway: Option<Arc<dyn ExecutionGateway + Send + Sync>> = {
             let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
-            let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
+            let sk = config
+                .multi_exchange
+                .bybit_secret_key
+                .as_deref()
+                .unwrap_or("");
             if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                info!("Bybit: live execution gateway initialised (testnet={})", config.multi_exchange.bybit_testnet);
+                info!(
+                    "Bybit: live execution gateway initialised (testnet={})",
+                    config.multi_exchange.bybit_testnet
+                );
                 let mut bbgw = bybit_gateway::BybitGateway::new(
-                    ak.to_string(), sk.to_string(),
+                    ak.to_string(),
+                    sk.to_string(),
                     config.multi_exchange.bybit_testnet,
                 );
                 bbgw.set_instrument_manager(instrument_mgr.clone());
@@ -5766,9 +6336,12 @@ fn main() {
                 None
             }
         };
-        
+
         // Store gateways for later use (e.g., margin monitor)
-        let mut multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = HashMap::new();
+        let mut multi_gateways: HashMap<
+            multi_exchange::ExchangeId,
+            Arc<dyn ExecutionGateway + Send + Sync>,
+        > = HashMap::new();
         if let Some(ref gw) = gateway {
             multi_gateways.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
         }
@@ -5778,9 +6351,12 @@ fn main() {
         if let Some(gw) = bybit_gateway {
             multi_gateways.insert(multi_exchange::ExchangeId::Bybit, gw);
         }
-        
-        info!("Multi-exchange gateways initialized: {} connected", multi_gateways.len());
-        
+
+        info!(
+            "Multi-exchange gateways initialized: {} connected",
+            multi_gateways.len()
+        );
+
         // Spawn Binance WS ingestion thread
         {
             let reg = registry_me.clone();
@@ -5813,14 +6389,18 @@ fn main() {
                         .enable_all()
                         .build()
                         .expect("Failed to build tokio runtime for ws-binance");
-                    rt.block_on(multi_exchange::ws_ingestion_multi::run_binance_ws_ingestion(
-                        binance_cfg, reg, sym_reg,
-                    ));
+                    rt.block_on(
+                        multi_exchange::ws_ingestion_multi::run_binance_ws_ingestion(
+                            binance_cfg,
+                            reg,
+                            sym_reg,
+                        ),
+                    );
                 })
                 .expect("Failed to spawn Binance WS thread");
             thread_handles.push(handle);
         }
-        
+
         // Spawn Bybit WS ingestion thread
         {
             let reg = registry_me.clone();
@@ -5860,7 +6440,7 @@ fn main() {
                 .expect("Failed to spawn Bybit WS thread");
             thread_handles.push(handle);
         }
-        
+
         // ── Determine which arbitrage engine to spawn ─────────────────────────
         // When SPOT_FUTURES_ENABLED=true, spawn the new Spot-Futures (Cash and
         // Carry) engine that buys Spot + shorts Futures on the SAME exchange.
@@ -5873,7 +6453,9 @@ fn main() {
             // same asset on Perpetual Futures. Profit from funding rate payments.
             // Same-exchange V1: both legs on the same exchange.
             let sf_symbols = config.symbols.clone();
-            let sf_gateio_testnet = config.exchanges.iter()
+            let sf_gateio_testnet = config
+                .exchanges
+                .iter()
                 .find(|e| e.name == "gateio")
                 .map(|e| e.testnet)
                 .unwrap_or(false);
@@ -5899,24 +6481,26 @@ fn main() {
                         .expect("Failed to build tokio runtime for spot-futures-arb");
 
                     rt.block_on(async {
-                        let mut engine = multi_exchange::SpotFuturesEngine::new(
-                            sf_config,
-                            sf_shutdown_clone,
-                        );
+                        let mut engine =
+                            multi_exchange::SpotFuturesEngine::new(sf_config, sf_shutdown_clone);
 
-                        engine.run(
-                            sf_gateways,
-                            sf_symbols,
-                            sf_binance_testnet,
-                            sf_bybit_testnet,
-                            sf_gateio_testnet,
-                        ).await;
+                        engine
+                            .run(
+                                sf_gateways,
+                                sf_symbols,
+                                sf_binance_testnet,
+                                sf_bybit_testnet,
+                                sf_gateio_testnet,
+                            )
+                            .await;
                     });
                 })
                 .expect("Failed to spawn spot-futures arb engine thread");
             thread_handles.push(handle);
 
-            info!("[spot-futures] Spot-Futures engine spawned (old Futures-Futures engine DISABLED)");
+            info!(
+                "[spot-futures] Spot-Futures engine spawned (old Futures-Futures engine DISABLED)"
+            );
         } else {
             // ── Spawn Legacy Funding Rate Arbitrage Engine (Futures-Futures) ──
             // DEPRECATED: Opens Long on one exchange Futures and Short on another.
@@ -5925,7 +6509,9 @@ fn main() {
 
             let fab_gbr = registry_me.clone();
             let fab_symbols = config.symbols.clone();
-            let fab_gateio_testnet = config.exchanges.iter()
+            let fab_gateio_testnet = config
+                .exchanges
+                .iter()
                 .find(|e| e.name == "gateio")
                 .map(|e| e.testnet)
                 .unwrap_or(false);
@@ -5948,8 +6534,11 @@ fn main() {
             // Clone InstrumentManager for the funding arb engine thread
             let fab_instrument_mgr = instrument_mgr.clone();
 
-            info!("[funding-arb] Spawning engine with {} gateways, {} symbols",
-                  fab_gateways.len(), fab_symbols.len());
+            info!(
+                "[funding-arb] Spawning engine with {} gateways, {} symbols",
+                fab_gateways.len(),
+                fab_symbols.len()
+            );
 
             let handle = thread::Builder::new()
                 .name("funding-arb".into())
@@ -5960,28 +6549,29 @@ fn main() {
                         .expect("Failed to build tokio runtime for funding-arb");
 
                     rt.block_on(async {
-                        let config = if fab_gateio_testnet || fab_binance_testnet || fab_bybit_testnet {
-                            info!("[funding-arb] Using TESTNET config with relaxed thresholds");
-                            multi_exchange::FundingArbEngineConfig::testnet()
-                        } else {
-                            multi_exchange::FundingArbEngineConfig::default()
-                        };
-                        let mut engine = multi_exchange::FundingArbEngine::new(
-                            config,
-                            fab_shutdown_clone,
-                        );
+                        let config =
+                            if fab_gateio_testnet || fab_binance_testnet || fab_bybit_testnet {
+                                info!("[funding-arb] Using TESTNET config with relaxed thresholds");
+                                multi_exchange::FundingArbEngineConfig::testnet()
+                            } else {
+                                multi_exchange::FundingArbEngineConfig::default()
+                            };
+                        let mut engine =
+                            multi_exchange::FundingArbEngine::new(config, fab_shutdown_clone);
                         engine.set_instrument_manager(fab_instrument_mgr);
 
-                        engine.run(
-                            fab_gateways,
-                            fab_gbr,
-                            fab_margin_monitor,
-                            Some(fab_dashboard),
-                            fab_symbols,
-                            fab_gateio_testnet,
-                            fab_binance_testnet,
-                            fab_bybit_testnet,
-                        ).await;
+                        engine
+                            .run(
+                                fab_gateways,
+                                fab_gbr,
+                                fab_margin_monitor,
+                                Some(fab_dashboard),
+                                fab_symbols,
+                                fab_gateio_testnet,
+                                fab_binance_testnet,
+                                fab_bybit_testnet,
+                            )
+                            .await;
                     });
                 })
                 .expect("Failed to spawn funding arb engine thread");
@@ -6002,7 +6592,10 @@ fn main() {
                         testnet: config.multi_exchange.binance_testnet,
                     };
                     let sink_binance = fill_update_sink.clone();
-                    info!("[ws-fill-binance] Spawning Binance WS fill receiver (testnet={})", config.multi_exchange.binance_testnet);
+                    info!(
+                        "[ws-fill-binance] Spawning Binance WS fill receiver (testnet={})",
+                        config.multi_exchange.binance_testnet
+                    );
                     let handle = thread::Builder::new()
                         .name("ws-fill-binance".into())
                         .spawn(move || {
@@ -6033,7 +6626,10 @@ fn main() {
                         testnet: config.multi_exchange.bybit_testnet,
                     };
                     let sink_bybit = fill_update_sink.clone();
-                    info!("[ws-fill-bybit] Spawning Bybit WS fill receiver (testnet={})", config.multi_exchange.bybit_testnet);
+                    info!(
+                        "[ws-fill-bybit] Spawning Bybit WS fill receiver (testnet={})",
+                        config.multi_exchange.bybit_testnet
+                    );
                     let handle = thread::Builder::new()
                         .name("ws-fill-bybit".into())
                         .spawn(move || {
@@ -6057,7 +6653,7 @@ fn main() {
         info!("Multi-Exchange mode DISABLED - Gate.io only");
         None
     };
-    
+
     // Store multi-exchange enabled flag in dashboard state
     dashboard_state.set_multi_exchange_enabled(config.multi_exchange_enabled);
 
@@ -6089,23 +6685,34 @@ fn main() {
         Box::leak(Box::new(SpscOverflowMonitor::new(10))); // 10 drops/sec threshold
 
     // Manual trade channels: dashboard -> execution (command), execution -> strategy (position tracking)
-    let (manual_cmd_tx, manual_cmd_rx) = crossbeam_channel::bounded::<dashboard_server::ManualTradeRequest>(32);
+    let (manual_cmd_tx, manual_cmd_rx) =
+        crossbeam_channel::bounded::<dashboard_server::ManualTradeRequest>(32);
     let manual_cmd_tx_arc = Arc::new(manual_cmd_tx);
     // When the execution loop processes a manual trade fill, it sends the fill details
     // here so the strategy thread can register the position in exit_evaluator / lifecycle_mgr.
-    let (manual_pos_tx, manual_pos_rx) = crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
+    let (manual_pos_tx, manual_pos_rx) =
+        crossbeam_channel::bounded::<dashboard_server::ManualPositionTrack>(32);
 
     // Feature 3/5: Create crossbeam channel for SL/TP update requests (strategy → execution)
     let (sl_tp_update_tx, sl_tp_update_rx) = crossbeam_channel::bounded::<SlTpUpdateRequest>(64);
     // Feature 4: Initialize persistent state store
-    let state_store_instance: Option<Arc<state_store::StateStore>> = if config.persistent_state.enabled {
+    let state_store_instance: Option<Arc<state_store::StateStore>> = if config
+        .persistent_state
+        .enabled
+    {
         match state_store::StateStore::open(&config.persistent_state.db_path) {
             Ok(store) => {
-                info!("[main] SQLite persistent state enabled at {}", config.persistent_state.db_path);
+                info!(
+                    "[main] SQLite persistent state enabled at {}",
+                    config.persistent_state.db_path
+                );
                 Some(Arc::new(store))
             }
             Err(e) => {
-                warn!("[main] Failed to open SQLite state store: {} — continuing without persistence", e);
+                warn!(
+                    "[main] Failed to open SQLite state store: {} — continuing without persistence",
+                    e
+                );
                 None
             }
         }
@@ -6120,7 +6727,10 @@ fn main() {
     if let Some(ref store) = state_store_instance {
         match store.reconcile_on_restart(&[]) {
             Ok(positions) => {
-                info!("[main] CONFIG 3: Restart reconciliation complete — {} positions to resume", positions.len());
+                info!(
+                    "[main] CONFIG 3: Restart reconciliation complete — {} positions to resume",
+                    positions.len()
+                );
             }
             Err(e) => {
                 warn!("[main] CONFIG 3: Restart reconciliation failed: {} — continuing with fresh state", e);
@@ -6147,7 +6757,10 @@ fn main() {
             .name("strategy".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
-                info!("[strategy] Pinned to core {} (with Market Impact + Overflow Monitor)", core_id);
+                info!(
+                    "[strategy] Pinned to core {} (with Market Impact + Overflow Monitor)",
+                    core_id
+                );
                 let regime_reader = regime_shm::SharedMemRegimeReader::new(&regime_shm_path);
                 strategy_evaluator_loop(
                     book_ring,
@@ -6186,10 +6799,15 @@ fn main() {
         let password = config.forex_password.as_deref().unwrap_or("").trim();
         let server = config.forex_server.as_deref().unwrap_or("").trim();
         // FIX 8: Reject placeholder/sentinel forex credentials
-        let login_valid = !login.is_empty() && !login.starts_with("your_") && login != "PLACEHOLDER";
-        let password_valid = !password.is_empty() && !password.starts_with("your_") && password != "PLACEHOLDER";
+        let login_valid =
+            !login.is_empty() && !login.starts_with("your_") && login != "PLACEHOLDER";
+        let password_valid =
+            !password.is_empty() && !password.starts_with("your_") && password != "PLACEHOLDER";
         if login_valid && password_valid {
-            info!("[main] Forex gateway enabled: login={}, server={}", login, server);
+            info!(
+                "[main] Forex gateway enabled: login={}, server={}",
+                login, server
+            );
             Some(Arc::new(forex_gateway::ForexGateway::new(
                 login.to_string(),
                 password.to_string(),
@@ -6202,49 +6820,68 @@ fn main() {
             None
         }
     };
-    
+
     // TASK 1: Build multi-exchange gateways map for execution router
-    let exec_multi_gateways: HashMap<multi_exchange::ExchangeId, Arc<dyn ExecutionGateway + Send + Sync>> = 
-        if config.multi_exchange_enabled {
-            let mut gateways_map = HashMap::new();
-            if let Some(ref gw) = gateway {
-                gateways_map.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
+    let exec_multi_gateways: HashMap<
+        multi_exchange::ExchangeId,
+        Arc<dyn ExecutionGateway + Send + Sync>,
+    > = if config.multi_exchange_enabled {
+        let mut gateways_map = HashMap::new();
+        if let Some(ref gw) = gateway {
+            gateways_map.insert(multi_exchange::ExchangeId::GateIo, gw.clone());
+        }
+        // Build Binance gateway for execution
+        {
+            let ak = config
+                .multi_exchange
+                .binance_api_key
+                .as_deref()
+                .unwrap_or("");
+            let sk = config
+                .multi_exchange
+                .binance_secret_key
+                .as_deref()
+                .unwrap_or("");
+            if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                let mut bgw_exec = binance_gateway::BinanceGateway::new(
+                    ak.to_string(),
+                    sk.to_string(),
+                    config.multi_exchange.binance_testnet,
+                );
+                bgw_exec.set_instrument_manager(instrument_mgr.clone());
+                let binance_gw = Arc::new(bgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
+                gateways_map.insert(multi_exchange::ExchangeId::Binance, binance_gw);
             }
-            // Build Binance gateway for execution
-            {
-                let ak = config.multi_exchange.binance_api_key.as_deref().unwrap_or("");
-                let sk = config.multi_exchange.binance_secret_key.as_deref().unwrap_or("");
-                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    let mut bgw_exec = binance_gateway::BinanceGateway::new(
-                        ak.to_string(), sk.to_string(),
-                        config.multi_exchange.binance_testnet,
-                    );
-                    bgw_exec.set_instrument_manager(instrument_mgr.clone());
-                    let binance_gw = Arc::new(bgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
-                    gateways_map.insert(multi_exchange::ExchangeId::Binance, binance_gw);
-                }
+        }
+        // Build Bybit gateway for execution
+        {
+            let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
+            let sk = config
+                .multi_exchange
+                .bybit_secret_key
+                .as_deref()
+                .unwrap_or("");
+            if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
+                let mut bbgw_exec = bybit_gateway::BybitGateway::new(
+                    ak.to_string(),
+                    sk.to_string(),
+                    config.multi_exchange.bybit_testnet,
+                );
+                bbgw_exec.set_instrument_manager(instrument_mgr.clone());
+                let bybit_gw = Arc::new(bbgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
+                gateways_map.insert(multi_exchange::ExchangeId::Bybit, bybit_gw);
             }
-            // Build Bybit gateway for execution
-            {
-                let ak = config.multi_exchange.bybit_api_key.as_deref().unwrap_or("");
-                let sk = config.multi_exchange.bybit_secret_key.as_deref().unwrap_or("");
-                if !ak.is_empty() && !sk.is_empty() && ak.len() >= 8 {
-                    let mut bbgw_exec = bybit_gateway::BybitGateway::new(
-                        ak.to_string(), sk.to_string(),
-                        config.multi_exchange.bybit_testnet,
-                    );
-                    bbgw_exec.set_instrument_manager(instrument_mgr.clone());
-                    let bybit_gw = Arc::new(bbgw_exec) as Arc<dyn ExecutionGateway + Send + Sync>;
-                    gateways_map.insert(multi_exchange::ExchangeId::Bybit, bybit_gw);
-                }
-            }
-            info!("[main] Multi-exchange execution gateways: {} connected", gateways_map.len());
-            gateways_map
-        } else {
-            HashMap::new()
-        };
+        }
+        info!(
+            "[main] Multi-exchange execution gateways: {} connected",
+            gateways_map.len()
+        );
+        gateways_map
+    } else {
+        HashMap::new()
+    };
     let multi_exchange_enabled_exec = config.multi_exchange_enabled;
-    
+
     {
         let exec_ring = strategy_to_exec;
         let gw = gateway.clone();
@@ -6270,12 +6907,31 @@ fn main() {
             .name("execution".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
-                info!("[execution] Pinned to core {} (with Lifecycle + Latency + Multi-Exchange SOR)", core_id);
+                info!(
+                    "[execution] Pinned to core {} (with Lifecycle + Latency + Multi-Exchange SOR)",
+                    core_id
+                );
                 execution_router_loop(
-                    exec_ring, manual_cmd_rx, manual_pos_tx, gw, fx_gw, cb, reg, lc, lat, 
-                    position_slot_manager, dash_exec, funding_rates_exec, exec_analytics_exec, sp,
-                    gbr_exec, exec_multi_gateways, multi_exchange_enabled_exec,
-                    sl_tp_update_rx, state_store_exec, auto_protection_exec,
+                    exec_ring,
+                    manual_cmd_rx,
+                    manual_pos_tx,
+                    gw,
+                    fx_gw,
+                    cb,
+                    reg,
+                    lc,
+                    lat,
+                    position_slot_manager,
+                    dash_exec,
+                    funding_rates_exec,
+                    exec_analytics_exec,
+                    sp,
+                    gbr_exec,
+                    exec_multi_gateways,
+                    multi_exchange_enabled_exec,
+                    sl_tp_update_rx,
+                    state_store_exec,
+                    auto_protection_exec,
                     shared_margin_monitor_exec,
                     exec_fill_sink,
                     exec_instrument_mgr,
@@ -6290,21 +6946,29 @@ fn main() {
     {
         let dash_state = dashboard_state.clone();
         let exec_analytics_dash = exec_analytics_arc.clone();
-        let bind_addr = std::env::var("DASHBOARD_BIND")
-            .unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let bind_addr =
+            std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
         // Set JOURNAL_DIR environment variable for Python dashboard to read
-        let journal_dir_env = std::env::var("JOURNAL_DIR")
-            .unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
+        let journal_dir_env =
+            std::env::var("JOURNAL_DIR").unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
         // SAFETY: Called before any threads read JOURNAL_DIR. The dashboard thread
         // hasn't started yet at this point in main().
-        unsafe { std::env::set_var("JOURNAL_DIR", &journal_dir_env); }
+        unsafe {
+            std::env::set_var("JOURNAL_DIR", &journal_dir_env);
+        }
         let manual_cmd_tx_dash = manual_cmd_tx_arc.clone();
         let symbol_registry_dash = registry.clone();
         let handle = thread::Builder::new()
             .name("dashboard-http".into())
             .spawn(move || {
                 info!("[dashboard] Starting HTTP server on {}", bind_addr);
-                dashboard_server::run_dashboard_server(&bind_addr, dash_state, exec_analytics_dash, manual_cmd_tx_dash, symbol_registry_dash);
+                dashboard_server::run_dashboard_server(
+                    &bind_addr,
+                    dash_state,
+                    exec_analytics_dash,
+                    manual_cmd_tx_dash,
+                    symbol_registry_dash,
+                );
             })
             .expect("Failed to spawn dashboard HTTP thread");
         thread_handles.push(handle);
@@ -6313,8 +6977,8 @@ fn main() {
     // ── Core 7: Telemetry/Journaling (Issue 2 — Journal + SharedState) ──
     {
         let core_id = topology.telemetry_core;
-        let journal_dir = std::env::var("JOURNAL_DIR")
-            .unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
+        let journal_dir =
+            std::env::var("JOURNAL_DIR").unwrap_or_else(|_| journal::JOURNAL_DIR.to_string());
         let state_shm_path = std::env::var("STATE_SHM_PATH")
             .unwrap_or_else(|_| shared_state::STATE_SHM_PATH.to_string());
         let dash_telem = dashboard_state.clone();
@@ -6323,7 +6987,10 @@ fn main() {
             .name("telemetry".into())
             .spawn(move || {
                 let _ = core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
-                info!("[telemetry] Pinned to core {} — Journal + SharedState + Health Monitor", core_id);
+                info!(
+                    "[telemetry] Pinned to core {} — Journal + SharedState + Health Monitor",
+                    core_id
+                );
 
                 // Create telemetry publisher with journal + shared state writers
                 let mut telemetry = TelemetryPublisher::new(journal_dir, state_shm_path);
@@ -6346,19 +7013,29 @@ fn main() {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    dash_telem.uptime_secs.store(now_epoch.saturating_sub(start), Ordering::Relaxed);
+                    dash_telem
+                        .uptime_secs
+                        .store(now_epoch.saturating_sub(start), Ordering::Relaxed);
 
                     // Every 60 heartbeats (~30s), log latency + lifecycle metrics
                     report_counter += 1;
                     if report_counter % 60 == 0 {
                         latency_tracker.log_report();
                         let lc_metrics = lifecycle_tracker.get_metrics();
-                        info!("[telemetry] Lifecycle: orders={}, fills={}, rejections={}, active={}",
-                            lc_metrics.total_orders, lc_metrics.total_fills,
-                            lc_metrics.total_rejections, lc_metrics.active_orders);
+                        info!(
+                            "[telemetry] Lifecycle: orders={}, fills={}, rejections={}, active={}",
+                            lc_metrics.total_orders,
+                            lc_metrics.total_fills,
+                            lc_metrics.total_rejections,
+                            lc_metrics.active_orders
+                        );
                         // BUG 7 FIX: Sync lifecycle metrics to dashboard
-                        dash_telem.total_fills.store(lc_metrics.total_fills, Ordering::Relaxed);
-                        dash_telem.orders_submitted.store(lc_metrics.total_orders, Ordering::Relaxed);
+                        dash_telem
+                            .total_fills
+                            .store(lc_metrics.total_fills, Ordering::Relaxed);
+                        dash_telem
+                            .orders_submitted
+                            .store(lc_metrics.total_orders, Ordering::Relaxed);
                     }
 
                     // Every 120 heartbeats (~60s), log bridge health metrics
@@ -6367,8 +7044,10 @@ fn main() {
                         hm.update_rates();
                         let health = hm.get_status();
                         let metrics_json = hm.get_metrics_json();
-                        info!("[telemetry] Bridge Health: status={}, metrics={}",
-                            health, metrics_json);
+                        info!(
+                            "[telemetry] Bridge Health: status={}, metrics={}",
+                            health, metrics_json
+                        );
                     }
 
                     thread::sleep(interval);
@@ -6378,8 +7057,10 @@ fn main() {
         thread_handles.push(handle);
     }
 
-    info!("All {} threads spawned. Engine running. Press Ctrl+C to stop.",
-          thread_handles.len());
+    info!(
+        "All {} threads spawned. Engine running. Press Ctrl+C to stop.",
+        thread_handles.len()
+    );
 
     // CONFIG 3: Keep a reference to the state store for shutdown persistence.
     let state_store_for_shutdown = state_store_instance.clone();
