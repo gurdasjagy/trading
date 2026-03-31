@@ -83,7 +83,7 @@ class RiskConfig(BaseModel):
     default_stop_loss_pct: float = 2.0
     default_take_profit_pct: float = 3.0
     trailing_stop_pct: float = 1.5
-    risk_reward_min: float = 1.5
+    risk_reward_min: float = 1.06
     use_kelly_criterion: bool = True
     max_correlation: float = 0.7
     circuit_breaker_loss_pct: float = 5.0
