@@ -79,7 +79,7 @@ const VPIN_SAFE_THRESHOLD: f64 = 0.35;
 const IMBALANCE_ENTRY_THRESHOLD: f64 = 0.015;
 
 /// Minimum spread in bps to avoid trading in tight spreads.
-const MIN_SPREAD_BPS: f64 = 1.0;
+const MIN_SPREAD_BPS: f64 = 0.1;
 
 /// Maximum spread in bps — don't trade if spread is insane.
 const MAX_SPREAD_BPS: f64 = 500.0; // Testnet can have wide spreads — do not hard-block valid signals
@@ -864,7 +864,7 @@ impl StrategyEngine {
                 metrics.mid_price - metrics.mid_price * 0.0005
             };
             (OrderType::Limit, "ioc".to_string(), Some(aggressive))
-        } else if confidence > 0.30 {
+        } else if confidence > 0.25 {
             // Moderate confidence: trade at mid with GTC.
             (OrderType::Limit, "gtc".to_string(), Some(metrics.mid_price))
         } else {

@@ -549,8 +549,8 @@ class ColdPathOrchestrator:
             from core.alpha_oracle import AlphaOracle
             self._alpha_oracle = AlphaOracle(
                 min_confluence_pct=0.75,
-                min_risk_reward=2.0,
-                min_confidence=0.6,
+                min_risk_reward=1.8,
+                min_confidence=0.3,
                 cooldown_seconds=300.0,
             )
             self._alpha_oracle.start()
@@ -973,14 +973,16 @@ class ColdPathOrchestrator:
                     sl = float(result["stop_loss"])
                     tp = float(result["take_profit"])
                 else:
-                    # Default ATR-based SL/TP
+                    # ROOT CAUSE FIX: Default ATR-based SL/TP giving R:R=1.5 (3/2)
+                    # which is below min_risk_reward. Tighten stop and widen target
+                    # to produce a viable default R:R profile.
                     atr_val = atr if atr > 0 else entry_price * 0.01
                     if direction == "long":
-                        sl = entry_price - atr_val * 2.0
-                        tp = entry_price + atr_val * 3.0
+                        sl = entry_price - atr_val * 1.5
+                        tp = entry_price + atr_val * 4.0
                     else:
-                        sl = entry_price + atr_val * 2.0
-                        tp = entry_price - atr_val * 3.0
+                        sl = entry_price + atr_val * 1.5
+                        tp = entry_price - atr_val * 4.0
 
                 side = SignalSide.LONG if direction == "long" else SignalSide.SHORT
 
