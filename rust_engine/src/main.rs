@@ -89,7 +89,7 @@ mod spread_analytics; // CAT 5: Spread analytics & imbalance decay
 mod strategy_correlation; // CAT 6: Strategy correlation matrix
 mod tca; // CAT 8: Trade Cost Analysis // CAT 8: PnL attribution by strategy
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -1067,7 +1067,14 @@ async fn ws_connect_and_ingest_gateio(
                                                 snapshot_count: 0,
                                                 _pad2: [0; 4],
                                             };
-                                            let _ = ring.try_push(sentinel);
+                                            if !ring.try_push(sentinel) {
+                                                *drop_count += 1;
+                                                warn!(
+                                                    "[ws-gateio] Dropping snapshot for {}: ring full before SNAPSHOT_START",
+                                                    contract
+                                                );
+                                                continue;
+                                            }
                                         }
 
                                         if let Some(bids) = result.get("bids").and_then(|v| v.as_array()) {
@@ -1141,8 +1148,15 @@ async fn ws_connect_and_ingest_gateio(
                                                 snapshot_count: 0,
                                                 _pad2: [0; 4],
                                             };
-                                            let _ = ring.try_push(sentinel);
-                                            info!("[ws-gateio] Full snapshot received for {}", contract);
+                                            if !ring.try_push(sentinel) {
+                                                *drop_count += 1;
+                                                warn!(
+                                                    "[ws-gateio] SNAPSHOT_END dropped for {}: ring full (book may resync on next snapshot)",
+                                                    contract
+                                                );
+                                            } else {
+                                                info!("[ws-gateio] Full snapshot received for {}", contract);
+                                            }
                                         }
                                     }
                                     "futures.tickers" => {
@@ -1159,8 +1173,27 @@ async fn ws_connect_and_ingest_gateio(
                                                 .unwrap_or(0.0)
                                         };
 
-                                        let bid1 = parse_price("bid1").max(parse_price("highest_bid"));
-                                        let ask1 = parse_price("ask1").max(parse_price("lowest_ask"));
+                                        let best_nonzero_max = |a: f64, b: f64| -> f64 {
+                                            match (a > 0.0, b > 0.0) {
+                                                (true, true) => a.max(b),
+                                                (true, false) => a,
+                                                (false, true) => b,
+                                                (false, false) => 0.0,
+                                            }
+                                        };
+                                        let best_nonzero_min = |a: f64, b: f64| -> f64 {
+                                            match (a > 0.0, b > 0.0) {
+                                                (true, true) => a.min(b),
+                                                (true, false) => a,
+                                                (false, true) => b,
+                                                (false, false) => 0.0,
+                                            }
+                                        };
+
+                                        let bid1 =
+                                            best_nonzero_max(parse_price("bid1"), parse_price("highest_bid"));
+                                        let ask1 =
+                                            best_nonzero_min(parse_price("ask1"), parse_price("lowest_ask"));
                                         let last = parse_price("last");
 
                                         if bid1 > 0.0 {
@@ -3349,6 +3382,7 @@ fn execution_router_loop(
         let mut orders_submitted: u64 = 0;
         let mut orders_rejected: u64 = 0;
         let mut total_pnl_fp: i64 = 0;
+        let mut pending_exec_cmds: VecDeque<OrderCommand> = VecDeque::new();
 
         // CONFIG 2: Track per-exchange connectivity failures for alerting.
         // Maps exchange name → (failure_count, last_alert_instant).
@@ -3865,22 +3899,18 @@ fn execution_router_loop(
                         continue;
                     }
 
-                    if exec_ring.try_push(cmd) {
-                        info!(
-                            "[execution] 🐍 Python signal queued: {} {} {}x {}contracts @ {:.4} (conf={:.0}%, {}/{})",
-                            if intent.side == 0 { "LONG" } else { "SHORT" },
-                            intent.symbol,
-                            intent.leverage,
-                            intent.size_contracts,
-                            current_price,
-                            intent.confidence * 100.0,
-                            intent.confluence_count,
-                            intent.total_strategies,
-                        );
-                    } else {
-                        warn!("[execution] Python signal for {} dropped — exec_ring full", intent.symbol);
-                        position_slots.release();
-                    }
+                    pending_exec_cmds.push_back(cmd);
+                    info!(
+                        "[execution] 🐍 Python signal accepted: {} {} {}x {}contracts @ {:.4} (conf={:.0}%, {}/{})",
+                        if intent.side == 0 { "LONG" } else { "SHORT" },
+                        intent.symbol,
+                        intent.leverage,
+                        intent.size_contracts,
+                        current_price,
+                        intent.confidence * 100.0,
+                        intent.confluence_count,
+                        intent.total_strategies,
+                    );
                 }
             }
 
@@ -3893,13 +3923,17 @@ fn execution_router_loop(
                     orders_rejected += 1;
                     position_slots.release();
                 }
+                while pending_exec_cmds.pop_front().is_some() {
+                    orders_rejected += 1;
+                    position_slots.release();
+                }
                 // Check cooldown for auto-recovery
                 circuit_breaker.check_cooldown();
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
 
-            if let Some(cmd) = exec_ring.try_pop() {
+            if let Some(cmd) = pending_exec_cmds.pop_front().or_else(|| exec_ring.try_pop()) {
                 // ── Step 1: Validate the command ──
                 if let Err(reason) = cmd.validate() {
                     warn!("[execution] Order rejected: {}", reason);
